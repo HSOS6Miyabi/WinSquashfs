@@ -86,10 +86,8 @@
   "Open an image to see its UNC path": "打开镜像以查看 UNC 路径",
   "Copy": "复制",
   "Share configuration": "共享设置",
-  "Local directory": "源目录",
   "Share name": "共享名称",
   "For example, C:\\images\\demo.squashfs becomes \\\\sfs$\\C\\images\\demo.squashfs. Only the current Windows account is granted access.": "例如，C:\\images\\demo.squashfs 对应 \\\\sfs$\\C\\images\\demo.squashfs。仅当前 Windows 用户具有访问权限。",
-  "Include local fixed and removable drives": "包含本地磁盘及映射的网络驱动器",
   "Idle timeout (seconds)": "空闲超时（秒）",
   "Maximum idle images": "空闲镜像数量上限",
   "Set either value to zero to release an image as soon as no open handle remains. Active handles retain their image.": "任一数值设为 0 时，最后一个文件句柄关闭后立即释放镜像。仍有打开的句柄时保留镜像。",
@@ -141,7 +139,6 @@
   "Stopping direct UNC access…": "正在停止 UNC 访问…",
   "Applying UNC settings…": "正在应用 UNC 设置…",
   "Opening image via UNC…": "正在通过 UNC 路径打开镜像…",
-  "Image is outside the configured UNC shares. Configure a local directory or enable local drives.": "镜像不在已配置的 UNC 共享目录中。请配置本地目录或启用本地磁盘映射。",
   "Image is outside the configured UNC roots.": "镜像不在已配置的 UNC 共享目录中。",
   "Invalid file name.": "文件名无效。",
   "Not a regular file.": "该项不是普通文件。",
@@ -230,5 +227,7 @@
   "Source handle is closed.": "源文件句柄已关闭。",
   "Enter a valid Windows share name.": "请输入有效的 Windows 共享名称。",
   "Choose an absolute source directory.": "请选择源目录的绝对路径。",
-  "The source cannot be another WinSquashfs volume.": "源路径不能指向其他 WinSquashfs 挂载卷。"
+  "The source cannot be another WinSquashfs volume.": "源路径不能指向其他 WinSquashfs 挂载卷。",
+  "Include local and mapped network drives": "包含本地磁盘及映射的网络驱动器",
+  "Image is outside the configured UNC shares. Configure a source directory or enable drive mappings.": "镜像不在已配置的 UNC 共享目录中。请配置源目录或启用驱动器映射。"
 }

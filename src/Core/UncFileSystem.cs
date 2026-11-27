@@ -69,9 +69,9 @@ public sealed record UncShare(string Name, string Root, bool IsNetworkNamespace 
             throw new ArgumentException(Localization.T("The UNC share name is reserved for network sources."));
         if (string.IsNullOrWhiteSpace(Name) || !UncFileSystem.SafeComponent(Name) || Prefix.Length >= 192)
             throw new ArgumentException(Localization.T("Enter a valid Windows share name."));
-        string root = NormalizeSourcePath(Root);
-        if (!Path.IsPathFullyQualified(root))
+        if (string.IsNullOrWhiteSpace(Root) || !Path.IsPathFullyQualified(Root))
             throw new ArgumentException(Localization.T("Choose an absolute source directory."));
+        string root = NormalizeSourcePath(Root);
         if (IsProjectedPath(root))
             throw new ArgumentException(Localization.T("The source cannot be another WinSquashfs volume."));
         return new UncShare(Name, Path.TrimEndingDirectorySeparator(root));
@@ -140,6 +140,9 @@ internal sealed class UncFileSystem : FileSystemBase
 
     private Node? Resolve(string name) => readIdentity.Run(() => ResolveCore(name));
 
+    private static bool MissingPath(IOException ex) =>
+        (ex.HResult & 0xffff) is 2 or 3 or 123 or 267; // FILE_NOT_FOUND, PATH_NOT_FOUND, INVALID_NAME, DIRECTORY
+
     private Node? ResolveCore(string name)
     {
         var parts = name.Split('\\', StringSplitOptions.RemoveEmptyEntries);
@@ -196,8 +199,7 @@ internal sealed class UncFileSystem : FileSystemBase
                 if ((File.GetAttributes(physical) & FileAttributes.Directory) == 0)
                     return OpenImage(count, physical);
             }
-            catch (FileNotFoundException) { }
-            catch (DirectoryNotFoundException) { }
+            catch (IOException ex) when (MissingPath(ex)) { }
             catch (UnauthorizedAccessException) when (count < parts.Length) { }
         }
 
@@ -210,8 +212,7 @@ internal sealed class UncFileSystem : FileSystemBase
             string physical = Physical(count);
             FileAttributes attributes;
             try { attributes = File.GetAttributes(physical); }
-            catch (FileNotFoundException) { continue; }
-            catch (DirectoryNotFoundException) { continue; }
+            catch (IOException ex) when (MissingPath(ex)) { continue; }
             catch (UnauthorizedAccessException) when (count < parts.Length) { continue; }
             if ((attributes & FileAttributes.Directory) == 0)
                 return OpenImage(count, physical);

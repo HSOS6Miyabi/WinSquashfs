@@ -49,7 +49,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Copy-Item artifacts/native/* artifacts/test -Recurse -Force
           $smbRoot=Join-Path $env:TEMP ('WinSquashfsSMB-'+[guid]::NewGuid().ToString('N'))
-          $smbName='WinSquashfsCI-'+[guid]::NewGuid().ToString('N').Substring(0,8)
+          $smbName='WinSquashfsCI-'+[guid]::NewGuid().ToString('N').Substring(0,8)+'$'
           New-Item -ItemType Directory $smbRoot | Out-Null
           $identity=[Security.Principal.WindowsIdentity]::GetCurrent().Name
           New-SmbShare -Name $smbName -Path $smbRoot -FullAccess $identity -CachingMode None | Out-Null

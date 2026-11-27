@@ -9,7 +9,7 @@ public static class UncLauncher
     {
         string full = UncShare.NormalizeSourcePath(path);
         var settings = UncSettings.Load();
-        string unc = settings.GetImagePath(full) ?? throw new IOException(Localization.T("Image is outside the configured UNC shares. Configure a local directory or enable local drives."));
+        string unc = settings.GetImagePath(full) ?? throw new IOException(Localization.T("Image is outside the configured UNC shares. Configure a source directory or enable drive mappings."));
         await UncAgentControl.StartAsync(token);
         if (!await Task.Run(() => Directory.Exists(unc), token))
             throw new IOException(Localization.T("The image cannot be opened through its UNC path: {0}", unc));

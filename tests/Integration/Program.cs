@@ -270,6 +270,74 @@ try
 
     // The CI runner exposes an actual SMB share. The network source should
     // not retain file handles and must invalidate active projected files.
+    // A directory junction and a file symbolic link must behave like their
+    // ordinary Windows targets, even when the image has a custom extension.
+    string linkTarget=Path.Combine(root,"linked-source");
+    Directory.CreateDirectory(linkTarget);
+    string linkedImage=Path.Combine(linkTarget,"custom-image.bin");
+    File.Copy(Path.Combine(root,"zstd.squashfs"),linkedImage);
+    string junctionRoot=Path.Combine(root,"junction-source");
+    using(var makeJunction=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe")
+    {
+        UseShellExecute=false, ArgumentList={"/c","mklink","/J",junctionRoot,linkTarget}
+    }) ?? throw new IOException("Cannot start mklink"))
+    {
+        await makeJunction.WaitForExitAsync();
+        Require(makeJunction.ExitCode==0,"Cannot create source junction");
+    }
+    try
+    {
+        string fileLink=Path.Combine(junctionRoot,"linked.sqfs");
+        File.CreateSymbolicLink(fileLink,linkedImage);
+        using(var browser=Archive.OpenForBrowsing(fileLink))
+        {
+            byte[] got=new byte[tiny.Length];
+            Require(browser.Read(browser.Find("tiny")!,0,got)==got.Length && got.SequenceEqual(tiny),"Browser rejected a file symbolic link");
+        }
+        var alias=new UncShare("linked-"+Guid.NewGuid().ToString("N")[..8],junctionRoot).Validate();
+        using(var session=new UncSession(new[]{alias},60,8))
+        {
+            string projected=Path.Combine(alias.UncPath,"linked.sqfs");
+            string custom=Path.Combine(alias.UncPath,"custom-image.bin");
+            Require(File.ReadAllBytes(Path.Combine(projected,"tiny")).SequenceEqual(tiny),"UNC rejected a symbolic-link image");
+            Require(File.ReadAllBytes(Path.Combine(custom,"tiny")).SequenceEqual(tiny),"UNC rejected an image with a nonstandard extension");
+        }
+        using(var mounted=new MountedImage(fileLink))
+        {
+            Require(File.ReadAllBytes(Path.Combine(mounted.MountPoint.TrimEnd('\\')+"\\","tiny")).SequenceEqual(tiny),"Drive mount rejected a symbolic-link image");
+        }
+        File.Delete(fileLink);
+    }
+    finally { Directory.Delete(junctionRoot); }
+    Console.WriteLine("PASS linked source directory, file symbolic link and nonstandard image extension");
+
+    using(var identity=System.Security.Principal.WindowsIdentity.GetCurrent())
+    {
+        var principal=new System.Security.Principal.WindowsPrincipal(identity);
+        var admins=new System.Security.Principal.SecurityIdentifier(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid,null);
+        if(principal.IsInRole(admins))
+        {
+            string adminImage=Path.Combine(root,"administrators.squashfs");
+            File.Copy(Path.Combine(root,"zstd.squashfs"),adminImage);
+            var file=new System.IO.FileInfo(adminImage);
+            var savedAcl=System.IO.FileSystemAclExtensions.GetAccessControl(file);
+            var acl=new System.Security.AccessControl.FileSecurity();
+            acl.SetOwner(identity.User!);
+            acl.SetAccessRuleProtection(true,false);
+            acl.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(admins,
+                System.Security.AccessControl.FileSystemRights.FullControl,System.Security.AccessControl.AccessControlType.Allow));
+            try
+            {
+                System.IO.FileSystemAclExtensions.SetAccessControl(file,acl);
+                using var browser=Archive.OpenForBrowsing(adminImage);
+                byte[] got=new byte[tiny.Length];
+                Require(browser.Read(browser.Find("tiny")!,0,got)==got.Length && got.SequenceEqual(tiny),"Administrator source was rejected");
+                Console.WriteLine("PASS source access under the application's actual administrator token");
+            }
+            finally { System.IO.FileSystemAclExtensions.SetAccessControl(file,savedAcl); }
+        }
+    }
+
     string? smb=Environment.GetEnvironmentVariable("WINSQUASHFS_TEST_SMB");
     if (!string.IsNullOrEmpty(smb))
     {
@@ -278,8 +346,20 @@ try
         string projection=UncShare.NetworkNamespace.ImagePath(remote) ?? throw new Exception("Network mapping failed");
         Require(projection.StartsWith(@"\\sfs$\UNC\",StringComparison.OrdinalIgnoreCase),"Network namespace mismatch");
         Require(UncShare.NetworkNamespace.ImagePath(@"\\sfs$\C\recursive.sqfs")==null,"Recursive network mapping allowed");
-        using var session=new UncSession(new[]{UncShare.NetworkNamespace},60,8);
+        var remoteAlias=new UncShare("remote-"+Guid.NewGuid().ToString("N")[..8],smb).Validate();
+        using var session=new UncSession(new[]{UncShare.NetworkNamespace,remoteAlias},60,8);
         Require(Directory.Exists(projection),"Remote image directory missing");
+        Require(UncShare.NetworkNamespace.ImagePath(@"\\?\UNC\"+remote[2..])==projection,"Extended UNC source mapping failed");
+        using(var browser=Archive.OpenForBrowsing(remote))
+        {
+            byte[] got=new byte[tiny.Length];
+            Require(browser.Read(browser.Find("tiny")!,0,got)==got.Length && got.SequenceEqual(tiny),"Browser rejected a network image");
+        }
+        using(var mounted=new MountedImage(remote))
+        {
+            Require(File.ReadAllBytes(Path.Combine(mounted.MountPoint.TrimEnd('\\')+"\\","tiny")).SequenceEqual(tiny),"Drive mount rejected a network image");
+        }
+        Require(File.ReadAllBytes(Path.Combine(remoteAlias.UncPath,"network.squashfs","tiny")).SequenceEqual(tiny),"Custom UNC directory alias rejected a network source");
         using(var live=new FileStream(Path.Combine(projection,"large.bin"),FileMode.Open,FileAccess.Read,FileShare.Read,1))
         {
             live.Seek(131071,SeekOrigin.Begin);

@@ -97,9 +97,9 @@ internal static class LocalizationResources
         resources["L_Open_an_image_to_see_its_UNC_path"] = Localization.T("Open an image to see its UNC path");
         resources["L_Copy"] = Localization.T("Copy");
         resources["L_Share_configuration"] = Localization.T("Share configuration");
-        resources["L_Local_directory"] = Localization.T("Local directory");
+        resources["L_Local_directory"] = Localization.T("Source directory");
         resources["L_Share_name"] = Localization.T("Share name");
-        resources["L_Include_local_fixed_and_removable_drives"] = Localization.T("Include local fixed and removable drives");
+        resources["L_Include_local_fixed_and_removable_drives"] = Localization.T("Include local and mapped network drives");
         resources["L_For_example_C_images_demo_squashfs_becomes_sfs_C_images_demo_squashfs_Only_the_current_Windows_account_is_gr"] = Localization.T("For example, C:\\images\\demo.squashfs becomes \\\\sfs$\\C\\images\\demo.squashfs. Only the current Windows account is granted access.");
         resources["L_Idle_timeout_seconds"] = Localization.T("Idle timeout (seconds)");
         resources["L_Maximum_idle_images"] = Localization.T("Maximum idle images");

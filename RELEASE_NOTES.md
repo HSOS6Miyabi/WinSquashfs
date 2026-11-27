@@ -1,13 +1,15 @@
-# WinSquashfs v0.1.3
+# WinSquashfs v0.1.4
 
-- New Fluent Design-inspired artwork for the installer and uninstaller, including welcome and finish pages and page headers.
-- High-resolution 24-bit banner images with control-size scaling for high-DPI displays.
-- Per-Monitor V2 DPI awareness with system DPI awareness fallback.
+- Source access uses the application's actual Windows access token and network credentials.
+- Supports local and UNC directory aliases, mapped drives, directory junctions, symbolic links and explicitly named images with any extension.
+- Network filesystems with limited identity information use available metadata and release idle image caches immediately.
+- Existing opportunistic locks, asynchronous directory notifications and drive mounting remain available.
 
 ## 简体中文
 
-- 更新安装程序和卸载程序的视觉设计，为欢迎页、完成页及页面顶部添加统一风格的横幅。
-- 使用高清 24 位横幅图像，根据控件尺寸缩放，适配高 DPI 显示环境。
-- 启用 Per-Monitor V2 DPI 感知，并兼容系统级 DPI 感知模式。
+- 使用程序实际运行时的 Windows 访问令牌及网络凭据读取镜像。
+- 支持本地及 UNC 目录映射、映射的网络驱动器、目录联接、符号链接和任意扩展名的镜像文件。
+- 对文件身份信息不完整的网络文件系统，使用可用的元数据检查源文件，并在镜像空闲时立即释放缓存。
+- 保留机会锁、异步目录变更通知及盘符挂载功能。
 
-Windows x64. WinFsp 2.2.26323 or a compatible newer 2.x runtime is required for mounting and UNC access. The installer and portable distribution include the runtime installer.
+Windows x64. WinFsp 2.2.26323 or a compatible newer 2.x runtime is required for mounting and UNC access. Both distributions include the WinFsp runtime installer.
