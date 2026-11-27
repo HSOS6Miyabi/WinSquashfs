@@ -9,3 +9,5 @@ $p = Start-Process msiexec.exe -ArgumentList @('/i',('"' + $msi + '"'),'/qn','/n
 if ($p.ExitCode -notin 0,3010) { throw "WinFsp install returned $($p.ExitCode)" }
 $assembly = Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'WinFsp\bin\winfsp-msil.dll'
 if (!(Test-Path $assembly)) { throw "WinFsp managed assembly is missing" }
+
+& (Join-Path $PSScriptRoot 'prepare-winfsp-binding.ps1')

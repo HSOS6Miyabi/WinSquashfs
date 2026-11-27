@@ -37,6 +37,28 @@ try
                 quit.Wait();
             }
             break;
+        case ["serve", var alias, var root, ..] when args.Length is 3 or 4:
+            using (var session = new UncSession(new[] { new UncShare(alias, root) }, args.Length == 4 ? int.Parse(args[3]) : 60))
+            {
+                Console.WriteLine(session.Shares[0].UncPath);
+                using var quit = new ManualResetEventSlim();
+                Console.CancelKeyPress += (_, e) => { e.Cancel = true; quit.Set(); };
+                quit.Wait();
+            }
+            break;
+        case ["unc-start"]:
+            await UncAgentControl.StartAsync();
+            foreach (var share in UncSettings.Load().Shares()) Console.WriteLine(share.UncPath);
+            break;
+        case ["unc-stop"]:
+            await UncAgentControl.StopAsync();
+            break;
+        case ["unc-status"]:
+            Console.WriteLine(UncAgentControl.IsRunning ? "Running" : "Stopped");
+            break;
+        case ["unc-path", var image]:
+            Console.WriteLine(UncSettings.Load().GetImagePath(image) ?? throw new IOException("Image is outside the configured UNC roots."));
+            break;
         case ["pack", var source, var output, ..]:
             await SquashTools.PackAsync(source, output, new PackOptions(Codec: args.Length == 4 ? args[3] : "zstd"), Console.WriteLine);
             break;
@@ -44,7 +66,7 @@ try
             await SquashTools.UnpackAsync(image, output, Console.WriteLine);
             break;
         default:
-            Console.Error.WriteLine("winsqfs info|list|read|mount|pack|unpack ...");
+            Console.Error.WriteLine("winsqfs info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|pack|unpack ...");
             return 2;
     }
     return 0;
