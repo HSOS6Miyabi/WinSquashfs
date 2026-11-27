@@ -1,17 +1,13 @@
-# WinSquashfs v0.1.2
+# WinSquashfs v0.1.3
 
-- The default file association opens images directly in Explorer through the UNC namespace. Edit opens the graphical image browser.
-- Remote source images can be opened through \\sfs$\UNC\server\share\path\image.squashfs.
-- Local UNC image sources use Read-Handle oplocks when available. Network and unsupported filesystems use short-lived read handles with file identity checks.
-- Removing, renaming, replacing or modifying an image invalidates its cached contents, even when virtual handles remain open. Shared asynchronous directory notifications and deadline-based cache expiration eliminate periodic source polling.
-- The Mount image button uses the system accent color.
+- New Fluent Design-inspired artwork for the installer and uninstaller, including welcome and finish pages and page headers.
+- High-resolution 24-bit banner images with control-size scaling for high-DPI displays.
+- Per-Monitor V2 DPI awareness with system DPI awareness fallback.
 
 ## 简体中文
 
-- 双击已关联的镜像文件直接在资源管理器中打开 UNC 路径，编辑命令打开图形界面。
-- 支持通过 \\sfs$\UNC\服务器\共享名\路径 访问网络镜像。
-- 支持本地机会锁自动释放；网络文件及不支持机会锁的文件系统采用短时读取句柄和文件身份校验。
-- 源文件删除、重命名、替换或修改时，自动释放对应镜像缓存；同目录共享异步变更通知，缓存按空闲期限调度，无周期性文件检查。
-- 使用系统强调色高亮“挂载镜像”按钮。
+- 更新安装程序和卸载程序的视觉设计，为欢迎页、完成页及页面顶部添加统一风格的横幅。
+- 使用高清 24 位横幅图像，根据控件尺寸缩放，适配高 DPI 显示环境。
+- 启用 Per-Monitor V2 DPI 感知，并兼容系统级 DPI 感知模式。
 
 Windows x64. WinFsp 2.2.26323 or a compatible newer 2.x runtime is required for mounting and UNC access. The installer and portable distribution include the runtime installer.
