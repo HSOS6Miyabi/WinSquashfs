@@ -5,10 +5,12 @@ internal sealed class ImageCache : IDisposable
 {
     internal sealed class Cached
     {
+        internal readonly string Path;
         internal readonly Archive Image;
         internal int References;
-        internal long Released;
-        internal Cached(Archive image) { Image = image; }
+        internal long Expires;
+        internal LinkedListNode<Cached>? IdleNode;
+        internal Cached(string path, Archive image) { Path = path; Image = image; }
     }
     internal sealed class Lease : IDisposable
     {
@@ -21,9 +23,14 @@ internal sealed class ImageCache : IDisposable
 
     private readonly object sync = new();
     private readonly Dictionary<string, Cached> images = new(StringComparer.OrdinalIgnoreCase);
+    // All entries share the same timeout. Inactive entries are ordered by
+    // release time, making expiration and the idle limit O(1) per entry.
+    private readonly LinkedList<Cached> idle = new();
     private readonly long idleMilliseconds;
     private readonly int maxIdle;
     private readonly Timer timer;
+    private long scheduled = long.MaxValue;
+    private long expiryWakeups;
     private bool disposed;
 
     internal ImageCache(int idleSeconds, int maxIdleImages)
@@ -32,51 +39,111 @@ internal sealed class ImageCache : IDisposable
         if (maxIdleImages is < 0 or > 1024) throw new ArgumentOutOfRangeException(nameof(maxIdleImages));
         idleMilliseconds = idleSeconds * 1000L;
         maxIdle = maxIdleImages;
-        timer = new Timer(_ => Sweep(), null, 500, 500);
+        timer = new Timer(_ => Expire(), null, Timeout.Infinite, Timeout.Infinite);
     }
 
     internal int Count { get { lock (sync) return images.Count; } }
-    internal int ActiveCount { get { lock (sync) return images.Values.Count(x => x.References > 0); } }
+    internal int ActiveCount { get { lock (sync) return images.Count - idle.Count; } }
     internal int OplockCount { get { lock (sync) return images.Values.Count(x => x.Image.UsesOplock); } }
+    internal long IdentityChecks { get { lock (sync) return images.Values.Sum(x => x.Image.IdentityChecks); } }
+    internal long ExpiryWakeups => Interlocked.Read(ref expiryWakeups);
+
+    private void Unlink(Cached item)
+    {
+        if (item.IdleNode != null)
+        {
+            idle.Remove(item.IdleNode);
+            item.IdleNode = null;
+        }
+    }
+
+    private bool Current(Cached item) =>
+        images.TryGetValue(item.Path, out var current) && ReferenceEquals(current, item);
+
+    private void RemoveLocked(Cached item)
+    {
+        Unlink(item);
+        images.Remove(item.Path);
+    }
+
+    private Lease AcquireLocked(Cached item)
+    {
+        Unlink(item);
+        checked { item.References++; }
+        ScheduleLocked();
+        return new Lease(this, item);
+    }
 
     internal Lease Acquire(string path, LocalReadIdentity identity)
     {
         path = Path.GetFullPath(path);
-        Sweep();
+        Lease? existing = null;
+        Cached? obsolete = null;
         lock (sync)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (images.TryGetValue(path, out var existing) && existing.Image.SourceValid)
+            if (images.TryGetValue(path, out var item))
             {
-                checked { existing.References++; }
-                return new Lease(this, existing);
+                if (item.Image.SourceValid && (item.IdleNode == null || item.Expires > Environment.TickCount64))
+                    existing = AcquireLocked(item);
+                else
+                {
+                    RemoveLocked(item);
+                    obsolete = item;
+                    ScheduleLocked();
+                }
             }
         }
+        obsolete?.Image.Dispose();
+        if (existing != null)
+        {
+            try
+            {
+                existing.Image.ValidateSourcePath();
+                return existing;
+            }
+            catch (IOException)
+            {
+                existing.Dispose();
+                // A replacement can already occupy the same path. Load its
+                // own generation rather than reusing the invalid metadata.
+            }
+            catch { existing.Dispose(); throw; }
+        }
 
-        // Opening a remote source can block on the network. Do not hold the
-        // cache lock while loading its metadata or closing source handles.
+        // Do not hold the cache lock while accessing the network or opening
+        // and decoding image metadata.
         var image = new Archive(path, identity);
-        Cached candidate = new(image);
+        Cached candidate = new(path, image);
         Cached? displaced = null;
         bool keep = false;
+        Lease? result = null;
         try
         {
             lock (sync)
             {
                 ObjectDisposedException.ThrowIf(disposed, this);
-                if (images.TryGetValue(path, out var existing) && existing.Image.SourceValid)
+                if (images.TryGetValue(path, out var current) && current.Image.SourceValid &&
+                    (current.IdleNode == null || current.Expires > Environment.TickCount64))
+                    result = AcquireLocked(current);
+                else
                 {
-                    checked { existing.References++; }
-                    return new Lease(this, existing);
+                    image.SourceInvalidated += () => RemoveInvalid(candidate);
+                    image.EnsureSourceValid();
+                    if (images.TryGetValue(path, out displaced)) RemoveLocked(displaced);
+                    candidate.References = 1;
+                    images.Add(path, candidate);
+                    ScheduleLocked();
+                    keep = true;
+                    result = new Lease(this, candidate);
                 }
-                image.SourceInvalidated += () => RemoveInvalid(path, candidate);
-                image.EnsureSourceValid();
-                if (images.TryGetValue(path, out displaced)) images.Remove(path);
-                candidate.References = 1;
-                images.Add(path, candidate);
-                keep = true;
-                return new Lease(this, candidate);
             }
+            try
+            {
+                if (!keep) result.Image.ValidateSourcePath();
+                return result;
+            }
+            catch { result.Dispose(); throw; }
         }
         finally
         {
@@ -84,60 +151,97 @@ internal sealed class ImageCache : IDisposable
             displaced?.Image.Dispose();
         }
     }
-    private void RemoveInvalid(string path, Cached generation)
+
+    private void RemoveInvalid(Cached generation)
     {
         bool removed;
         lock (sync)
         {
-            removed = images.TryGetValue(path, out var current) && ReferenceEquals(current, generation);
-            if (removed) images.Remove(path);
+            removed = Current(generation);
+            if (removed)
+            {
+                RemoveLocked(generation);
+                ScheduleLocked();
+            }
         }
         if (removed) generation.Image.Dispose();
     }
-    private void Release(Cached cached)
+
+    private void Release(Cached item)
     {
+        List<Cached>? release = null;
+        lock (sync)
+        {
+            if (disposed || !Current(item) || --item.References != 0) return;
+            if (!item.Image.SourceValid || idleMilliseconds == 0 || maxIdle == 0)
+            {
+                RemoveLocked(item);
+                release = new List<Cached> { item };
+            }
+            else
+            {
+                item.Expires = Environment.TickCount64 + idleMilliseconds;
+                item.IdleNode = idle.AddLast(item);
+            }
+            TrimLocked(ref release);
+            ScheduleLocked();
+        }
+        DisposeItems(release);
+    }
+
+    private void TrimLocked(ref List<Cached>? release)
+    {
+        long now = Environment.TickCount64;
+        while (idle.First is { } first &&
+            (idle.Count > maxIdle || first.Value.Expires <= now))
+        {
+            var item = first.Value;
+            RemoveLocked(item);
+            (release ??= new List<Cached>()).Add(item);
+        }
+    }
+
+    private void ScheduleLocked()
+    {
+        long next = idle.First?.Value.Expires ?? long.MaxValue;
+        if (scheduled == next) return;
+        scheduled = next;
+        timer.Change(next == long.MaxValue ? Timeout.Infinite : (int)Math.Clamp(next - Environment.TickCount64, 1, int.MaxValue),
+            Timeout.Infinite);
+    }
+
+    private void Expire()
+    {
+        Interlocked.Increment(ref expiryWakeups);
+        List<Cached>? release = null;
         lock (sync)
         {
             if (disposed) return;
-            if (--cached.References == 0) cached.Released = Environment.TickCount64;
+            scheduled = long.MaxValue;
+            TrimLocked(ref release);
+            ScheduleLocked();
         }
-        Sweep();
+        DisposeItems(release);
     }
-    private void Sweep()
+
+    private static void DisposeItems(IEnumerable<Cached>? release)
     {
-        var remove = new List<Cached>();
-        lock (sync)
-        {
-            if (disposed) return;
-            foreach (var pair in images.Where(p => !p.Value.Image.SourceValid).ToArray())
-            {
-                images.Remove(pair.Key);
-                remove.Add(pair.Value);
-            }
-            long now = Environment.TickCount64;
-            var idle = images.Where(p => p.Value.References == 0).OrderBy(p => p.Value.Released).ToArray();
-            int remaining = idle.Length;
-            foreach (var pair in idle)
-            {
-                if (now - pair.Value.Released < idleMilliseconds && remaining <= maxIdle) break;
-                images.Remove(pair.Key);
-                remove.Add(pair.Value);
-                remaining--;
-            }
-        }
-        foreach (var item in remove) item.Image.Dispose();
+        if (release != null)
+            foreach (var item in release) item.Image.Dispose();
     }
+
     public void Dispose()
     {
-        timer.Dispose();
         Cached[] remaining;
         lock (sync)
         {
             if (disposed) return;
             disposed = true;
+            timer.Dispose();
             remaining = images.Values.ToArray();
             images.Clear();
+            idle.Clear();
         }
-        foreach (var item in remaining) item.Image.Dispose();
+        DisposeItems(remaining);
     }
 }

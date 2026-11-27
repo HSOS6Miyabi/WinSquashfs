@@ -226,6 +226,13 @@ try
         {
             Require(live.ReadByte()==data[0],"Initial live read failed");
             Require(session.OplockImages>=1,"Local NTFS RH oplock was not granted");
+            int watches=session.DirectoryWatchers;
+            Require(watches>0,"Directory notifications were not established");
+            long checks=session.SourceIdentityChecks, wakeups=session.CacheExpiryWakeups;
+            await Task.Delay(2200);
+            Require(session.SourceIdentityChecks==checks && session.CacheExpiryWakeups==wakeups,
+                "An idle UNC session performed periodic work");
+            Require(session.DirectoryWatchers==watches,"Idle source opened additional directory watches");
             // A conflicting open must complete while the projected file remains open.
             await Task.Run(() => { using var f=File.Open(changingSource,FileMode.Open,FileAccess.ReadWrite,FileShare.None); }).WaitAsync(TimeSpan.FromSeconds(10));
             var deadline=DateTime.UtcNow.AddSeconds(5);
@@ -259,7 +266,7 @@ try
         Require(File.ReadAllBytes(Path.Combine(changingShare.UncPath,"renamed.sqfs","tiny")).SequenceEqual(tiny),"Renamed source failed to reopen");
         Require(File.ReadAllText(Path.Combine(retained,"nested","hello.txt"))=="Hello SquashFS","Unrelated UNC image was invalidated");
     }
-    Console.WriteLine("PASS RH oplock break, deletion, rename, replacement and isolated invalidation");
+    Console.WriteLine("PASS RH oplock break, deletion, rename, replacement, isolated invalidation and zero periodic idle checks");
 
     // The CI runner exposes an actual SMB share. The network source should
     // not retain file handles and must invalidate active projected files.
@@ -280,6 +287,11 @@ try
             live.ReadExactly(got);
             Require(got.SequenceEqual(data.AsSpan(131071,got.Length).ToArray()),"SMB random read mismatch");
             Require(session.OplockImages==0,"SMB source unexpectedly retained an oplock");
+            Require(session.DirectoryWatchers>0,"SMB change notification not established");
+            long checks=session.SourceIdentityChecks, wakeups=session.CacheExpiryWakeups;
+            await Task.Delay(2200);
+            Require(session.SourceIdentityChecks==checks && session.CacheExpiryWakeups==wakeups,
+                "Idle SMB source performed periodic network checks");
             // An exclusive open of the original file succeeds while the
             // projected handle is open, because idle SMB handles are closed.
             using(var exclusive=File.Open(remote,FileMode.Open,FileAccess.Read,FileShare.None)) { }
@@ -297,7 +309,7 @@ try
         File.Copy(Path.Combine(root,"zstd.squashfs"),remote);
         Require(File.ReadAllBytes(Path.Combine(projection,"tiny")).SequenceEqual(tiny),"SMB replacement image did not reopen");
         File.Delete(remote);
-        Console.WriteLine("PASS actual SMB source, random reads, no idle source handles and deletion");
+        Console.WriteLine("PASS actual SMB source, random reads, no idle source handles, zero periodic network checks and deletion");
     }
 
     var bad=Path.Combine(root,"bad.squashfs");

@@ -15,13 +15,15 @@ internal sealed class VolatileImageSource : IDisposable
     private readonly Stamp original;
     private SafeFileHandle? retained, active;
     private SourceOplock? oplock;
-    private FileSystemWatcher? watcher;
-    private Timer? timer;
-    private int invalid, disposed, probing;
+    private readonly List<IDisposable> watches = new();
+    private bool completeWatch;
+    private long identityChecks;
+    private int invalid, disposed;
     internal Native.SourceRead Reader { get; }
     internal ulong Size => checked((ulong)original.Length);
     internal bool Valid => Volatile.Read(ref invalid) == 0 && Volatile.Read(ref disposed) == 0;
     internal bool UsesOplock { get; }
+    internal long IdentityChecks => Interlocked.Read(ref identityChecks);
     internal event Action? Invalidated;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -70,8 +72,9 @@ internal sealed class VolatileImageSource : IDisposable
 
     private static ulong Join(uint high, uint low) => ((ulong)high << 32) | low;
 
-    private static Stamp Snapshot(SafeFileHandle handle)
+    private Stamp Snapshot(SafeFileHandle handle)
     {
+        Interlocked.Increment(ref identityChecks);
         if (!GetFileInformationByHandle(handle, out var info))
             throw new IOException(Localization.T("Cannot query source file identity."), new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
         if ((info.Attributes & ((uint)FileAttributes.Directory | (uint)FileAttributes.ReparsePoint)) != 0)
@@ -120,54 +123,77 @@ internal sealed class VolatileImageSource : IDisposable
         SafeFileHandle? initial = null;
         try
         {
-            initial = Open();
-            // The Windows SMB redirector does not support application-issued
-            // FSCTL_REQUEST_OPLOCK; remote sources use short-lived read handles.
-            if (!path.StartsWith(@"\\", StringComparison.Ordinal) &&
-                new DriveInfo(Path.GetPathRoot(path)!).DriveType != DriveType.Network)
-                oplock = SourceOplock.TryRequest(initial);
-            original = Snapshot(initial);
-            if (oplock != null)
+            lock (gate)
             {
-                retained = initial;
-                initial = null;
-                UsesOplock = true;
-                oplock.Monitor(Invalidate);
-            }
-            else
-            {
-                // No permanent source handle on filesystems without RH oplocks.
-                if (original.IdLow == 0 && original.IdHigh == 0) throw new IOException(Localization.T("The source filesystem did not provide a stable file identifier."));
-            }
+                // Subscribe before capturing identity, so concurrent changes
+                // during initialization also invalidate the generation.
+                completeWatch = SubscribeChanges();
+                initial = Open();
+                if (!path.StartsWith(@"\\", StringComparison.Ordinal) &&
+                    new DriveInfo(Path.GetPathRoot(path)!).DriveType != DriveType.Network)
+                    oplock = SourceOplock.TryRequest(initial);
 
-            try
-            {
-                watcher = identity.Run(() =>
+                original = Snapshot(initial);
+                if (oplock != null)
                 {
-                    var w = new FileSystemWatcher(Path.GetDirectoryName(path)!, Path.GetFileName(path));
-                    try
-                    {
-                        w.NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime;
-                        w.Deleted += (_, _) => Invalidate();
-                        w.Renamed += (_, _) => Invalidate();
-                        w.Created += (_, _) => Invalidate();
-                        w.Changed += (_, _) => Invalidate();
-                        w.Error += (_, _) => Invalidate();
-                        w.EnableRaisingEvents = true;
-                        return w;
-                    }
-                    catch { w.Dispose(); throw; }
-                });
+                    retained = initial;
+                    initial = null;
+                    UsesOplock = true;
+                    oplock.Monitor(Invalidate);
+                }
+                else if (original.IdLow == 0 && original.IdHigh == 0)
+                    throw new IOException(Localization.T("The source filesystem did not provide a stable file identifier."));
+
+                EnsureValid();
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or PlatformNotSupportedException)
-            {
-                // Identity checks continue even when directory notifications are unavailable.
-            }
-            timer = new Timer(_ => Probe(), null, 500, 500);
-            EnsureValid();
         }
         catch { Dispose(); throw; }
         finally { initial?.Dispose(); }
+    }
+
+    private bool SubscribeChanges()
+    {
+        bool complete = true;
+        // Share watches among images in the same directory. Ancestor watches
+        // detect directory renames/deletions; only name changes are relevant.
+        string? item = path;
+        bool ancestor = false;
+        while (item != null && Path.GetDirectoryName(item) is string parent &&
+            !string.IsNullOrEmpty(Path.GetFileName(item)))
+        {
+            try
+            {
+                var subscription = identity.Run(() =>
+                    identity.Changes.Subscribe(parent, Path.GetFileName(item), Invalidate, ancestor));
+                watches.Add(subscription);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or PlatformNotSupportedException)
+            {
+                complete = false;
+            }
+            item = parent;
+            ancestor = true;
+        }
+        return complete;
+    }
+
+    // Only callers accessing an existing image trigger this check. A healthy
+    // local oplock plus complete notifications needs no additional disk I/O.
+    internal void ValidatePath()
+    {
+        try
+        {
+            lock (gate)
+            {
+                EnsureValid();
+                if (oplock != null && !oplock.Broken && completeWatch) return;
+                using var handle = OpenProbe();
+                if (Snapshot(handle) != original || (oplock != null && oplock.Broken))
+                    throw new IOException(Localization.T("The source image was removed, replaced or modified."));
+                EnsureValid();
+            }
+        }
+        catch { Invalidate(); throw; }
     }
 
     internal void EnsureValid()
@@ -178,7 +204,7 @@ internal sealed class VolatileImageSource : IDisposable
     private void CheckLocked(SafeFileHandle handle)
     {
         EnsureValid();
-        if ((oplock != null && oplock.Broken) || Snapshot(handle) != original)
+        if (oplock != null ? oplock.Broken : Snapshot(handle) != original)
             throw new IOException(Localization.T("The source image was removed, replaced or modified."));
     }
 
@@ -190,6 +216,7 @@ internal sealed class VolatileImageSource : IDisposable
             {
                 EnsureValid();
                 if (active != null) throw new InvalidOperationException(Localization.T("A source read is already active."));
+                if (retained != null && !completeWatch) ValidatePath();
                 active = retained ?? Open();
                 CheckLocked(active);
             }
@@ -246,20 +273,6 @@ internal sealed class VolatileImageSource : IDisposable
         catch (Exception) { Invalidate(); return -2; }
     }
 
-    private void Probe()
-    {
-        if (!Valid || Interlocked.Exchange(ref probing, 1) != 0) return;
-        try
-        {
-            // Verify the path as well as the open file: deletion, ancestor
-            // renames and replacement are detected even if a notification is lost.
-            using var handle = OpenProbe();
-            if (Snapshot(handle) != original) Invalidate();
-        }
-        catch (Exception) { Invalidate(); }
-        finally { Volatile.Write(ref probing, 0); }
-    }
-
     private void Invalidate()
     {
         if (Interlocked.Exchange(ref invalid, 1) != 0) return;
@@ -279,6 +292,8 @@ internal sealed class VolatileImageSource : IDisposable
             active = null;
             retained?.Dispose();
             retained = null;
+            foreach (var watch in watches) watch.Dispose();
+            watches.Clear();
         }
     }
 
@@ -286,8 +301,6 @@ internal sealed class VolatileImageSource : IDisposable
     {
         if (Interlocked.Exchange(ref disposed, 1) != 0) return;
         Interlocked.Exchange(ref invalid, 1);
-        timer?.Dispose();
-        watcher?.Dispose();
         CloseSource();
     }
 }

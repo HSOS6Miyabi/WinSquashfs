@@ -117,6 +117,8 @@ public sealed class Archive : IDisposable
 
     public bool SourceValid => source?.Valid != false;
     internal bool UsesOplock => source?.UsesOplock == true;
+    internal long IdentityChecks => source?.IdentityChecks ?? 0;
+    internal void ValidateSourcePath() => source?.ValidatePath();
     public event Action? SourceInvalidated
     {
         add { if (source != null) source.Invalidated += value; }

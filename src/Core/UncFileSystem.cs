@@ -397,6 +397,9 @@ public sealed class UncSession : IDisposable
     public int CachedImages => cache.Count;
     public int ActiveImages => cache.ActiveCount;
     public int OplockImages => cache.OplockCount;
+    public long SourceIdentityChecks => cache.IdentityChecks;
+    public long CacheExpiryWakeups => cache.ExpiryWakeups;
+    public int DirectoryWatchers => readIdentity.Changes.Count;
 
     public UncSession(IEnumerable<UncShare> shares, int idleSeconds = 60, int maxIdleImages = 8)
     {

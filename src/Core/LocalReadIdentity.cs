@@ -11,6 +11,7 @@ namespace WinSquashfs.Core;
 internal sealed class LocalReadIdentity : IDisposable
 {
     private readonly SafeAccessTokenHandle? limited;
+    internal DirectoryChangeMonitor Changes { get; } = new();
     private const int TokenElevationType = 18;
     private const int TokenLinkedToken = 19;
     private const int TokenElevationTypeFull = 2;
@@ -37,5 +38,9 @@ internal sealed class LocalReadIdentity : IDisposable
         finally { Marshal.FreeHGlobal(buffer); }
     }
     internal T Run<T>(Func<T> action) => limited == null ? action() : WindowsIdentity.RunImpersonated(limited, action);
-    public void Dispose() => limited?.Dispose();
+    public void Dispose()
+    {
+        Changes.Dispose();
+        limited?.Dispose();
+    }
 }
