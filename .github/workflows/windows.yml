@@ -68,6 +68,13 @@ jobs:
       - name: WinUI end-to-end automation
         shell: powershell
         run: ./tests/ui.ps1 -AppDirectory (Resolve-Path artifacts/dist).Path
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinSquashfs-UI-screenshots
+          path: artifacts/screenshots/
+          if-no-files-found: warn
       - name: Upload installer and portable distribution
         uses: actions/upload-artifact@v4
         with:

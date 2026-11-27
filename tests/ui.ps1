@@ -1,6 +1,7 @@
 param([Parameter(Mandatory=$true)][string]$AppDirectory)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+. (Join-Path $PSScriptRoot 'screenshots.ps1')
 function Find-Control($parent,[string]$id) {
   $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty,$id)
   $parent.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
@@ -48,6 +49,14 @@ try {
   $window=Get-AppWindow $p 'PackSource'
   Set-Value $window 'PackSource' "$root\src"
   Set-Value $window 'PackOutput' $img
+  Save-WindowScreenshot $p '01-pack'
+  $adv=Wait-Control $window 'AdvancedParameters'
+  $exp=$null
+  if($adv.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$exp)){
+    $exp.Expand()
+    Save-WindowScreenshot $p '02-advanced'
+    $exp.Collapse()
+  }
   Invoke-Control $window 'CreateImage'
   for($i=0;$i -lt 120 -and !(Test-Path $img);$i++){Start-Sleep -Milliseconds 250}
   if(!(Test-Path $img)){throw 'GUI did not create image'}
@@ -57,6 +66,7 @@ try {
   $p=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--open',('"' + $img + '"')) -WorkingDirectory $AppDirectory -PassThru
   $window=Get-AppWindow $p 'FileList'
   $null=Wait-Control $window 'MountImage' $true
+  Save-WindowScreenshot $p '03-browser'
   $list=Wait-Control $window 'FileList'
   $itemCondition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ListItem)
   $item=$list.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)
@@ -66,6 +76,9 @@ try {
   Start-Sleep -Milliseconds 500
   $path=(Wait-Control $window 'ArchivePath').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
   if($path -ne '\nested'){throw "Navigation failed: $path"}
+  $file=$list.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)
+  if($file){$file.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()}
+  Save-WindowScreenshot $p '04-preview'
   Invoke-Control $window 'UpFolder'
   Invoke-Control $window 'MountImage'
   $mounted=Wait-Control $window 'MountedList'
@@ -77,6 +90,7 @@ try {
   }
   if(!$item){throw 'Mount list is empty'}
   $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+  Save-WindowScreenshot $p '05-mounts'
   Invoke-Control $window 'UnmountImage'
   for($i=0;$i -lt 120;$i++){
     if(!$mounted.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)){break}
@@ -103,6 +117,7 @@ try {
   $agentStarted=$true
   $null=Wait-Control $window 'StopUnc' $true
   $unc='\\sfs$\' + $alias + '\ui.squashfs'
+  Save-WindowScreenshot $p '06-unc'
   $uncActual=(Wait-Control $window 'UncImagePath').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
   if($uncActual -ne $unc){throw "Unexpected UNC path: $uncActual"}
   if([IO.File]::ReadAllText("$unc\nested\hello.txt") -ne 'hello'){throw 'GUI-launched UNC read failed'}
@@ -114,6 +129,10 @@ try {
   Invoke-Control $window 'StartUnc'
   $agentStarted=$true
   $null=Wait-Control $window 'StopUnc' $true
+  $nav=Wait-Control $window 'NavTools' $true
+  $pattern=$null
+  if($nav.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)){$pattern.Select()}else{$nav.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
+  Save-WindowScreenshot $p '07-tools'
   $p.CloseMainWindow()|Out-Null
   if(!$p.WaitForExit(10000)){throw 'GUI did not close with UNC access enabled'}
   if([IO.File]::ReadAllText("$unc\nested\hello.txt") -ne 'hello'){throw 'Closing GUI stopped UNC access'}
