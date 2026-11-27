@@ -532,6 +532,7 @@ public sealed partial class MainWindow : Window
 
     private async void CheckWinFspClicked(object sender, RoutedEventArgs e)
     {
+        if (operation != null) return;
         ToolsLog.Text = "";
         await RunAsync(Localization.T("Checking WinFsp runtime…"), async token =>
         {

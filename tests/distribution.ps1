@@ -42,7 +42,7 @@ foreach($exe in @('WinSquashfs.exe','winsqfs.exe','WinSquashfs.Unc.exe')){
 }
 if((Invoke-Cli --version) -ne $Version){throw 'CLI version mismatch'}
 $doctor=Invoke-Cli doctor
-if($doctor -notmatch 'WinFsp runtime 2\.'){throw "WinFsp diagnostic failed: $doctor"}
+if(($doctor -join "`n") -notmatch 'WinFsp runtime 2\.'){throw "WinFsp diagnostic failed: $doctor"}
 $root=Join-Path $env:TEMP ('WinSquashfsDist-'+[guid]::NewGuid().ToString('N'))
 $settingsDirectory=Join-Path $env:LOCALAPPDATA 'WinSquashfs'
 $settingsFile=Join-Path $settingsDirectory 'unc.json'

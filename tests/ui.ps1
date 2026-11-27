@@ -216,9 +216,13 @@ try {
   $pattern=$null
   if($nav.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)){$pattern.Select()}else{$nav.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
   Invoke-Control $window 'CheckWinFsp'
-  $null=Wait-Control $window 'CheckWinFsp' $true
-  $log=(Wait-Control $window 'ToolsLog').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
-  if($log -notmatch '2\.2\.26323|2\.[3-9]\.'){throw "WinFsp runtime diagnostic missing: $log"}
+  $log=''
+  for($i=0;$i -lt 100;$i++){
+    $log=(Wait-Control $window 'ToolsLog').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    if($log -match 'WinFsp.*2\.2\.26323'){break}
+    Start-Sleep -Milliseconds 100
+  }
+  if($log -notmatch 'WinFsp.*2\.2\.26323'){throw "WinFsp runtime diagnostic missing: $log"}
   Save-WindowScreenshot $p '07-tools'
   $p.CloseMainWindow()|Out-Null
   if(!$p.WaitForExit(10000)){throw 'GUI did not close with UNC access enabled'}
