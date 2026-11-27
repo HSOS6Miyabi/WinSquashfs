@@ -85,13 +85,13 @@ public sealed partial class MainWindow
         UncIdleBox.Value = settings.IdleSeconds;
         UncLimitBox.Value = settings.MaxIdleImages;
         UncLoginBox.IsChecked = settings.StartAtLogin;
-        RefreshUncStatus();
+        UpdateUncButtons();
     }
     private UncSettings ReadUncSettings() => new(UncRootBox.Text.Trim(), UncAliasBox.Text.Trim(),
         UncDrivesBox.IsChecked == true, OptionalInt(UncIdleBox) ?? 60,
         OptionalInt(UncLimitBox) ?? 8, UncLoginBox.IsChecked == true);
 
-    private void RefreshUncStatus()
+    private void UpdateUncButtons()
     {
         if (!ready) return;
         try
@@ -102,18 +102,28 @@ public sealed partial class MainWindow
             StartUncButton.IsEnabled = idle && !running;
             StopUncButton.IsEnabled = idle && running;
             UncApplyButton.IsEnabled = idle;
-            var settings = UncSettings.Load();
-            UncShares.Text = string.Join(Environment.NewLine, settings.Shares().Select(s => s.UncPath + "  →  " + s.Root));
-            UncImagePathBox.Text = archive == null ? "" : settings.GetImagePath(archive.Path) ?? "";
             CopyUncButton.IsEnabled = idle && UncImagePathBox.Text.Length > 0;
             OpenUncButton.IsEnabled = idle && UncImagePathBox.Text.Length > 0;
+        }
+        catch (Exception ex) { UncStatus.Text = ex.Message; }
+    }
+
+    private void RefreshUncStatus()
+    {
+        if (!ready) return;
+        try
+        {
+            var settings = UncSettings.Load();
+            var shares = settings.Shares();
+            UncShares.Text = string.Join(Environment.NewLine, shares.Select(s => s.UncPath + "  →  " + s.Root));
+            UncImagePathBox.Text = uncTargetPath == null ? "" : shares.Select(s => s.ImagePath(uncTargetPath)).FirstOrDefault(s => s != null) ?? "";
         }
         catch (Exception ex)
         {
             UncShares.Text = ex.Message;
             UncImagePathBox.Text = "";
-            CopyUncButton.IsEnabled = OpenUncButton.IsEnabled = false;
         }
+        UpdateUncButtons();
     }
     private async void UncRootClicked(object sender, RoutedEventArgs e)
     {
@@ -157,14 +167,15 @@ public sealed partial class MainWindow
     }
     private async void OpenUncClicked(object sender, RoutedEventArgs e)
     {
-        if (archive != null) await OpenDirectImageAsync(archive.Path);
+        if (uncTargetPath != null) await OpenDirectImageAsync(uncTargetPath);
     }
     private async Task OpenDirectImageAsync(string path)
     {
         await RunAsync("Opening image via UNC…", async token =>
         {
+            uncTargetPath = Path.GetFullPath(path);
             var settings = UncSettings.Load();
-            string unc = settings.GetImagePath(path) ?? throw new IOException("Image is outside the configured UNC shares. Configure a local directory or enable local drives.");
+            string unc = settings.GetImagePath(uncTargetPath) ?? throw new IOException("Image is outside the configured UNC shares. Configure a local directory or enable local drives.");
             await UncAgentControl.StartAsync(token);
             if (!await Task.Run(() => Directory.Exists(unc), token))
                 throw new IOException("The image cannot be opened through its UNC path: " + unc);

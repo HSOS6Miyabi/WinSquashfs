@@ -31,16 +31,31 @@ public sealed partial class MainWindow : Window
     private CancellationTokenSource? operation;
     private int previewGeneration;
     private bool ready;
+    private bool errorDialogOpen;
+    private bool closing;
+    private string? uncTargetPath;
     public MainWindow()
     {
         InitializeComponent();
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 780));
+        var display = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
+        var area = display.WorkArea;
+        double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
+        if (scale <= 0) scale = 1;
+        if (AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+        {
+            presenter.PreferredMinimumWidth = Math.Min(area.Width, (int)(820 * scale));
+            presenter.PreferredMinimumHeight = Math.Min(area.Height, (int)(540 * scale));
+        }
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(Math.Min(area.Width, (int)(1200 * scale)), Math.Min(area.Height, (int)(780 * scale))));
         try { SystemBackdrop = new MicaBackdrop(); } catch { }
         MountedList.ItemsSource = mounts;
         CodecBox.ItemsSource = new[] { "zstd", "gzip", "xz", "lz4", "lzo" };
         BlockBox.ItemsSource = new[] { "4 KiB", "8 KiB", "16 KiB", "32 KiB", "64 KiB", "128 KiB", "256 KiB", "512 KiB", "1024 KiB" };
         LzoAlgorithm.ItemsSource = new[] { "Default", "lzo1x_1", "lzo1x_1_11", "lzo1x_1_12", "lzo1x_1_15", "lzo1x_999" };
-        CodecBox.SelectionChanged += (_,_) => UpdateCodec();
+        CodecBox.SelectionChanged += (_,_) => { if (ready) LevelBox.Value = double.NaN; UpdateCodec(); };
+        LzoAlgorithm.SelectionChanged += (_,_) => UpdateLzoLevel();
+        NoFragments.Checked += (_,_) => AlwaysFragments.IsChecked = false;
+        AlwaysFragments.Checked += (_,_) => NoFragments.IsChecked = false;
         ready = true;
         LoadUncSettings();
         RefreshRecent();
@@ -48,22 +63,31 @@ public sealed partial class MainWindow : Window
         RefreshDrives();
         Navigation.SelectedItem = BrowseNav;
         RefreshEntries();
+        var uncTimer = DispatcherQueue.CreateTimer();
+        uncTimer.Interval = TimeSpan.FromSeconds(1);
+        uncTimer.Tick += (_, _) => { if (UncPage.Visibility == Visibility.Visible) UpdateUncButtons(); };
+        uncTimer.Start();
         AppWindow.Closing += (_, e) =>
         {
             if (operation != null)
             {
                 e.Cancel = true;
+                closing = true;
                 operation.Cancel();
-                StatusText.Text = "Cancelling the current operation. Close the window after it completes.";
+                StatusText.Text = "Cancelling the current operation…";
             }
         };
         Closed += (_,_) =>
         {
+            uncTimer.Stop();
             ++previewGeneration;
             foreach (var mount in mounts.ToArray()) mount.Dispose();
             archive?.Dispose();
         };
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr window);
 
     internal async Task ApplyCommandLineAsync(string[] args)
     {
@@ -112,9 +136,16 @@ public sealed partial class MainWindow : Window
     private async Task ShowErrorAsync(Exception e)
     {
         StatusText.Text = e.Message;
-        var dialog = new ContentDialog { Title = "Operation failed", Content = e.Message,
-            CloseButtonText = "Close", XamlRoot = Root.XamlRoot };
-        await dialog.ShowAsync();
+        if (errorDialogOpen || closing || Root.XamlRoot == null) return;
+        errorDialogOpen = true;
+        try
+        {
+            var dialog = new ContentDialog { Title = "Operation failed",
+                Content = new TextBlock { Text = e.Message, TextWrapping = TextWrapping.Wrap, MaxWidth = 520 },
+                CloseButtonText = "Close", XamlRoot = Root.XamlRoot };
+            await dialog.ShowAsync();
+        }
+        finally { errorDialogOpen = false; }
     }
 
     private async Task<bool> RunAsync(string title, Func<CancellationToken,Task> action)
@@ -122,7 +153,7 @@ public sealed partial class MainWindow : Window
         if (operation != null) return false;
         using var cts = new CancellationTokenSource();
         operation = cts; BusyRing.IsActive = true; CancelButton.IsEnabled = true;
-        OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = MountButton.IsEnabled = ExtractButton.IsEnabled = ExtractAllButton.IsEnabled = VerifyButton.IsEnabled = false;
+        OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = MountButton.IsEnabled = ExtractButton.IsEnabled = ExtractAllButton.IsEnabled = VerifyButton.IsEnabled = CloseImageButton.IsEnabled = false;
         StartUncButton.IsEnabled = StopUncButton.IsEnabled = UncApplyButton.IsEnabled = CopyUncButton.IsEnabled = OpenUncButton.IsEnabled = false;
         StatusText.Text = title;
         try { await action(cts.Token); StatusText.Text = "Completed"; return true; }
@@ -133,7 +164,8 @@ public sealed partial class MainWindow : Window
             operation = null; BusyRing.IsActive = false; CancelButton.IsEnabled = false;
             OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = true;
             UpdateButtons();
-            RefreshUncStatus();
+            if (UncPage.Visibility == Visibility.Visible) RefreshUncStatus();
+            if (closing) DispatcherQueue.TryEnqueue(() => Close());
         }
     }
 
@@ -171,6 +203,7 @@ public sealed partial class MainWindow : Window
             ++previewGeneration;
             archive?.Dispose();
             archive = next;
+            uncTargetPath = next.Path;
             current = next.Root;
             RecentImages.Add(next.Path);
             RefreshRecent();
@@ -192,7 +225,9 @@ public sealed partial class MainWindow : Window
             .Select(e => new BrowserRow(e)).ToArray() ?? Array.Empty<BrowserRow>();
         ++previewGeneration;
         Preview.Text = "";
-        Details.Text = current == null ? "Select an entry to view its properties." : $"{current.Children.Count} entries in {current.ArchivePath}";
+        Details.Text = current == null ? "Open an image and select an entry." : $"{current.Children.Count} entries in {current.ArchivePath}";
+        BrowserEmpty.Text = current == null ? "Open or drop a SquashFS image to begin." : "No matching entries.";
+        BrowserEmpty.Visibility = Entries.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
     }
 
@@ -201,11 +236,26 @@ public sealed partial class MainWindow : Window
         if (!ready) return;
         var selected = (Entries.SelectedItem as BrowserRow)?.Entry;
         bool idle = operation == null;
+        CloseImageButton.IsEnabled = archive != null && idle;
         UpButton.IsEnabled = current?.Parent != null;
         EnterButton.IsEnabled = selected?.IsDirectory == true;
         MountButton.IsEnabled = ExtractAllButton.IsEnabled = archive != null && idle;
         ExtractButton.IsEnabled = selected != null && (selected.IsFile || selected.IsDirectory) && idle;
         VerifyButton.IsEnabled = archive != null && idle;
+    }
+
+    private void CloseImageClicked(object sender, RoutedEventArgs e)
+    {
+        if (operation != null) return;
+        ++previewGeneration;
+        archive?.Dispose();
+        archive = null;
+        current = null;
+        uncTargetPath = null;
+        ImageSummary.Text = "Open a SquashFS image to explore its contents.";
+        SearchBox.Text = "";
+        RefreshEntries();
+        StatusText.Text = "Image closed";
     }
 
     private void Go(Entry? entry)
@@ -236,7 +286,11 @@ public sealed partial class MainWindow : Window
         Preview.Text = "";
         var entry = (Entries.SelectedItem as BrowserRow)?.Entry;
         var owner = archive;
-        if (entry == null || owner == null) return;
+        if (entry == null || owner == null)
+        {
+            Details.Text = current == null ? "Open an image and select an entry." : $"{current.Children.Count} entries in {current.ArchivePath}";
+            return;
+        }
         Details.Text = $"{entry.Name}\n{entry.Kind} · {FormatSize(entry.Size)}\nModified: {entry.Modified.LocalDateTime:g}\nInode: {entry.Inode}" +
             (entry.Name == entry.WindowsName ? "" : $"\nWindows name: {entry.WindowsName}");
         if (!entry.IsFile) return;
@@ -270,7 +324,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var folder = await PickFolderAsync();
-            if (folder == null) return;
+            if (folder == null || !ReferenceEquals(owner, archive)) return;
             await RunAsync("Extracting selected entry…", token => Task.Run(() => owner.ExportEntry(entry, Path.Combine(folder,entry.WindowsName), token),token));
         }
         catch (Exception ex) { await ShowErrorAsync(ex); }
@@ -341,12 +395,22 @@ public sealed partial class MainWindow : Window
             "lzo" => "Fast decompression with broad compatibility.",
             _ => ""
         };
+        LevelBox.Minimum = codec == "zstd" ? -131072 : 1;
+        LevelBox.Maximum = codec == "zstd" ? 22 : 9;
         LevelBox.IsEnabled = codec is "zstd" or "gzip" or "lzo";
         if (!LevelBox.IsEnabled) LevelBox.Value = double.NaN;
         Lz4Hc.IsEnabled = codec == "lz4"; if (!Lz4Hc.IsEnabled) Lz4Hc.IsChecked = false;
         XzDict.IsEnabled = XzFilters.IsEnabled = codec == "xz"; if (!XzDict.IsEnabled) XzDict.Text = XzFilters.Text = "";
         GzipWindow.IsEnabled = codec == "gzip"; if (!GzipWindow.IsEnabled) GzipWindow.Value = double.NaN;
         LzoAlgorithm.IsEnabled = codec == "lzo"; if (!LzoAlgorithm.IsEnabled) LzoAlgorithm.SelectedIndex = 0;
+        UpdateLzoLevel();
+    }
+
+    private void UpdateLzoLevel()
+    {
+        if (!ready || !Equals(CodecBox.SelectedItem, "lzo")) return;
+        LevelBox.IsEnabled = LzoAlgorithm.SelectedIndex <= 0 || Equals(LzoAlgorithm.SelectedItem, "lzo1x_999");
+        if (!LevelBox.IsEnabled) LevelBox.Value = double.NaN;
     }
 
     private static int? OptionalInt(NumberBox b)
@@ -402,15 +466,17 @@ public sealed partial class MainWindow : Window
         if (archive == null || operation != null) { StatusText.Text = "Open an image before mounting."; return; }
         string path = archive.Path;
         string? drive = DriveBox.SelectedItem as string; if (drive == "Automatic") drive = null;
+        string? mountedPoint = null;
         if (await RunAsync("Mounting read-only volume…", async token =>
         {
             var mounted = await Task.Run(() => new MountedImage(path, drive), token);
             if (token.IsCancellationRequested) { mounted.Dispose(); token.ThrowIfCancellationRequested(); }
+            mountedPoint = mounted.MountPoint;
             mounts.Add(mounted);
             Navigation.SelectedItem = MountNav;
             MountedList.SelectedItem = mounted;
             RefreshDrives();
-        })) StatusText.Text = "Mounted " + ((MountedImage)MountedList.SelectedItem).MountPoint;
+        })) StatusText.Text = "Mounted " + mountedPoint;
     }
     private async void UnmountClicked(object sender, RoutedEventArgs e)
     {

@@ -12,7 +12,7 @@ public sealed record PackOptions(string Codec = "zstd", int BlockSize = 131072, 
 {
     public IReadOnlyList<string> Arguments()
     {
-        if (Codec is not ("gzip" or "lzo" or "xz" or "lz4" or "zstd" or "lzma")) throw new ArgumentException("Unknown compressor.");
+        if (Codec is not ("gzip" or "lzo" or "xz" or "lz4" or "zstd")) throw new ArgumentException("Unknown compressor.");
         if (BlockSize < 4096 || BlockSize > 1048576 || (BlockSize & (BlockSize - 1)) != 0) throw new ArgumentException("Block size must be a power of two between 4 KiB and 1 MiB.");
         if (Threads < 0 || Threads > 1024) throw new ArgumentException("Invalid processor count.");
         if (NoFragments && AlwaysFragments) throw new ArgumentException("Fragment options conflict.");
@@ -48,7 +48,7 @@ public sealed record PackOptions(string Codec = "zstd", int BlockSize = 131072, 
         }
         if (!string.IsNullOrWhiteSpace(XzFilters))
         {
-            if (Codec != "xz" || XzFilters.Split(',').Any(x => x is not ("x86" or "arm" or "armthumb" or "arm64" or "powerpc" or "sparc" or "ia64" or "riscv")))
+            if (Codec != "xz" || XzFilters.Split(',').Any(x => x is not ("x86" or "arm" or "armthumb" or "powerpc" or "sparc" or "ia64")))
                 throw new ArgumentException("Invalid XZ filters.");
             a.AddRange(new[] { "-Xbcj", XzFilters });
         }
@@ -116,7 +116,7 @@ public static class SquashTools
         destination = Path.GetFullPath(destination);
         if (File.Exists(destination) || Directory.Exists(destination)) throw new IOException("Choose a new destination directory.");
         using var archive = await Task.Run(() => new Archive(image), token);
-        await Task.Run(() => archive.ExportEntry(archive.Root, destination, token), token);
+        await Task.Run(() => archive.ExportEntry(archive.Root, destination, token, log), token);
         log?.Invoke("Extracted " + destination);
     }
 }

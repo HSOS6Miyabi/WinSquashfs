@@ -92,34 +92,73 @@ public static class UncAgentControl
 
     public static async Task StartAsync(CancellationToken token = default)
     {
+        token.ThrowIfCancellationRequested();
         if (IsRunning) return;
         if (!File.Exists(ExecutablePath)) throw new FileNotFoundException("UNC background application is missing.", ExecutablePath);
         using var p = Process.Start(new ProcessStartInfo(ExecutablePath) { UseShellExecute = false, CreateNoWindow = true })
             ?? throw new IOException("Cannot start UNC background application.");
-        for (int i = 0; i < 150; i++)
+        try
         {
-            token.ThrowIfCancellationRequested();
+            for (int i = 0; i < 150; i++)
+            {
+                if (IsRunning) return;
+                token.ThrowIfCancellationRequested();
+                if (p.HasExited && !IsStartingOrRunning) break;
+                await Task.Delay(100, token);
+            }
             if (IsRunning) return;
-            if (p.HasExited && !IsStartingOrRunning) break;
-            await Task.Delay(100, token);
+            if (!p.HasExited)
+            {
+                await TerminateStartupAsync(p);
+                throw new IOException("UNC background application did not become ready.");
+            }
         }
-        if (IsRunning) return;
-        if (!p.HasExited) throw new IOException("UNC background application did not become ready.");
+        catch (OperationCanceledException)
+        {
+            if (IsRunning) return;
+            await TerminateStartupAsync(p);
+            throw;
+        }
         string error = File.Exists(UncSettings.LogPath) ? File.ReadAllText(UncSettings.LogPath) : "";
         throw new IOException("UNC background application could not start. " + error);
     }
 
+    private static async Task TerminateStartupAsync(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill();
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            }
+        }
+        catch (InvalidOperationException) { }
+    }
+
+    private static bool InstanceStopped()
+    {
+        if (!Mutex.TryOpenExisting(Name("Instance"), out var mutex)) return true;
+        using (mutex)
+        {
+            bool acquired;
+            try { acquired = mutex.WaitOne(0); }
+            catch (AbandonedMutexException) { acquired = true; }
+            if (acquired) mutex.ReleaseMutex();
+            return acquired;
+        }
+    }
+
     public static async Task StopAsync(CancellationToken token = default)
     {
+        token.ThrowIfCancellationRequested();
         if (EventWaitHandle.TryOpenExisting(Name("Stop"), out var stop))
         {
             using (stop) stop.Set();
             for (int i = 0; i < 150; i++)
             {
-                token.ThrowIfCancellationRequested();
-                if (!EventWaitHandle.TryOpenExisting(Name("Stop"), out var running)) return;
-                running.Dispose();
-                await Task.Delay(100, token);
+                if (InstanceStopped()) return;
+                await Task.Delay(100);
             }
             throw new IOException("UNC background application did not stop.");
         }

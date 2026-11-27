@@ -5,7 +5,7 @@
  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
  mc:Ignorable="d" Title="WinSquashfs">
  <Grid x:Name="Root" RowDefinitions="Auto,*,Auto">
-  <Grid Padding="24,16" ColumnDefinitions="*,Auto">
+  <Grid Padding="20,10" ColumnDefinitions="*,Auto">
    <StackPanel Spacing="2">
     <TextBlock Text="WinSquashfs" Style="{StaticResource TitleTextBlockStyle}"/>
     <TextBlock Text="SquashFS image workspace" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
@@ -17,7 +17,7 @@
     </StackPanel>
    </Border>
   </Grid>
-  <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Left" OpenPaneLength="200"
+  <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" OpenPaneLength="200" CompactModeThresholdWidth="640" ExpandedModeThresholdWidth="1120"
     IsBackButtonVisible="Collapsed" IsSettingsVisible="False" IsPaneToggleButtonVisible="True"
     SelectionChanged="NavigationChanged">
    <NavigationView.MenuItems>
@@ -32,9 +32,10 @@
      <Grid ColumnDefinitions="*,Auto">
       <StackPanel Spacing="3">
        <TextBlock Text="Image browser" Style="{StaticResource SubtitleTextBlockStyle}"/>
-       <TextBlock x:Name="ImageSummary" Text="Open a SquashFS image to explore its contents." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="ImageSummary"/>
+       <TextBlock x:Name="ImageSummary" MaxLines="2" TextTrimming="CharacterEllipsis" Text="Open a SquashFS image to explore its contents." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="ImageSummary"/>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+       <Button x:Name="CloseImageButton" Content="Close" Click="CloseImageClicked" ToolTipService.ToolTip="Close current image" AutomationProperties.AutomationId="CloseImage"/>
        <Button x:Name="RecentButton" Content="Recent" AutomationProperties.AutomationId="RecentImages">
         <Button.Flyout><MenuFlyout x:Name="RecentMenu"/></Button.Flyout>
        </Button>
@@ -70,22 +71,23 @@
          <ListView.ItemTemplate>
           <DataTemplate>
            <Grid ColumnDefinitions="*,100,90" ColumnSpacing="4">
-            <StackPanel Orientation="Horizontal" Spacing="8">
+            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
              <FontIcon Glyph="{Binding Glyph}" FontSize="16"/>
-             <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-            </StackPanel>
+             <TextBlock Grid.Column="1" Text="{Binding Name}" ToolTipService.ToolTip="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+            </Grid>
             <TextBlock Grid.Column="1" Text="{Binding Kind}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
             <TextBlock Grid.Column="2" Text="{Binding SizeText}" TextAlignment="Right" VerticalAlignment="Center"/>
            </Grid>
           </DataTemplate>
          </ListView.ItemTemplate>
         </ListView>
+        <TextBlock Grid.Row="1" x:Name="BrowserEmpty" Text="Open or drop a SquashFS image to begin." TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="12" IsHitTestVisible="False"/>
        </Grid>
       </Border>
       <Border Grid.Column="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="14" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
        <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
         <TextBlock Text="File details" FontWeight="SemiBold"/>
-        <TextBlock Grid.Row="1" x:Name="Details" Text="Select an entry to view its properties." TextWrapping="Wrap"/>
+        <TextBlock Grid.Row="1" x:Name="Details" Text="Select an entry to view its properties." TextWrapping="Wrap" MaxLines="7" TextTrimming="CharacterEllipsis"/>
         <TextBox Grid.Row="2" x:Name="Preview" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" ScrollViewer.VerticalScrollBarVisibility="Auto" Header="Preview · first 16 KiB" AutomationProperties.AutomationId="FilePreview"/>
        </Grid>
       </Border>
@@ -276,7 +278,7 @@
    </Grid>
   </NavigationView>
   <Grid Grid.Row="2" Padding="18,8" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
-   <TextBlock x:Name="StatusText" Text="Ready" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.AutomationId="Status"/>
+   <TextBlock x:Name="StatusText" Text="Ready" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" AutomationProperties.AutomationId="Status"/>
    <ProgressRing Grid.Column="1" x:Name="BusyRing" Width="22" Height="22" IsActive="False"/>
    <Button Grid.Column="2" x:Name="CancelButton" Content="Cancel" Click="CancelClicked" IsEnabled="False" AutomationProperties.AutomationId="CancelOperation"/>
   </Grid>

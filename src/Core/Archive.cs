@@ -242,7 +242,7 @@ public sealed class Archive : IDisposable
         return new ArchiveVerification(files, bytes);
     }
 
-    public void ExportEntry(Entry entry, string path, CancellationToken token = default)
+    public void ExportEntry(Entry entry, string path, CancellationToken token = default, Action<string>? log = null)
     {
         ValidateEntry(entry);
         token.ThrowIfCancellationRequested();
@@ -274,6 +274,7 @@ public sealed class Archive : IDisposable
                     {
                         ExportFile(child, destination, token);
                     }
+                    else log?.Invoke("Skipped " + child.ArchivePath + " (" + child.Kind + ")");
                 }
             }
             for (int i = directories.Count - 1; i >= 0; i--)
