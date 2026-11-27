@@ -149,6 +149,7 @@ public sealed class MountedImage : IDisposable
     {
         if (drive != null && (drive.Length != 2 || !char.IsAsciiLetter(drive[0]) || drive[1] != ':'))
             throw new ArgumentException(Localization.T("Use a drive letter such as X:."));
+        WinFspRuntime.Check();
         archive = new Archive(path);
         FileSystemHost? h = null;
         try

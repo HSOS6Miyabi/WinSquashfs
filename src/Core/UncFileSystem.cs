@@ -313,6 +313,7 @@ public sealed class UncSession : IDisposable
         Shares = shares.Select(s => s.Validate()).ToArray();
         if (Shares.Count == 0 || Shares.Select(s => s.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Shares.Count)
             throw new ArgumentException(Localization.T("At least one share is required; names must be unique."));
+        WinFspRuntime.Check();
         cache = new ImageCache(idleSeconds, maxIdleImages);
         try { readIdentity = new LocalReadIdentity(); }
         catch { cache.Dispose(); throw; }

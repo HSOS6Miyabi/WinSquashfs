@@ -3,7 +3,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <AssemblyName>WinSquashfs.WinFsp</AssemblyName>
     <Product>WinFsp</Product>
-    <FileVersion>2.2.0.0</FileVersion>
+    <FileVersion>$(WinFspRuntimeVersion).0</FileVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
@@ -12,5 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\..\.deps\winfsp-binding\*.cs"/>
+    <Compile Include="RuntimeDependency.cs"/>
+    <AssemblyMetadata Include="WinFspMinimumVersion" Value="$(WinFspRuntimeVersion).0"/>
   </ItemGroup>
 </Project>

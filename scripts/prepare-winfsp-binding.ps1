@@ -11,7 +11,8 @@ $files = [ordered]@{
 }
 foreach ($name in $files.Keys) {
   $path = Join-Path $dir $name
-  $uri = 'https://raw.githubusercontent.com/winfsp/winfsp/v2.2B1/src/dotnet/' + $name
+  $release = ([xml](Get-Content (Join-Path $root 'Directory.Build.props') -Raw)).Project.PropertyGroup.WinFspRelease
+  $uri = "https://raw.githubusercontent.com/winfsp/winfsp/$release/src/dotnet/$name"
   Invoke-WebRequest $uri -OutFile $path
   $hash = (& git hash-object --no-filters $path).Trim()
   if ($LASTEXITCODE -or $hash -ne $files[$name]) { throw "WinFsp source hash mismatch: $name" }
@@ -43,4 +44,19 @@ $old = 'Result = Api.FspFileSystemCreate('
 $source = $source.Replace($old, 'if (PrefixOnly && _VolumeParams.IsPrefixEmpty()) return unchecked((Int32)0xC000000D);' + [Environment]::NewLine + '            ' + $old)
 # FileSystemHost is not derived from FileSystemBase; use the literal success status.
 $source = $source.Replace('PrefixOnly ? STATUS_SUCCESS :', 'PrefixOnly ? 0 :')
+[IO.File]::WriteAllText($path, $source, [Text.UTF8Encoding]::new($false))
+
+$path = Join-Path $dir 'Interop.cs'
+$source = [IO.File]::ReadAllText($path)
+$start = $source.IndexOf('        private static IntPtr LoadDll()')
+$end = $source.IndexOf('        private static IntPtr GetEntryPointPtr(', $start)
+if ($start -lt 0 -or $end -le $start) { throw 'WinFsp native loader source has changed' }
+$loader = @'
+        private static IntPtr LoadDll()
+        {
+            return RuntimeDependency.Load();
+        }
+
+'@
+$source = $source.Substring(0, $start) + $loader + [Environment]::NewLine + $source.Substring($end)
 [IO.File]::WriteAllText($path, $source, [Text.UTF8Encoding]::new($false))

@@ -93,6 +93,7 @@ public static class UncAgentControl
     {
         token.ThrowIfCancellationRequested();
         if (IsRunning) return;
+        WinFspRuntime.Check();
         if (!File.Exists(ExecutablePath)) throw new FileNotFoundException(Localization.T("UNC background application is missing."), ExecutablePath);
         using var p = DetachedProcess.Start(ExecutablePath);
         try
@@ -154,7 +155,7 @@ public static class UncAgentControl
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(UncSettings.LogPath)!);
-            File.WriteAllText(UncSettings.LogPath, DateTimeOffset.Now.ToString("O") + "\n" + error.Message);
+            File.WriteAllText(UncSettings.LogPath, DateTimeOffset.Now.ToString("O") + "\n" + error);
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

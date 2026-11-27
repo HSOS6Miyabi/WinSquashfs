@@ -17,6 +17,9 @@ try
         case ["--version"] or ["version"]:
             Console.WriteLine(typeof(Archive).Assembly.GetName().Version!.ToString(3));
             break;
+        case ["doctor"]:
+            Console.WriteLine(WinFspRuntime.Describe());
+            break;
         case ["info", var image]:
             using (var archive = new Archive(image))
                 Console.WriteLine($"{archive.Codec} {archive.BlockSize} {archive.ImageSize}");
@@ -85,7 +88,7 @@ try
             await SquashTools.UnpackAsync(image, output, Console.WriteLine);
             break;
         default:
-            Console.Error.WriteLine(Localization.T("Usage: winsqfs [--lang en-US|zh-CN|system] --version|info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."));
+            Console.Error.WriteLine(Localization.T("Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."));
             return 2;
     }
     return 0;
