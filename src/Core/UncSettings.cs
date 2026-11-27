@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-only
-using System.Diagnostics;
 using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Win32;
@@ -95,8 +94,7 @@ public static class UncAgentControl
         token.ThrowIfCancellationRequested();
         if (IsRunning) return;
         if (!File.Exists(ExecutablePath)) throw new FileNotFoundException(Localization.T("UNC background application is missing."), ExecutablePath);
-        using var p = Process.Start(new ProcessStartInfo(ExecutablePath) { UseShellExecute = false, CreateNoWindow = true })
-            ?? throw new IOException(Localization.T("Cannot start UNC background application."));
+        using var p = DetachedProcess.Start(ExecutablePath);
         try
         {
             for (int i = 0; i < 150; i++)
@@ -109,31 +107,18 @@ public static class UncAgentControl
             if (IsRunning) return;
             if (!p.HasExited)
             {
-                await TerminateStartupAsync(p);
+                p.Terminate();
                 throw new IOException(Localization.T("UNC background application did not become ready."));
             }
         }
         catch (OperationCanceledException)
         {
             if (IsRunning) return;
-            await TerminateStartupAsync(p);
+            p.Terminate();
             throw;
         }
         string error = File.Exists(UncSettings.LogPath) ? File.ReadAllText(UncSettings.LogPath) : "";
         throw new IOException(Localization.T("UNC background application could not start. {0}", error));
-    }
-
-    private static async Task TerminateStartupAsync(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill();
-                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
-            }
-        }
-        catch (InvalidOperationException) { }
     }
 
     private static bool InstanceStopped()

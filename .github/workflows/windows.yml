@@ -63,6 +63,7 @@ jobs:
           path: artifacts/screenshots/
           if-no-files-found: warn
       - name: Test packaged application and cross-language UNC communication
+        timeout-minutes: 4
         shell: pwsh
         run: |
           $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
@@ -77,6 +78,7 @@ jobs:
           & $nsis "/DPRODUCT_VERSION=$version" installer/WinSquashfs.nsi
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify installation, registry and uninstallation
+        timeout-minutes: 8
         shell: pwsh
         run: |
           $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version

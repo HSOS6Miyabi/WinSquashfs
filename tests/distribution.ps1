@@ -7,10 +7,29 @@ $AppDirectory=(Resolve-Path $AppDirectory).Path
 $cli=Join-Path $AppDirectory 'winsqfs.exe'
 [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
 function Invoke-Cli {
-    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
-    $result=& $cli @Arguments
-    if($LASTEXITCODE -ne 0){throw "winsqfs $($Arguments -join ' ') exited with $LASTEXITCODE"}
-    $result
+    $arguments=@($args)
+    $si=[Diagnostics.ProcessStartInfo]::new($cli)
+    $si.UseShellExecute=$false
+    $si.CreateNoWindow=$true
+    $si.RedirectStandardOutput=$true
+    $si.RedirectStandardError=$true
+    $si.StandardOutputEncoding=[Text.Encoding]::UTF8
+    $si.StandardErrorEncoding=[Text.Encoding]::UTF8
+    foreach($argument in $arguments){$si.ArgumentList.Add([string]$argument)}
+    $p=[Diagnostics.Process]::Start($si)
+    try {
+        $stdout=$p.StandardOutput.ReadToEndAsync()
+        $stderr=$p.StandardError.ReadToEndAsync()
+        if(!$p.WaitForExit(30000)){
+            $p.Kill($true)
+            throw "CLI timeout: $($arguments -join ' ')"
+        }
+        $result=$stdout.WaitAsync([TimeSpan]::FromSeconds(10)).GetAwaiter().GetResult()
+        $errorText=$stderr.WaitAsync([TimeSpan]::FromSeconds(10)).GetAwaiter().GetResult()
+        if($p.ExitCode -ne 0){throw "CLI exit $($p.ExitCode): $($arguments -join ' '): $errorText"}
+        $result -split '\r?\n' | Where-Object {$_ -ne ''}
+    }
+    finally {$p.Dispose()}
 }
 foreach($exe in @('WinSquashfs.exe','winsqfs.exe','WinSquashfs.Unc.exe')){
     $file=Join-Path $AppDirectory $exe
@@ -33,6 +52,7 @@ try {
     New-Item -ItemType Directory -Force $source,$settingsDirectory|Out-Null
     [IO.File]::WriteAllBytes((Join-Path $source '测试.txt'),[byte[]](0,1,2,127,255))
     $image=Join-Path $root '测试镜像.squashfs'
+    Write-Host "Testing Unicode image creation and CLI output"
     Invoke-Cli pack $source $image zstd|Out-Null
     $listing=Invoke-Cli list $image
     if($listing -notmatch '测试\.txt'){throw "Unicode list output is incorrect: $listing"}
@@ -55,12 +75,15 @@ try {
         $other=if($language -eq 'zh-CN'){'en-US'}else{'zh-CN'}
         [IO.File]::WriteAllText($languageFile,$language)
         $agentStarted=$true
+        Write-Host "Starting $language agent from $other CLI with redirected output"
         Invoke-Cli --lang $other unc-start|Out-Null
+        Write-Host "Agent started; checking both languages and UNC data"
         if((Invoke-Cli --lang en-US unc-status) -ne 'Running'){throw 'English status did not detect running agent'}
         if((Invoke-Cli --lang zh-CN unc-status) -ne '运行中'){throw 'Chinese status did not detect running agent'}
         if([Convert]::ToHexString([IO.File]::ReadAllBytes($unc)) -ne '0001027FFF'){throw 'UNC Unicode read mismatch'}
         # Change the preference while the agent is alive, as happens when the GUI language changes.
         [IO.File]::WriteAllText($languageFile,$other)
+        Write-Host "Stopping agent after language preference change"
         Invoke-Cli --lang $other unc-stop|Out-Null
         $agentStarted=$false
         if((Invoke-Cli --lang en-US unc-status) -ne 'Stopped' -or [IO.File]::Exists($unc)){throw 'Agent did not stop after language change'}
@@ -68,7 +91,7 @@ try {
     Write-Host "PASS packaged applications $Version, Unicode paths, CLI validation and cross-language UNC lifecycle"
 }
 finally {
-    if($agentStarted){& $cli --lang en-US unc-stop|Out-Null}
+    if($agentStarted){try {Invoke-Cli --lang en-US unc-stop|Out-Null}catch{Write-Warning $_.Exception.Message}}
     foreach($file in @($settingsFile,$languageFile)){
         if($backup.ContainsKey($file)){[IO.File]::WriteAllBytes($file,$backup[$file])}
         elseif(Test-Path $file){Remove-Item -LiteralPath $file -Force}
