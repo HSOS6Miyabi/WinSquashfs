@@ -80,39 +80,7 @@ try {
     $mount=[Diagnostics.Process]::Start($start)
     try {
         $drive=$mount.StandardOutput.ReadLineAsync().WaitAsync([TimeSpan]::FromSeconds(20)).GetAwaiter().GetResult()
-        if($drive -notmatch '^[A-Za-z]:\\?
-    $alias='dist-'+[guid]::NewGuid().ToString('N').Substring(0,8)
-    $settings=@{Root=$root;Alias=$alias;IncludeDrives=$false;IdleSeconds=0;MaxIdleImages=0;StartAtLogin=$false}
-    [IO.File]::WriteAllText($settingsFile,($settings|ConvertTo-Json -Compress))
-    $unc='\\sfs$\'+$alias+'\测试镜像.squashfs\测试.txt'
-    foreach($language in @('zh-CN','en-US')){
-        $other=if($language -eq 'zh-CN'){'en-US'}else{'zh-CN'}
-        [IO.File]::WriteAllText($languageFile,$language)
-        $agentStarted=$true
-        Write-Host "Starting $language agent from $other CLI with redirected output"
-        Invoke-Cli --lang $other unc-start|Out-Null
-        Write-Host "Agent started; checking both languages and UNC data"
-        if((Invoke-Cli --lang en-US unc-status) -ne 'Running'){throw 'English status did not detect running agent'}
-        if((Invoke-Cli --lang zh-CN unc-status) -ne '运行中'){throw 'Chinese status did not detect running agent'}
-        if([Convert]::ToHexString([IO.File]::ReadAllBytes($unc)) -ne '0001027FFF'){throw 'UNC Unicode read mismatch'}
-        # Change the preference while the agent is alive, as happens when the GUI language changes.
-        [IO.File]::WriteAllText($languageFile,$other)
-        Write-Host "Stopping agent after language preference change"
-        Invoke-Cli --lang $other unc-stop|Out-Null
-        $agentStarted=$false
-        if((Invoke-Cli --lang en-US unc-status) -ne 'Stopped' -or [IO.File]::Exists($unc)){throw 'Agent did not stop after language change'}
-    }
-    Write-Host "PASS packaged applications $Version, Unicode paths, CLI validation and cross-language UNC lifecycle"
-}
-finally {
-    if($agentStarted){try {Invoke-Cli --lang en-US unc-stop|Out-Null}catch{Write-Warning $_.Exception.Message}}
-    foreach($file in @($settingsFile,$languageFile)){
-        if($backup.ContainsKey($file)){[IO.File]::WriteAllBytes($file,$backup[$file])}
-        elseif(Test-Path $file){Remove-Item -LiteralPath $file -Force}
-    }
-    if(Test-Path $root){Remove-Item -LiteralPath $root -Recurse -Force}
-}
-){
+        if($drive -notmatch '^[A-Za-z]:\\?$'){
             if($mount.HasExited){throw "Mount failed: $($mount.StandardError.ReadToEnd())"}
             throw "Invalid mount point: $drive"
         }
@@ -136,39 +104,7 @@ finally {
             foreach($candidate in $item.Verbs()){
                 $name=$candidate.Name.Replace('&','').Trim()
                 $names+=$name
-                if($name -match '^(Eject \(WinSquashfs\)|弹出（WinSquashfs）)
-    $alias='dist-'+[guid]::NewGuid().ToString('N').Substring(0,8)
-    $settings=@{Root=$root;Alias=$alias;IncludeDrives=$false;IdleSeconds=0;MaxIdleImages=0;StartAtLogin=$false}
-    [IO.File]::WriteAllText($settingsFile,($settings|ConvertTo-Json -Compress))
-    $unc='\\sfs$\'+$alias+'\测试镜像.squashfs\测试.txt'
-    foreach($language in @('zh-CN','en-US')){
-        $other=if($language -eq 'zh-CN'){'en-US'}else{'zh-CN'}
-        [IO.File]::WriteAllText($languageFile,$language)
-        $agentStarted=$true
-        Write-Host "Starting $language agent from $other CLI with redirected output"
-        Invoke-Cli --lang $other unc-start|Out-Null
-        Write-Host "Agent started; checking both languages and UNC data"
-        if((Invoke-Cli --lang en-US unc-status) -ne 'Running'){throw 'English status did not detect running agent'}
-        if((Invoke-Cli --lang zh-CN unc-status) -ne '运行中'){throw 'Chinese status did not detect running agent'}
-        if([Convert]::ToHexString([IO.File]::ReadAllBytes($unc)) -ne '0001027FFF'){throw 'UNC Unicode read mismatch'}
-        # Change the preference while the agent is alive, as happens when the GUI language changes.
-        [IO.File]::WriteAllText($languageFile,$other)
-        Write-Host "Stopping agent after language preference change"
-        Invoke-Cli --lang $other unc-stop|Out-Null
-        $agentStarted=$false
-        if((Invoke-Cli --lang en-US unc-status) -ne 'Stopped' -or [IO.File]::Exists($unc)){throw 'Agent did not stop after language change'}
-    }
-    Write-Host "PASS packaged applications $Version, Unicode paths, CLI validation and cross-language UNC lifecycle"
-}
-finally {
-    if($agentStarted){try {Invoke-Cli --lang en-US unc-stop|Out-Null}catch{Write-Warning $_.Exception.Message}}
-    foreach($file in @($settingsFile,$languageFile)){
-        if($backup.ContainsKey($file)){[IO.File]::WriteAllBytes($file,$backup[$file])}
-        elseif(Test-Path $file){Remove-Item -LiteralPath $file -Force}
-    }
-    if(Test-Path $root){Remove-Item -LiteralPath $root -Recurse -Force}
-}
-){$verb=$candidate}
+                if($name -in @('Eject (WinSquashfs)','弹出（WinSquashfs）')){$verb=$candidate}
             }
             if(!$verb){throw "Eject menu missing on $drive; shell filesystem: $($item.ExtendedProperty('System.Volume.FileSystem')); verbs: $($names -join '; ')"}
             foreach($candidate in $computer.Items()){

@@ -12,6 +12,15 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Validate PowerShell script syntax
+        shell: pwsh
+        run: |
+          Get-ChildItem scripts,tests -Filter *.ps1 -Recurse | ForEach-Object {
+            $tokens=$null
+            $errors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors)
+            if($errors){throw "$($_.FullName): $($errors -join '; ')"}
+          }
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
