@@ -24,6 +24,10 @@ WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI
 
 可在资源管理器中右键点击 SquashFS 盘符，选择“弹出（WinSquashfs）”。Windows 11 可通过“显示更多选项”找到该命令。也可在挂载管理页面卸载，或执行 `winsqfs eject X:`。
 
+## 文件关联
+
+双击已关联的镜像文件，直接在资源管理器中打开其 UNC 路径。右键选择“使用 WinSquashfs 编辑”可打开图形界面。图形界面的“挂载镜像”按钮可将镜像挂载为盘符。
+
 ## UNC 访问
 
 在“UNC 访问”页面启动后台进程。启用本地磁盘映射后，可以直接通过以下路径访问镜像中的文件：
@@ -33,6 +37,10 @@ WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI
     \\sfs$\C\images\linux.squashfs\etc\os-release
 
 也可将自定义目录映射为共享名称，例如将 C:\images 映射为 path，然后使用 \\sfs$\path\linux.squashfs 访问镜像。
+
+对于网络共享上的源镜像，例如 \\nas\backup\rootfs.squashfs，可直接访问 \\sfs$\UNC\nas\backup\rootfs.squashfs。程序使用当前 Windows 用户已有的网络访问权限。
+
+UNC 访问和镜像浏览器对支持机会锁的本地文件使用 Read-Handle Oplock。其他程序请求冲突访问时，程序释放读取句柄。SMB 网络文件及不支持机会锁的文件系统采用短时读取句柄，并检查文件身份和修改信息。源文件删除、重命名、替换或修改后，程序根据变更通知及每 500 毫秒一次的补充检查释放相应镜像缓存，其他镜像及 UNC 入口保持可用。显式盘符挂载期间仍会保护源镜像。
 
 关闭主窗口后，后台进程仍可提供访问。可以设置登录时自动启动、空闲超时及空闲镜像数量上限。应用共享设置将重新启动后台进程，请先关闭正在使用的 UNC 文件。
 

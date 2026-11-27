@@ -208,6 +208,98 @@ try
     }
     Console.WriteLine("PASS corrupt block rejection, cancellation, ownership and long-name extraction");
 
+    // The retained RH oplock must yield to a conflicting open, and removal
+    // invalidates live virtual handles without closing the shared namespace.
+    var changing=Path.Combine(root,"changing");
+    Directory.CreateDirectory(changing);
+    string changingSource=Path.Combine(changing,"changing.squashfs");
+    string keepSource=Path.Combine(changing,"keep.squashfs");
+    File.Copy(Path.Combine(root,"gzip.squashfs"),changingSource);
+    File.Copy(Path.Combine(root,"zstd.squashfs"),keepSource);
+    var changingShare=new UncShare("changes-"+Guid.NewGuid().ToString("N")[..8],changing);
+    using(var session=new UncSession(new[]{changingShare},60,8))
+    {
+        string projected=Path.Combine(changingShare.UncPath,"changing.squashfs");
+        string retained=Path.Combine(changingShare.UncPath,"keep.squashfs");
+        Require(File.ReadAllText(Path.Combine(retained,"nested","hello.txt"))=="Hello SquashFS","Unrelated image not accessible");
+        using(var live=new FileStream(Path.Combine(projected,"large.bin"),FileMode.Open,FileAccess.Read,FileShare.Read,1))
+        {
+            Require(live.ReadByte()==data[0],"Initial live read failed");
+            Require(session.OplockImages>=1,"Local NTFS RH oplock was not granted");
+            // A conflicting open must complete while the projected file remains open.
+            await Task.Run(() => { using var f=File.Open(changingSource,FileMode.Open,FileAccess.ReadWrite,FileShare.None); }).WaitAsync(TimeSpan.FromSeconds(10));
+            var deadline=DateTime.UtcNow.AddSeconds(5);
+            while(session.CachedImages>1 && DateTime.UtcNow<deadline) await Task.Delay(50);
+            Require(session.CachedImages==1,"Oplock break did not release the image");
+            bool stale=false;
+            try { live.Seek(2*1024*1024,SeekOrigin.Begin); live.ReadByte(); }
+            catch(IOException) { stale=true; }
+            catch(UnauthorizedAccessException) { stale=true; }
+            Require(stale,"Invalidated handle still returned image contents");
+        }
+        using(var live=new FileStream(Path.Combine(projected,"large.bin"),FileMode.Open,FileAccess.Read,FileShare.Read,1))
+        {
+            Require(live.ReadByte()==data[0],"Image failed to reopen after oplock break");
+            await Task.Run(() => File.Delete(changingSource)).WaitAsync(TimeSpan.FromSeconds(10));
+            var deadline=DateTime.UtcNow.AddSeconds(5);
+            while(session.CachedImages>1 && DateTime.UtcNow<deadline) await Task.Delay(50);
+            Require(!File.Exists(changingSource) && session.CachedImages==1,"Source deletion did not evict active image");
+            Require(!Directory.Exists(projected),"Deleted source is still visible");
+            bool stale=false;
+            try { live.Seek(2*1024*1024,SeekOrigin.Begin); live.ReadByte(); }
+            catch(IOException) { stale=true; }
+            catch(UnauthorizedAccessException) { stale=true; }
+            Require(stale,"Deleted source remained readable");
+        }
+        File.Copy(Path.Combine(root,"zstd.squashfs"),changingSource);
+        Require(File.ReadAllBytes(Path.Combine(projected,"tiny")).SequenceEqual(tiny),"Replacement image did not open");
+        string renamed=Path.Combine(changing,"renamed.sqfs");
+        await Task.Run(() => File.Move(changingSource,renamed)).WaitAsync(TimeSpan.FromSeconds(10));
+        Require(!Directory.Exists(projected),"Renamed source remained visible");
+        Require(File.ReadAllBytes(Path.Combine(changingShare.UncPath,"renamed.sqfs","tiny")).SequenceEqual(tiny),"Renamed source failed to reopen");
+        Require(File.ReadAllText(Path.Combine(retained,"nested","hello.txt"))=="Hello SquashFS","Unrelated UNC image was invalidated");
+    }
+    Console.WriteLine("PASS RH oplock break, deletion, rename, replacement and isolated invalidation");
+
+    // The CI runner exposes an actual SMB share. The network source should
+    // not retain file handles and must invalidate active projected files.
+    string? smb=Environment.GetEnvironmentVariable("WINSQUASHFS_TEST_SMB");
+    if (!string.IsNullOrEmpty(smb))
+    {
+        string remote=Path.Combine(smb,"network.squashfs");
+        File.Copy(Path.Combine(root,"gzip.squashfs"),remote,true);
+        string projection=UncShare.NetworkNamespace.ImagePath(remote) ?? throw new Exception("Network mapping failed");
+        Require(projection.StartsWith(@"\\sfs$\UNC\",StringComparison.OrdinalIgnoreCase),"Network namespace mismatch");
+        Require(UncShare.NetworkNamespace.ImagePath(@"\\sfs$\C\recursive.sqfs")==null,"Recursive network mapping allowed");
+        using var session=new UncSession(new[]{UncShare.NetworkNamespace},60,8);
+        Require(Directory.Exists(projection),"Remote image directory missing");
+        using(var live=new FileStream(Path.Combine(projection,"large.bin"),FileMode.Open,FileAccess.Read,FileShare.Read,1))
+        {
+            live.Seek(131071,SeekOrigin.Begin);
+            byte[] got=new byte[17001];
+            live.ReadExactly(got);
+            Require(got.SequenceEqual(data.AsSpan(131071,got.Length).ToArray()),"SMB random read mismatch");
+            Require(session.OplockImages==0,"SMB source unexpectedly retained an oplock");
+            // An exclusive open of the original file succeeds while the
+            // projected handle is open, because idle SMB handles are closed.
+            using(var exclusive=File.Open(remote,FileMode.Open,FileAccess.Read,FileShare.None)) { }
+            await Task.Run(() => File.Delete(remote)).WaitAsync(TimeSpan.FromSeconds(10));
+            var deadline=DateTime.UtcNow.AddSeconds(5);
+            while(session.CachedImages!=0 && DateTime.UtcNow<deadline) await Task.Delay(50);
+            Require(!File.Exists(remote) && session.CachedImages==0,"SMB deletion did not invalidate image");
+            Require(!Directory.Exists(projection),"Deleted SMB source remained visible");
+            bool stale=false;
+            try { live.Seek(2*1024*1024,SeekOrigin.Begin); live.ReadByte(); }
+            catch(IOException) { stale=true; }
+            catch(UnauthorizedAccessException) { stale=true; }
+            Require(stale,"Stale SMB handle still readable");
+        }
+        File.Copy(Path.Combine(root,"zstd.squashfs"),remote);
+        Require(File.ReadAllBytes(Path.Combine(projection,"tiny")).SequenceEqual(tiny),"SMB replacement image did not reopen");
+        File.Delete(remote);
+        Console.WriteLine("PASS actual SMB source, random reads, no idle source handles and deletion");
+    }
+
     var bad=Path.Combine(root,"bad.squashfs");
     File.WriteAllBytes(bad,new byte[96]);
     bool rejected=false;

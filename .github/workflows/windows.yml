@@ -48,8 +48,20 @@ jobs:
           dotnet publish tests/Integration/Integration.csproj -c Release -r win-x64 --self-contained true -o artifacts/test
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Copy-Item artifacts/native/* artifacts/test -Recurse -Force
-          & ./artifacts/test/Integration.exe
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $smbRoot=Join-Path $env:TEMP ('WinSquashfsSMB-'+[guid]::NewGuid().ToString('N'))
+          $smbName='WinSquashfsCI-'+[guid]::NewGuid().ToString('N').Substring(0,8)
+          New-Item -ItemType Directory $smbRoot | Out-Null
+          $identity=[Security.Principal.WindowsIdentity]::GetCurrent().Name
+          New-SmbShare -Name $smbName -Path $smbRoot -FullAccess $identity -CachingMode None | Out-Null
+          try {
+            $env:WINSQUASHFS_TEST_SMB="\\localhost\$smbName"
+            if (!(Test-Path $env:WINSQUASHFS_TEST_SMB)) { throw 'SMB test share is not accessible' }
+            & ./artifacts/test/Integration.exe
+            if ($LASTEXITCODE) { throw "Integration test exit $LASTEXITCODE" }
+          } finally {
+            Remove-SmbShare -Name $smbName -Force -Confirm:$false
+            Remove-Item $smbRoot -Recurse -Force
+          }
       - name: English WinUI end-to-end automation
         shell: powershell
         run: ./tests/ui.ps1 -AppDirectory (Resolve-Path artifacts/dist).Path -Language en-US

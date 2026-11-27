@@ -1,25 +1,17 @@
-# WinSquashfs v0.1.1
+# WinSquashfs v0.1.2
 
-Windows x64 maintenance release.
+- The default file association opens images directly in Explorer through the UNC namespace. Edit opens the graphical image browser.
+- Remote source images can be opened through \\sfs$\UNC\server\share\path\image.squashfs.
+- Local UNC image sources use Read-Handle oplocks when available. Network and unsupported filesystems use short-lived read handles with file identity checks.
+- Removing, renaming, replacing or modifying an image invalidates its cached contents, even when virtual handles remain open.
+- The Mount image button uses the system accent color.
 
-- Requires WinFsp 2026 (2.2.26323) or a later compatible 2.x runtime. The installer upgrades older installations and includes the official WinFsp MSI.
-- Loads the native WinFsp DLL from its registered installation directory, checks its version, and reports detailed initialization failures.
-- Adds a WinFsp runtime diagnostic in the GUI and the winsqfs doctor command.
-- The portable distribution includes prerequisites/WinFsp.msi for offline driver installation.
-- Adds an Explorer drive context-menu eject command and synchronized GUI/CLI unmounting.
+## 简体中文
 
-## Downloads
+- 双击已关联的镜像文件直接在资源管理器中打开 UNC 路径，编辑命令打开图形界面。
+- 支持通过 \\sfs$\UNC\服务器\共享名\路径 访问网络镜像。
+- 支持本地机会锁自动释放；网络文件及不支持机会锁的文件系统采用短时读取句柄和文件身份校验。
+- 源文件删除、重命名、替换或修改时，自动释放对应镜像缓存。
+- 使用系统强调色高亮“挂载镜像”按钮。
 
-- **WinSquashfs-Setup-x64.exe**: includes the application and WinFsp installer.
-- **WinSquashfs-portable-x64.zip**: includes the application and the prerequisite MSI.
-- **SHA256SUMS.txt**: SHA-256 checksums for both distributions.
-
-Windows 10 version 1809 or later is required. The application binaries are not Authenticode-signed.
-
-# 简体中文
-
-Windows x64 维护版本。安装程序会检查 WinFsp 运行时版本，并在需要时安装或升级至 WinFsp 2026（2.2.26323）。便携版内含 prerequisites\WinFsp.msi，可离线安装。
-
-程序从 WinFsp 的注册安装目录加载匹配的原生 DLL，并在运行时初始化失败时显示详细信息。可通过“工具与关于 → 检查 WinFsp 运行时”或 winsqfs doctor 查看安装情况。已挂载的 SquashFS 卷可通过资源管理器右键菜单弹出，挂载管理界面会同步更新。
-
-发布文件包括安装程序、便携版 ZIP 和 SHA-256 校验文件。最低支持 Windows 10 1809，应用程序二进制文件尚未进行 Authenticode 签名。
+Windows x64. WinFsp 2.2.26323 or a compatible newer 2.x runtime is required for mounting and UNC access. The installer and portable distribution include the runtime installer.

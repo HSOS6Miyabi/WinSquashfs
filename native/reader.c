@@ -181,13 +181,40 @@ API void ws_close(image_t *im) {
     free(im);
 }
 
-API int ws_open(const char *path, image_t **out) {
+typedef int (*source_read_t)(sqfs_u64 offset, void *buffer, size_t size);
+typedef struct {
+    sqfs_file_t base;
+    source_read_t read;
+    sqfs_u64 size;
+} source_file_t;
+
+static void source_destroy(sqfs_object_t *obj) { free(obj); }
+static sqfs_object_t *source_copy(const sqfs_object_t *obj) {
+    source_file_t *copy = malloc(sizeof(*copy));
+    if (copy) memcpy(copy, obj, sizeof(*copy));
+    return (sqfs_object_t *)copy;
+}
+static int source_read_at(sqfs_file_t *base, sqfs_u64 offset, void *buffer, size_t size) {
+    source_file_t *file = (source_file_t *)base;
+    if (offset > file->size || size > file->size - offset) return SQFS_ERROR_OUT_OF_BOUNDS;
+    return size ? file->read(offset, buffer, size) : 0;
+}
+static int source_write_at(sqfs_file_t *base, sqfs_u64 offset, const void *buffer, size_t size) {
+    (void)base; (void)offset; (void)buffer; (void)size;
+    return SQFS_ERROR_UNSUPPORTED;
+}
+static sqfs_u64 source_size(const sqfs_file_t *base) { return ((const source_file_t *)base)->size; }
+static int source_truncate(sqfs_file_t *base, sqfs_u64 size) {
+    (void)base; (void)size; return SQFS_ERROR_UNSUPPORTED;
+}
+
+static int open_image(sqfs_file_t *file, image_t **out) {
     *out = NULL;
+    if (!file) return SQFS_ERROR_IO;
     int rc = SQFS_ERROR_ALLOC;
     image_t *im = calloc(1, sizeof(*im));
-    if (!im) return rc;
-    im->file = sqfs_open_file(path, SQFS_FILE_OPEN_READ_ONLY);
-    if (!im->file) { rc = SQFS_ERROR_IO; goto fail; }
+    if (!im) { sqfs_destroy(file); return rc; }
+    im->file = file;
     rc = sqfs_super_read(&im->super, im->file);
     if (rc) goto fail;
     if (im->super.bytes_used > im->file->get_size(im->file) ||
@@ -232,6 +259,26 @@ API int ws_open(const char *path, image_t **out) {
 fail:
     ws_close(im);
     return rc;
+}
+
+API int ws_open(const char *path, image_t **out) {
+    return open_image(sqfs_open_file(path, SQFS_FILE_OPEN_READ_ONLY), out);
+}
+
+API int ws_open_source(sqfs_u64 size, source_read_t read, image_t **out) {
+    *out = NULL;
+    if (!read) return SQFS_ERROR_ARG_INVALID;
+    source_file_t *file = calloc(1, sizeof(*file));
+    if (!file) return SQFS_ERROR_ALLOC;
+    file->base.base.destroy = source_destroy;
+    file->base.base.copy = source_copy;
+    file->base.read_at = source_read_at;
+    file->base.write_at = source_write_at;
+    file->base.get_size = source_size;
+    file->base.truncate = source_truncate;
+    file->read = read;
+    file->size = size;
+    return open_image(&file->base, out);
 }
 
 API const sqfs_tree_node_t *ws_root(image_t *im) { return im->root; }

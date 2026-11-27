@@ -115,7 +115,7 @@ public sealed partial class MainWindow
         {
             var settings = UncSettings.Load();
             var shares = settings.Shares();
-            UncShares.Text = string.Join(Environment.NewLine, shares.Select(s => s.UncPath + "  →  " + s.Root));
+            UncShares.Text = string.Join(Environment.NewLine, shares.Select(s => s.UncPath + "  →  " + (s.IsNetworkNamespace ? Localization.T("Network shares") : s.Root)));
             UncImagePathBox.Text = uncTargetPath == null ? "" : shares.Select(s => s.ImagePath(uncTargetPath)).FirstOrDefault(s => s != null) ?? "";
         }
         catch (Exception ex)
@@ -174,12 +174,7 @@ public sealed partial class MainWindow
         await RunAsync(Localization.T("Opening image via UNC…"), async token =>
         {
             uncTargetPath = Path.GetFullPath(path);
-            var settings = UncSettings.Load();
-            string unc = settings.GetImagePath(uncTargetPath) ?? throw new IOException(Localization.T("Image is outside the configured UNC shares. Configure a local directory or enable local drives."));
-            await UncAgentControl.StartAsync(token);
-            if (!await Task.Run(() => Directory.Exists(unc), token))
-                throw new IOException(Localization.T("The image cannot be opened through its UNC path: {0}", unc));
-            Process.Start(new ProcessStartInfo(unc) { UseShellExecute = true });
+            await UncLauncher.OpenAsync(uncTargetPath, token);
         });
     }
 }

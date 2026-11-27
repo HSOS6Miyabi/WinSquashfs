@@ -206,11 +206,12 @@ public sealed partial class MainWindow : Window
     {
         await RunAsync(Localization.T("Reading image metadata…"), async token =>
         {
-            var next = await Task.Run(() => new Archive(path), token);
+            var next = await Task.Run(() => Archive.OpenForBrowsing(path), token);
             if (token.IsCancellationRequested) { next.Dispose(); token.ThrowIfCancellationRequested(); }
             ++previewGeneration;
             archive?.Dispose();
             archive = next;
+            next.SourceInvalidated += () => DispatcherQueue.TryEnqueue(() => CloseInvalidImage(next));
             uncTargetPath = next.Path;
             current = next.Root;
             RecentImages.Add(next.Path);
@@ -219,7 +220,16 @@ public sealed partial class MainWindow : Window
             SearchBox.Text = "";
             Navigation.SelectedItem = BrowseNav;
             RefreshEntries();
+            if (!next.SourceValid) CloseInvalidImage(next);
         });
+    }
+
+    private void CloseInvalidImage(Archive image)
+    {
+        if (!ReferenceEquals(archive, image)) return;
+        operation?.Cancel();
+        CloseImage();
+        StatusText.Text = Localization.T("The source image was removed, replaced or modified.");
     }
 
     private void RefreshEntries()
@@ -255,7 +265,11 @@ public sealed partial class MainWindow : Window
 
     private void CloseImageClicked(object sender, RoutedEventArgs e)
     {
-        if (operation != null) return;
+        if (operation == null) CloseImage();
+    }
+
+    private void CloseImage()
+    {
         ++previewGeneration;
         archive?.Dispose();
         archive = null;

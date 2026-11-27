@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
+using System.Collections.Concurrent;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Security.Cryptography;
@@ -9,14 +10,38 @@ using VolumeInfo = Fsp.Interop.VolumeInfo;
 
 namespace WinSquashfs.Core;
 
-public sealed record UncShare(string Name, string Root)
+public sealed record UncShare(string Name, string Root, bool IsNetworkNamespace = false)
 {
     public const string ServerName = "sfs$";
+    public const string NetworkShareName = "UNC";
+    public static UncShare NetworkNamespace => new(NetworkShareName, @"\\", true);
     public string Prefix => "\\" + ServerName + "\\" + Name;
     public string UncPath => "\\" + Prefix;
 
+    internal static string? NormalizeNetworkPath(string path)
+    {
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            path = @"\\" + path[8..];
+        if (!path.StartsWith(@"\\", StringComparison.Ordinal) ||
+            path.StartsWith(@"\\?\", StringComparison.Ordinal) ||
+            path.StartsWith(@"\\.\", StringComparison.Ordinal)) return null;
+        string full = Path.GetFullPath(path);
+        var parts = full[2..].Split('\\', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2 || parts.Any(p => !UncFileSystem.SafeComponent(p)) ||
+            string.Equals(parts[0], ServerName, StringComparison.OrdinalIgnoreCase)) return null;
+        return @"\\" + string.Join("\\", parts);
+    }
+
     public UncShare Validate()
     {
+        if (IsNetworkNamespace)
+        {
+            if (Name != NetworkShareName || Root != @"\\")
+                throw new ArgumentException(Localization.T("Invalid network namespace."));
+            return this;
+        }
+        if (string.Equals(Name, NetworkShareName, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException(Localization.T("The UNC share name is reserved for network sources."));
         if (string.IsNullOrWhiteSpace(Name) || Name.Length > 64 ||
             !Name.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
             throw new ArgumentException(Localization.T("Share name must contain 1–64 ASCII letters, digits, underscores or hyphens."));
@@ -35,6 +60,12 @@ public sealed record UncShare(string Name, string Root)
     }
     public string? ImagePath(string image)
     {
+        if (IsNetworkNamespace)
+        {
+            var network = NormalizeNetworkPath(image);
+            if (network == null || !UncFileSystem.IsImageName(network)) return null;
+            return UncPath + "\\" + network[2..];
+        }
         var relative = Path.GetRelativePath(Root, Path.GetFullPath(image));
         if (relative == "." || Path.IsPathRooted(relative) || relative == ".." ||
             relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return null;
@@ -55,6 +86,7 @@ internal sealed class UncFileSystem : FileSystemBase
     private readonly byte[] security;
     private readonly LocalReadIdentity readIdentity;
     private static readonly StringComparer Compare = StringComparer.OrdinalIgnoreCase;
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> networkShares = new(Compare);
 
     private sealed class Node : IDisposable
     {
@@ -62,9 +94,11 @@ internal sealed class UncFileSystem : FileSystemBase
         internal readonly string PhysicalPath;
         internal readonly Entry? Entry;
         internal readonly ImageCache.Lease? Lease;
+        internal readonly bool Virtual;
+        internal void EnsureValid() => Lease?.Image.EnsureSourceValid();
         internal bool Directory => Entry == null || Entry.IsDirectory;
-        internal Node(string name, string physicalPath, Entry? entry = null, ImageCache.Lease? lease = null)
-        { Name = name; PhysicalPath = physicalPath; Entry = entry; Lease = lease; }
+        internal Node(string name, string physicalPath, Entry? entry = null, ImageCache.Lease? lease = null, bool virtualDirectory = false)
+        { Name = name; PhysicalPath = physicalPath; Entry = entry; Lease = lease; Virtual = virtualDirectory; }
         public void Dispose() => Lease?.Dispose();
     }
     private sealed record Row(string Name, FileInfo Info);
@@ -82,17 +116,20 @@ internal sealed class UncFileSystem : FileSystemBase
     }
 
     internal static bool IsImageName(string name) => Path.GetExtension(name).ToLowerInvariant() is ".squashfs" or ".sqfs" or ".sfs";
-    private static bool SafeComponent(string part) =>
+    internal static bool SafeComponent(string part) =>
         part.Length is > 0 and <= 255 && part != "." && part != ".." &&
         !part.EndsWith('.') && !part.EndsWith(' ') && part.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 &&
         part.IndexOf(':') < 0;
 
     private Node? Resolve(string name) => readIdentity.Run(() => ResolveCore(name));
 
-    private static bool IsPlainPath(string path)
+    internal static bool IsPlainPath(string path)
     {
+        string? networkRoot = path.StartsWith(@"\\", StringComparison.Ordinal) ? Path.GetPathRoot(path) : null;
         for (string? p = path; p != null; p = Path.GetDirectoryName(p))
         {
+            if (networkRoot != null && Compare.Equals(Path.TrimEndingDirectorySeparator(p),
+                    Path.TrimEndingDirectorySeparator(networkRoot))) return Directory.Exists(networkRoot);
             var attr = File.GetAttributes(p);
             if ((attr & FileAttributes.ReparsePoint) != 0) return false;
         }
@@ -101,12 +138,25 @@ internal sealed class UncFileSystem : FileSystemBase
 
     private Node? ResolveCore(string name)
     {
-        if (!IsPlainPath(share.Root)) return null;
         var parts = name.Split('\\', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Any(p => !SafeComponent(p))) return null;
         string physical = share.Root;
         string normalized = "";
-        for (int i = 0; i < parts.Length; i++)
+        int start = 0;
+        if (share.IsNetworkNamespace)
+        {
+            if (parts.Length == 0) return new Node("\\", share.Root, virtualDirectory: true);
+            if (Compare.Equals(parts[0], UncShare.ServerName)) return null;
+            if (parts.Length == 1) return new Node("\\" + parts[0], @"\\" + parts[0], virtualDirectory: true);
+            physical = @"\\" + parts[0] + "\\" + parts[1];
+            normalized = "\\" + parts[0] + "\\" + parts[1];
+            if (!Directory.Exists(physical)) return null;
+            var known = networkShares.GetOrAdd(parts[0], _ => new ConcurrentDictionary<string, byte>(Compare));
+            known.TryAdd(parts[1], 0);
+            start = 2;
+        }
+        else if (!IsPlainPath(share.Root)) return null;
+        for (int i = start; i < parts.Length; i++)
         {
             physical = Path.Combine(physical, parts[i]);
             FileAttributes attributes;
@@ -117,9 +167,10 @@ internal sealed class UncFileSystem : FileSystemBase
             normalized += "\\" + parts[i];
             if ((attributes & FileAttributes.Directory) != 0) continue;
             if (!IsImageName(parts[i])) return null;
-            var lease = cache.Acquire(physical);
+            var lease = cache.Acquire(physical, readIdentity);
             try
             {
+                lease.Image.EnsureSourceValid();
                 var entry = lease.Image.Find(string.Join("\\", parts.Skip(i + 1)));
                 if (entry == null || (!entry.IsDirectory && !entry.IsFile))
                 { lease.Dispose(); return null; }
@@ -152,7 +203,19 @@ internal sealed class UncFileSystem : FileSystemBase
             IndexNumber = Index(path, entry.Parent == null ? 0 : entry.Inode)
         };
     }
-    private FileInfo Info(Node node) => node.Entry == null ? readIdentity.Run(() => DirectoryInfoFor(node.PhysicalPath)) : ArchiveInfo(node.PhysicalPath, node.Entry);
+    private static FileInfo VirtualInfo(string path)
+    {
+        return new FileInfo { FileAttributes = 0x11, IndexNumber = Index(path) };
+    }
+    private FileInfo Info(Node node)
+    {
+        node.EnsureValid();
+        if (node.Virtual) return VirtualInfo(node.PhysicalPath);
+        if (node.Entry != null) return ArchiveInfo(node.PhysicalPath, node.Entry);
+        if (share.IsNetworkNamespace && node.Name.Count(c => c == '\\') == 2)
+            return VirtualInfo(node.PhysicalPath);
+        return readIdentity.Run(() => DirectoryInfoFor(node.PhysicalPath));
+    }
 
     public override int Init(object host)
     {
@@ -180,7 +243,7 @@ internal sealed class UncFileSystem : FileSystemBase
     public override int GetVolumeInfo(out VolumeInfo info)
     {
         info = default;
-        try { info.TotalSize = (ulong)new DriveInfo(Path.GetPathRoot(share.Root)!).TotalSize; }
+        try { info.TotalSize = share.IsNetworkNamespace ? 0UL : (ulong)new DriveInfo(Path.GetPathRoot(share.Root)!).TotalSize; }
         catch { info.TotalSize = 0; }
         info.FreeSize = 0; info.SetVolumeLabel("SquashFS"); return STATUS_SUCCESS;
     }
@@ -214,12 +277,13 @@ internal sealed class UncFileSystem : FileSystemBase
     public override int GetFileInfo(object node, object desc, out FileInfo info)
     { info = Info((Node)node); return STATUS_SUCCESS; }
     public override int GetSecurity(object node, object desc, ref byte[] descriptor)
-    { descriptor = (byte[])security.Clone(); return STATUS_SUCCESS; }
+    { ((Node)node).EnsureValid(); descriptor = (byte[])security.Clone(); return STATUS_SUCCESS; }
 
     public override int Read(object node, object desc, IntPtr buffer, ulong offset, uint length, out uint transferred)
     {
         transferred = 0;
         var n = (Node)node;
+        n.EnsureValid();
         if (n.Entry?.IsFile != true || n.Lease == null) return IsDirectory;
         if (length == 0) return STATUS_SUCCESS;
         if (offset >= n.Entry.Size) return STATUS_END_OF_FILE;
@@ -231,6 +295,25 @@ internal sealed class UncFileSystem : FileSystemBase
 
     private IEnumerable<Row> ListCore(Node dir)
     {
+        dir.EnsureValid();
+        if (dir.Virtual)
+        {
+            if (dir.Name == "\\")
+            {
+                foreach (var server in networkShares.Keys)
+                    yield return new Row(server, VirtualInfo(@"\" + server));
+            }
+            else
+            {
+                yield return new Row(".", Info(dir));
+                yield return new Row("..", VirtualInfo("\\"));
+                string server = dir.Name.TrimStart('\\');
+                if (networkShares.TryGetValue(server, out var known))
+                    foreach (var name in known.Keys)
+                        yield return new Row(name, VirtualInfo(dir.Name + "\\" + name));
+            }
+            yield break;
+        }
         if (dir.Entry == null && !IsPlainPath(dir.PhysicalPath)) throw new UnauthorizedAccessException(Localization.T("Directory is a reparse point."));
         if (dir.Name != "\\")
         {
@@ -238,7 +321,12 @@ internal sealed class UncFileSystem : FileSystemBase
             if (dir.Entry?.Parent != null)
                 yield return new Row("..", ArchiveInfo(dir.PhysicalPath, dir.Entry.Parent));
             else
-                yield return new Row("..", DirectoryInfoFor(Path.GetDirectoryName(dir.PhysicalPath) ?? share.Root));
+            {
+                string parent = Path.GetDirectoryName(dir.PhysicalPath) ?? share.Root;
+                bool virtualParent = share.IsNetworkNamespace && (dir.Name.Count(c => c == '\\') == 2 ||
+                    Compare.Equals(Path.TrimEndingDirectorySeparator(parent), Path.TrimEndingDirectorySeparator(Path.GetPathRoot(dir.PhysicalPath)!)));
+                yield return new Row("..", virtualParent ? VirtualInfo(parent) : DirectoryInfoFor(parent));
+            }
         }
         if (dir.Entry != null)
         {
@@ -262,6 +350,7 @@ internal sealed class UncFileSystem : FileSystemBase
     {
         name = null!; info = default;
         var n = (Node)node;
+        n.EnsureValid();
         if (!n.Directory) return false;
         if (context is not IEnumerator<Row> iterator)
         {
@@ -307,6 +396,7 @@ public sealed class UncSession : IDisposable
     public IReadOnlyList<UncShare> Shares { get; }
     public int CachedImages => cache.Count;
     public int ActiveImages => cache.ActiveCount;
+    public int OplockImages => cache.OplockCount;
 
     public UncSession(IEnumerable<UncShare> shares, int idleSeconds = 60, int maxIdleImages = 8)
     {

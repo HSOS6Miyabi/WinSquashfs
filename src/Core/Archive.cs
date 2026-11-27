@@ -16,6 +16,8 @@ internal static partial class Native
 {
     private const string Dll = "winsqfs-native";
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] internal static extern int ws_open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, out ImageHandle image);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)] internal delegate int SourceRead(ulong offset, IntPtr buffer, nuint length);
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] internal static extern int ws_open_source(ulong size, SourceRead read, out ImageHandle image);
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] internal static extern void ws_close(IntPtr image);
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ws_root(ImageHandle image);
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)] internal static extern IntPtr ws_child(IntPtr node);
@@ -102,6 +104,8 @@ public sealed record ArchiveVerification(long Files, ulong Bytes);
 public sealed class Archive : IDisposable
 {
     private readonly ImageHandle handle;
+    private readonly VolatileImageSource? source;
+    private readonly LocalReadIdentity? ownedIdentity;
     private readonly object gate = new();
     private bool disposed;
     public string Path { get; }
@@ -111,13 +115,34 @@ public sealed class Archive : IDisposable
     public uint Compression { get; }
     public string Codec => Compression switch { 1 => "gzip", 2 => "lzma", 3 => "lzo", 4 => "xz", 5 => "lz4", 6 => "zstd", _ => "Unknown" };
 
-    public Archive(string path)
+    public bool SourceValid => source?.Valid != false;
+    internal bool UsesOplock => source?.UsesOplock == true;
+    public event Action? SourceInvalidated
     {
+        add { if (source != null) source.Invalidated += value; }
+        remove { if (source != null) source.Invalidated -= value; }
+    }
+    internal void EnsureSourceValid() => source?.EnsureValid();
+
+    public Archive(string path) : this(path, null) { }
+
+    public static Archive OpenForBrowsing(string path) => new(path, new LocalReadIdentity(), true);
+
+    internal Archive(string path, LocalReadIdentity? readIdentity, bool ownsIdentity = false)
+    {
+        ownedIdentity = ownsIdentity ? readIdentity : null;
         Path = System.IO.Path.GetFullPath(path);
-        int status = Native.ws_open(Path, out handle);
-        if (status != 0) { handle?.Dispose(); throw new IOException(Localization.T("Cannot open SquashFS image (error {0}).", status)); }
         try
         {
+            if (readIdentity != null)
+            {
+                source = new VolatileImageSource(Path, readIdentity);
+                source.BeginRead();
+            }
+            int status = source == null ? Native.ws_open(Path, out handle) :
+                Native.ws_open_source(source.Size, source.Reader, out handle);
+            source?.EnsureValid();
+            if (status != 0) throw new IOException(Localization.T("Cannot open SquashFS image (error {0}).", status));
             ImageSize = Native.ws_image_size(handle); BlockSize = Native.ws_block_size(handle); Compression = Native.ws_compression(handle);
             Root = new Entry(Native.ws_root(handle), null);
             var pending = new Stack<Entry>();
@@ -136,8 +161,10 @@ public sealed class Archive : IDisposable
                 }
                 parent.ChildList.Sort((a,b) => StringComparer.OrdinalIgnoreCase.Compare(a.WindowsName,b.WindowsName));
             }
+            source?.CheckRead();
         }
-        catch { handle.Dispose(); throw; }
+        catch { handle?.Dispose(); source?.Dispose(); ownedIdentity?.Dispose(); throw; }
+        finally { source?.EndRead(); }
     }
 
     public Entry? Find(string path)
@@ -155,6 +182,7 @@ public sealed class Archive : IDisposable
     {
         lock (gate)
         {
+            source?.EnsureValid();
             ObjectDisposedException.ThrowIf(disposed, this);
             if (!entry.IsFile) throw new IOException(Localization.T("Not a regular file."));
             var owner = entry;
@@ -162,9 +190,16 @@ public sealed class Archive : IDisposable
             if (!ReferenceEquals(owner, Root)) throw new ArgumentException(Localization.T("Entry belongs to another image."));
             if (offset >= entry.Size || length == 0) return 0;
             length = (uint)Math.Min((ulong)length, entry.Size - offset);
-            int result = Native.ws_read(handle, entry.Pointer, offset, buffer, length);
-            if (result < 0) throw new IOException(Localization.T("SquashFS read failed (error {0}).", result));
-            return result;
+            source?.BeginRead();
+            try
+            {
+                int result = Native.ws_read(handle, entry.Pointer, offset, buffer, length);
+                source?.EnsureValid();
+                if (result < 0) throw new IOException(Localization.T("SquashFS read failed (error {0}).", result));
+                source?.CheckRead();
+                return result;
+            }
+            finally { source?.EndRead(); }
         }
     }
 
@@ -287,6 +322,6 @@ public sealed class Archive : IDisposable
 
     public void Dispose()
     {
-        lock (gate) { if (!disposed) { disposed = true; handle.Dispose(); } }
+        lock (gate) { if (!disposed) { disposed = true; try { handle.Dispose(); } finally { try { source?.Dispose(); } finally { ownedIdentity?.Dispose(); } } } }
     }
 }

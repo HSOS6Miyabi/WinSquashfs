@@ -32,27 +32,67 @@ internal sealed class ImageCache : IDisposable
         if (maxIdleImages is < 0 or > 1024) throw new ArgumentOutOfRangeException(nameof(maxIdleImages));
         idleMilliseconds = idleSeconds * 1000L;
         maxIdle = maxIdleImages;
-        timer = new Timer(_ => { lock (sync) { if (!disposed) Sweep(); } }, null, 1000, 1000);
+        timer = new Timer(_ => Sweep(), null, 500, 500);
     }
 
     internal int Count { get { lock (sync) return images.Count; } }
     internal int ActiveCount { get { lock (sync) return images.Values.Count(x => x.References > 0); } }
+    internal int OplockCount { get { lock (sync) return images.Values.Count(x => x.Image.UsesOplock); } }
 
-    internal Lease Acquire(string path)
+    internal Lease Acquire(string path, LocalReadIdentity identity)
     {
         path = Path.GetFullPath(path);
+        Sweep();
         lock (sync)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            Sweep();
-            if (!images.TryGetValue(path, out var cached))
+            if (images.TryGetValue(path, out var existing) && existing.Image.SourceValid)
             {
-                cached = new Cached(new Archive(path));
-                images.Add(path, cached);
+                checked { existing.References++; }
+                return new Lease(this, existing);
             }
-            checked { cached.References++; }
-            return new Lease(this, cached);
         }
+
+        // Opening a remote source can block on the network. Do not hold the
+        // cache lock while loading its metadata or closing source handles.
+        var image = new Archive(path, identity);
+        Cached candidate = new(image);
+        Cached? displaced = null;
+        bool keep = false;
+        try
+        {
+            lock (sync)
+            {
+                ObjectDisposedException.ThrowIf(disposed, this);
+                if (images.TryGetValue(path, out var existing) && existing.Image.SourceValid)
+                {
+                    checked { existing.References++; }
+                    return new Lease(this, existing);
+                }
+                image.SourceInvalidated += () => RemoveInvalid(path, candidate);
+                image.EnsureSourceValid();
+                if (images.TryGetValue(path, out displaced)) images.Remove(path);
+                candidate.References = 1;
+                images.Add(path, candidate);
+                keep = true;
+                return new Lease(this, candidate);
+            }
+        }
+        finally
+        {
+            if (!keep) image.Dispose();
+            displaced?.Image.Dispose();
+        }
+    }
+    private void RemoveInvalid(string path, Cached generation)
+    {
+        bool removed;
+        lock (sync)
+        {
+            removed = images.TryGetValue(path, out var current) && ReferenceEquals(current, generation);
+            if (removed) images.Remove(path);
+        }
+        if (removed) generation.Image.Dispose();
     }
     private void Release(Cached cached)
     {
@@ -60,31 +100,44 @@ internal sealed class ImageCache : IDisposable
         {
             if (disposed) return;
             if (--cached.References == 0) cached.Released = Environment.TickCount64;
-            Sweep();
         }
+        Sweep();
     }
     private void Sweep()
     {
-        long now = Environment.TickCount64;
-        var idle = images.Where(p => p.Value.References == 0).OrderBy(p => p.Value.Released).ToArray();
-        int remaining = idle.Length;
-        foreach (var pair in idle)
+        var remove = new List<Cached>();
+        lock (sync)
         {
-            if (now - pair.Value.Released < idleMilliseconds && remaining <= maxIdle) break;
-            images.Remove(pair.Key);
-            pair.Value.Image.Dispose();
-            remaining--;
+            if (disposed) return;
+            foreach (var pair in images.Where(p => !p.Value.Image.SourceValid).ToArray())
+            {
+                images.Remove(pair.Key);
+                remove.Add(pair.Value);
+            }
+            long now = Environment.TickCount64;
+            var idle = images.Where(p => p.Value.References == 0).OrderBy(p => p.Value.Released).ToArray();
+            int remaining = idle.Length;
+            foreach (var pair in idle)
+            {
+                if (now - pair.Value.Released < idleMilliseconds && remaining <= maxIdle) break;
+                images.Remove(pair.Key);
+                remove.Add(pair.Value);
+                remaining--;
+            }
         }
+        foreach (var item in remove) item.Image.Dispose();
     }
     public void Dispose()
     {
         timer.Dispose();
+        Cached[] remaining;
         lock (sync)
         {
             if (disposed) return;
             disposed = true;
-            foreach (var item in images.Values) item.Image.Dispose();
+            remaining = images.Values.ToArray();
             images.Clear();
         }
+        foreach (var item in remaining) item.Image.Dispose();
     }
 }

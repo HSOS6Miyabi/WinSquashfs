@@ -45,6 +45,18 @@ public partial class App : Application
         try
         {
             string[] commandLine = Environment.GetCommandLineArgs().Skip(1).ToArray();
+            if (commandLine is ["--unc", var image])
+            {
+                try { await UncLauncher.OpenAsync(image); }
+                catch (Exception ex)
+                {
+                    RecordException(ex);
+                    MessageBox(IntPtr.Zero, ex.Message, "WinSquashfs", 0x10);
+                    Environment.ExitCode = 1;
+                }
+                Exit();
+                return;
+            }
             if (commandLine is ["--eject", var drive])
             {
                 try { await MountEject.RequestAsync(drive); }

@@ -51,7 +51,7 @@
       <Button x:Name="EnterButton" Click="EnterClicked" Content="{StaticResource L_Open_folder}" AutomationProperties.AutomationId="OpenFolder"/>
       <Button x:Name="ExtractButton" Click="ExtractSelectedClicked" Content="{StaticResource L_Extract_selected}" AutomationProperties.AutomationId="ExtractSelected"/>
       <Button x:Name="ExtractAllButton" Click="ExtractAllClicked" Content="{StaticResource L_Extract_all}" AutomationProperties.AutomationId="ExtractAll"/>
-      <Button x:Name="MountButton" Click="MountClicked" Content="{StaticResource L_Mount_image}" AutomationProperties.AutomationId="MountImage"/>
+      <Button x:Name="MountButton" Style="{StaticResource AccentButtonStyle}" Click="MountClicked" Content="{StaticResource L_Mount_image}" AutomationProperties.AutomationId="MountImage"/>
       <Button x:Name="VerifyButton" Click="VerifyClicked" Content="{StaticResource L_Verify}" ToolTipService.ToolTip="{StaticResource L_Read_every_file_and_verify_image_readability}" AutomationProperties.AutomationId="VerifyImage"/>
      </StackPanel>
      <Grid Grid.Row="3" ColumnDefinitions="3*,2*" ColumnSpacing="12">

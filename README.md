@@ -32,6 +32,10 @@ Open an image from the browser or Explorer. Select files for previews or extract
 
 Create image accepts a source directory and a new output path. Zstandard is the default. Advanced parameters are optional. Files with Windows-incompatible names receive deterministic Windows-safe names; the browser preserves the original names for display. Linux symbolic links, sockets and devices are listed as metadata; they are omitted from the mounted filesystem and Windows-safe extraction. The original unsquashfs executable is available for Linux-oriented extraction behavior.
 
+## File associations
+
+Double-click an associated image to open its UNC directory directly in Explorer. The **Edit with WinSquashfs** verb opens the graphical image browser. Mounting a drive letter remains available in the GUI and Explorer context menu.
+
 ## Direct UNC access
 
 Open **UNC access** in WinSquashfs and start the background application. The default configuration exposes the current user's profile as **path** and available local drives by their letter. For example:
@@ -41,6 +45,10 @@ Open **UNC access** in WinSquashfs and start the background application. The def
     \\sfs$\C\images\linux.squashfs\usr\bin\example
 
 To use a custom root, set the local directory to C:\images and the share name to path, then open \\sfs$\path\linux.squashfs. The sfs$ server component is a local virtual UNC namespace chosen to reduce conflicts with DNS hostnames. The UNC paths are normal Windows paths; Explorer and other applications can read them directly. A single network filesystem per share dynamically opens images as directories. No drive letter is reserved. Ordinary host files are not exposed. The configured directory must be local and may not pass through a reparse point; reparse points encountered below it are skipped. Access is restricted to the Windows account running the background application. Run it in the ordinary interactive user session.
+
+Network source images are accessed through the built-in UNC share. For example, \\nas\backup\rootfs.squashfs becomes \\sfs$\UNC\nas\backup\rootfs.squashfs. The background process uses the current Windows user's network credentials; use an already accessible share.
+
+For UNC access and the image browser, local files use a read-handle opportunistic lock when supported. A conflicting operation breaks the lock and releases the source handle. SMB and filesystems without this lock use short-lived read handles and verify file identity and modification information. Directory notifications and periodic validation invalidate removed, renamed, replaced or changed images, including active cached entries. Other images and the UNC shares remain available. Network changes are detected as soon as the server delivers notifications, with a 500 ms periodic identity check as a fallback. An unavailable or unsupported file identity prevents unsafe reuse. Explicit drive-letter mounts continue to protect their source images while mounted.
 
 The background application remains available after the GUI closes. Start-at-login is optional. Idle images are closed after the configured time (default 60 seconds); the maximum number of idle images defaults to 8. Active handles retain their image. Changing settings restarts the background application if it is running; close open UNC files before stopping or applying settings. Restart UNC access to discover newly attached drives. Only one process can own a particular sfs$ share name at a time.
 

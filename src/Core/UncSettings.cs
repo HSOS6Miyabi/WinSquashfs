@@ -40,9 +40,15 @@ public sealed record UncSettings(string Root, string Alias = "path", bool Includ
                 result.Add(share);
             }
         }
+        result.Add(UncShare.NetworkNamespace);
         return result;
     }
-    public string? GetImagePath(string path) => Shares().Select(s => s.ImagePath(path)).FirstOrDefault(p => p != null);
+    public string? GetImagePath(string path)
+    {
+        if (path.StartsWith(@"\\", StringComparison.Ordinal))
+            return UncShare.NetworkNamespace.ImagePath(path);
+        return Shares().Select(s => s.ImagePath(path)).FirstOrDefault(p => p != null);
+    }
 
     public void Save()
     {

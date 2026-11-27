@@ -53,6 +53,8 @@ LangString Description ${LANG_ENGLISH} "Browse, create and mount SquashFS images
 LangString Description ${LANG_SIMPCHINESE} "浏览、创建和挂载 SquashFS 镜像。"
 LangString ImageType ${LANG_ENGLISH} "SquashFS image"
 LangString ImageType ${LANG_SIMPCHINESE} "SquashFS 镜像"
+LangString EditVerb ${LANG_ENGLISH} "Edit with WinSquashfs"
+LangString EditVerb ${LANG_SIMPCHINESE} "使用 WinSquashfs 编辑"
 LangString UninstallLink ${LANG_ENGLISH} "Uninstall"
 LangString UninstallLink ${LANG_SIMPCHINESE} "卸载"
 LangString DriverError ${LANG_ENGLISH} "WinFsp installation failed (exit code $1)."
@@ -197,7 +199,10 @@ Section "WinSquashfs"
   WriteRegStr HKLM "Software\RegisteredApplications" "WinSquashfs" "Software\WinSquashfs\Capabilities"
   WriteRegStr HKLM "Software\Classes\${PROGID}" "" "$(ImageType)"
   WriteRegStr HKLM "Software\Classes\${PROGID}\DefaultIcon" "" '"$INSTDIR\app\Assets\file-icon.ico",0'
-  WriteRegStr HKLM "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\app\WinSquashfs.exe" --open "%1"'
+  WriteRegStr HKLM "Software\Classes\${PROGID}\shell" "" "open"
+  WriteRegStr HKLM "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\app\WinSquashfs.exe" --unc "%1"'
+  WriteRegStr HKLM "Software\Classes\${PROGID}\shell\edit" "" "$(EditVerb)"
+  WriteRegStr HKLM "Software\Classes\${PROGID}\shell\edit\command" "" '"$INSTDIR\app\WinSquashfs.exe" --open "%1"'
   !insertmacro RegisterExtension ".squashfs"
   !insertmacro RegisterExtension ".sqfs"
   !insertmacro RegisterExtension ".sfs"

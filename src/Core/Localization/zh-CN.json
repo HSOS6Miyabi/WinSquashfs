@@ -226,5 +226,10 @@
   "Unable to eject the SquashFS volume {0}.": "无法弹出 SquashFS 卷 {0}。",
   "No active WinSquashfs mount was found at {0}.": "未找到位于 {0} 的 WinSquashfs 挂载卷。",
   "Eject operation timed out for {0}.": "弹出 {0} 的操作超时。",
-  "Ejected {0}": "已弹出 {0}"
+  "Ejected {0}": "已弹出 {0}",
+  "The source image was removed, replaced or modified.": "源镜像已删除、替换或修改。",
+  "The source filesystem did not provide a stable file identifier.": "源文件系统未提供稳定的文件标识符。",
+  "Invalid network namespace.": "网络命名空间无效。",
+  "The UNC share name is reserved for network sources.": "共享名称 UNC 保留用于访问网络源文件。",
+  "Network shares": "网络共享"
 }
