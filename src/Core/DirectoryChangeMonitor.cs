@@ -22,19 +22,24 @@ internal sealed class DirectoryChangeMonitor : IDisposable
         internal readonly DirectoryWatch Directory;
         internal readonly string Name;
         internal readonly Action Changed;
+        internal readonly Action MonitoringLost;
         internal readonly bool DirectoryNameOnly;
-        internal Subscription(DirectoryChangeMonitor owner, DirectoryWatch directory, string name, Action changed, bool directoryNameOnly)
-        { this.owner = owner; Directory = directory; Name = name; Changed = changed; DirectoryNameOnly = directoryNameOnly; }
+        internal Subscription(DirectoryChangeMonitor owner, DirectoryWatch directory, string name, Action changed, Action monitoringLost, bool directoryNameOnly)
+        { this.owner = owner; Directory = directory; Name = name; Changed = changed; MonitoringLost = monitoringLost; DirectoryNameOnly = directoryNameOnly; }
         internal void Notify()
         {
             if (Volatile.Read(ref owner) != null) Changed();
+        }
+        internal void NotifyLost()
+        {
+            if (Volatile.Read(ref owner) != null) MonitoringLost();
         }
         public void Dispose() => Interlocked.Exchange(ref owner, null)?.Remove(this);
     }
 
     internal int Count { get { lock (gate) return directories.Count; } }
 
-    internal IDisposable Subscribe(string directory, string name, Action changed, bool directoryNameOnly)
+    internal IDisposable Subscribe(string directory, string name, Action changed, Action monitoringLost, bool directoryNameOnly)
     {
         directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
         lock (gate)
@@ -63,7 +68,7 @@ internal sealed class DirectoryChangeMonitor : IDisposable
                 directories.Add(directory, entry);
             }
 
-            var subscription = new Subscription(this, entry, name, changed, directoryNameOnly);
+            var subscription = new Subscription(this, entry, name, changed, monitoringLost, directoryNameOnly);
             if (!entry.Subscribers.TryGetValue(name, out var subscribers))
                 entry.Subscribers.Add(name, subscribers = new HashSet<Subscription>());
             subscribers.Add(subscription);
@@ -94,10 +99,10 @@ internal sealed class DirectoryChangeMonitor : IDisposable
             if (directories.TryGetValue(entry.Watcher.Path, out var current) && ReferenceEquals(current, entry))
                 directories.Remove(entry.Watcher.Path);
         }
-        // Notification overflow or disconnection invalidates affected images;
-        // there is no periodic scan or automatic retry in the background.
+        // A missing notification capability does not mean the image is gone.
+        // Revalidate once and fall back to checks on actual accesses.
         entry.Watcher.Dispose();
-        foreach (var subscriber in subscribers) subscriber.Notify();
+        foreach (var subscriber in subscribers) subscriber.NotifyLost();
     }
 
     private void Remove(Subscription subscription)

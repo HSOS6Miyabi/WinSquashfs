@@ -17,13 +17,15 @@ internal sealed class VolatileImageSource : IDisposable
     private SourceOplock? oplock;
     private readonly List<IDisposable> watches = new();
     private bool completeWatch;
+    private int watchLost, initialized;
+    private bool HasFullWatch => completeWatch && Volatile.Read(ref watchLost) == 0;
     private long identityChecks;
     private int invalid, disposed;
     internal Native.SourceRead Reader { get; }
     internal ulong Size => checked((ulong)original.Length);
     internal bool Valid => Volatile.Read(ref invalid) == 0 && Volatile.Read(ref disposed) == 0;
     internal bool UsesOplock { get; }
-    internal bool HasStableIdentity => original.IdLow != 0 || original.IdHigh != 0;
+    internal bool HasStableIdentity => original.HasIdentity;
     internal long IdentityChecks => Interlocked.Read(ref identityChecks);
     internal event Action? Invalidated;
 
@@ -69,7 +71,27 @@ internal sealed class VolatileImageSource : IDisposable
     private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security,
         uint creation, uint flags, IntPtr template);
 
-    private readonly record struct Stamp(ulong Volume, ulong IdLow, ulong IdHigh, long Length, ulong Creation, ulong Write, long Change);
+    private readonly record struct Stamp(ulong LegacyVolume, ulong LegacyId, ulong ExtendedVolume,
+        ulong IdLow, ulong IdHigh, long Length, ulong Creation, ulong Write, long Change)
+    {
+        private bool HasExtended => IdLow != 0 || IdHigh != 0;
+        internal bool HasIdentity => HasExtended || LegacyId != 0;
+
+        internal bool Matches(Stamp other)
+        {
+            if (Length != other.Length) return false;
+            if (HasExtended && other.HasExtended)
+            {
+                if (ExtendedVolume != other.ExtendedVolume || IdLow != other.IdLow || IdHigh != other.IdHigh)
+                    return false;
+            }
+            else if (LegacyId != 0 && other.LegacyId != 0 &&
+                (LegacyId != other.LegacyId || LegacyVolume != other.LegacyVolume)) return false;
+            return (Creation == 0 || other.Creation == 0 || Creation == other.Creation) &&
+                (Write == 0 || other.Write == 0 || Write == other.Write) &&
+                (Change == 0 || other.Change == 0 || Change == other.Change);
+        }
+    }
 
     private static ulong Join(uint high, uint low) => ((ulong)high << 32) | low;
 
@@ -87,7 +109,8 @@ internal sealed class VolatileImageSource : IDisposable
             length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
         }
         if (length == 0 || length >= buffer.Capacity) return null;
-        return UncShare.NormalizeSourcePath(buffer.ToString());
+        try { return UncShare.NormalizeSourcePath(buffer.ToString()); }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException) { return null; }
     }
 
     private Stamp Snapshot(SafeFileHandle handle)
@@ -105,17 +128,15 @@ internal sealed class VolatileImageSource : IDisposable
         // Network servers may return only partial identity information.
         // File length and available timestamps are sufficient for a best-effort
         // generation check; missing IDs do not prevent reading an image.
-        var id = new IdInformation { Volume = hasInfo ? info.VolumeSerial : 0,
-            Low = hasInfo ? Join(info.IndexHigh, info.IndexLow) : 0 };
-        if (GetId(handle, 18, out var extended, (uint)Marshal.SizeOf<IdInformation>()) &&
-            (extended.Low != 0 || extended.High != 0))
-            id = extended;
+        if (!GetId(handle, 18, out var extended, (uint)Marshal.SizeOf<IdInformation>()))
+            extended = default;
         long length = hasStandard ? standard.Length : RandomAccess.GetLength(handle);
         ulong creation = hasBasic ? unchecked((ulong)basic.Creation) :
             hasInfo ? Join(info.CreationHigh, info.CreationLow) : 0;
         ulong write = hasBasic ? unchecked((ulong)basic.Write) :
             hasInfo ? Join(info.WriteHigh, info.WriteLow) : 0;
-        return new Stamp(id.Volume, id.Low, id.High, length, creation, write, hasBasic ? basic.Change : 0);
+        return new Stamp(hasInfo ? info.VolumeSerial : 0, hasInfo ? Join(info.IndexHigh, info.IndexLow) : 0,
+            extended.Volume, extended.Low, extended.High, length, creation, write, hasBasic ? basic.Change : 0);
     }
 
     private SafeFileHandle Open() => identity.Run(() =>
@@ -176,6 +197,7 @@ internal sealed class VolatileImageSource : IDisposable
                 }
 
                 EnsureValid();
+                Volatile.Write(ref initialized, 1);
             }
         }
         catch { Dispose(); throw; }
@@ -195,7 +217,7 @@ internal sealed class VolatileImageSource : IDisposable
             try
             {
                 var subscription = identity.Run(() =>
-                    identity.Changes.Subscribe(parent, Path.GetFileName(item), Invalidate, ancestor));
+                    identity.Changes.Subscribe(parent, Path.GetFileName(item), Invalidate, MonitoringLost, ancestor));
                 watches.Add(subscription);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or PlatformNotSupportedException)
@@ -208,6 +230,28 @@ internal sealed class VolatileImageSource : IDisposable
         return complete;
     }
 
+    private void MonitoringLost()
+    {
+        Volatile.Write(ref watchLost, 1);
+        if (Volatile.Read(ref initialized) != 0 && Valid)
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                if (!Valid) return;
+                try { ValidatePath(); } catch (Exception) { /* The source has been invalidated. */ }
+            });
+    }
+
+    private Stamp ProbeSnapshot()
+    {
+        try { using var handle = OpenProbe(); return Snapshot(handle); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            // A server may reject metadata-only handles but permit file reads.
+            using var handle = Open();
+            return Snapshot(handle);
+        }
+    }
+
     // Only callers accessing an existing image trigger this check. A healthy
     // local oplock plus complete notifications needs no additional disk I/O.
     internal void ValidatePath()
@@ -217,9 +261,8 @@ internal sealed class VolatileImageSource : IDisposable
             lock (gate)
             {
                 EnsureValid();
-                if (oplock != null && !oplock.Broken && completeWatch && HasStableIdentity) return;
-                using var handle = OpenProbe();
-                if (Snapshot(handle) != original || (oplock != null && oplock.Broken))
+                if (oplock != null && !oplock.Broken && HasFullWatch && HasStableIdentity) return;
+                if (!original.Matches(ProbeSnapshot()) || (oplock != null && oplock.Broken))
                     throw new IOException(Localization.T("The source image was removed, replaced or modified."));
                 EnsureValid();
             }
@@ -235,7 +278,7 @@ internal sealed class VolatileImageSource : IDisposable
     private void CheckLocked(SafeFileHandle handle)
     {
         EnsureValid();
-        if (oplock != null ? oplock.Broken : Snapshot(handle) != original)
+        if (oplock != null ? oplock.Broken : !original.Matches(Snapshot(handle)))
             throw new IOException(Localization.T("The source image was removed, replaced or modified."));
     }
 
@@ -247,7 +290,7 @@ internal sealed class VolatileImageSource : IDisposable
             {
                 EnsureValid();
                 if (active != null) throw new InvalidOperationException(Localization.T("A source read is already active."));
-                if (retained != null && !completeWatch) ValidatePath();
+                if (retained != null && !HasFullWatch) ValidatePath();
                 active = retained ?? Open();
                 CheckLocked(active);
             }
