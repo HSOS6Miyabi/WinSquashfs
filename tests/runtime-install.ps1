@@ -101,6 +101,7 @@ try {
     $app=Join-Path $env:ProgramFiles 'WinSquashfs\app'
     . (Join-Path $PSScriptRoot 'icons.ps1')
     Assert-InstalledIcons -AppDirectory $app -Setup $Setup
+    & (Join-Path $PSScriptRoot 'installer-appearance.ps1') -Setup $Setup -Uninstaller (Join-Path (Split-Path -Parent $app) 'Uninstall.exe')
     $installedCli=Join-Path $app 'winsqfs.exe'
     & $installedCli doctor
     if($LASTEXITCODE){throw 'Installed native library cannot initialize'}

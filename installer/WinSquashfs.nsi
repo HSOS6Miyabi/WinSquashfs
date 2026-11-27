@@ -1,4 +1,6 @@
 ﻿Unicode true
+ManifestDPIAware true
+ManifestDPIAwareness "PerMonitorV2,System"
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
@@ -20,13 +22,27 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 !define MUI_ICON "..\src\App\Assets\app-icon.ico"
 !define MUI_UNICON "..\src\App\Assets\app-icon.ico"
+
+!define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_RIGHT
+!define MUI_HEADERIMAGE_BITMAP "assets\header.bmp"
+!define MUI_HEADERIMAGE_UNBITMAP "assets\header.bmp"
+!define MUI_HEADERIMAGE_BITMAP_STRETCH "FitControl"
+!define MUI_HEADERIMAGE_UNBITMAP_STRETCH "FitControl"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "assets\wizard.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "assets\wizard.bmp"
+!define MUI_WELCOMEFINISHPAGE_BITMAP_STRETCH "FitControl"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP_STRETCH "FitControl"
+
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "..\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_UNPAGE_WELCOME
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_UNPAGE_FINISH
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "SimpChinese"
 
