@@ -2,6 +2,10 @@
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
+!ifndef PRODUCT_VERSION
+  !error "Pass /DPRODUCT_VERSION=<version> from Directory.Build.props"
+!endif
+VIProductVersion "${PRODUCT_VERSION}.0"
 !define PROGID "WinSquashfs.Image"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\WinSquashfs"
 Name "WinSquashfs"
@@ -18,6 +22,15 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "SimpChinese"
+
+VIAddVersionKey /LANG=1033 "ProductName" "WinSquashfs"
+VIAddVersionKey /LANG=1033 "FileDescription" "WinSquashfs Setup"
+VIAddVersionKey /LANG=1033 "FileVersion" "${PRODUCT_VERSION}"
+VIAddVersionKey /LANG=1033 "ProductVersion" "${PRODUCT_VERSION}"
+VIAddVersionKey /LANG=2052 "ProductName" "WinSquashfs"
+VIAddVersionKey /LANG=2052 "FileDescription" "WinSquashfs 安装程序"
+VIAddVersionKey /LANG=2052 "FileVersion" "${PRODUCT_VERSION}"
+VIAddVersionKey /LANG=2052 "ProductVersion" "${PRODUCT_VERSION}"
 
 LangString BrowseVerb ${LANG_ENGLISH} "Browse with WinSquashfs"
 LangString BrowseVerb ${LANG_SIMPCHINESE} "使用 WinSquashfs 浏览"
@@ -121,6 +134,8 @@ Section "WinSquashfs"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\WinSquashfs"
   CreateShortCut "$SMPROGRAMS\WinSquashfs\WinSquashfs.lnk" "$INSTDIR\app\WinSquashfs.exe"
+  Delete "$SMPROGRAMS\WinSquashfs\Uninstall.lnk"
+  Delete "$SMPROGRAMS\WinSquashfs\卸载.lnk"
   CreateShortCut "$SMPROGRAMS\WinSquashfs\$(UninstallLink).lnk" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\WinSquashfs" "InstallDir" "$INSTDIR"
   WriteRegDWORD HKLM "Software\WinSquashfs" "InstallerLanguage" $LANGUAGE
@@ -136,7 +151,7 @@ Section "WinSquashfs"
   WriteRegStr HKLM "Software\Classes\Directory\shell\WinSquashfs.Pack" "" "$(PackVerb)"
   WriteRegStr HKLM "Software\Classes\Directory\shell\WinSquashfs.Pack\command" "" '"$INSTDIR\app\WinSquashfs.exe" --pack "%1"'
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "WinSquashfs"
-  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "0.1.0"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "${PRODUCT_VERSION}"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\app\WinSquashfs.exe"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'

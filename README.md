@@ -48,6 +48,7 @@ The image browser can copy the current image's UNC path or open it in Explorer. 
 
 ## Command line
 
+    winsqfs --version
     winsqfs info image.squashfs
     winsqfs list image.squashfs
     winsqfs list image.squashfs /directory
@@ -72,7 +73,7 @@ On Windows x64, install .NET 8, Visual Studio with Windows SDK and desktop devel
     pwsh scripts/install-winfsp.ps1
     pwsh scripts/publish.ps1
 
-The distribution is written to artifacts/dist. The Windows workflow builds and tests the distribution and publishes installer and ZIP files when a version tag is pushed.
+The distribution is written to artifacts/dist. The project version is defined in Directory.Build.props. Build the installer with `makensis /DPRODUCT_VERSION=<version> installer/WinSquashfs.nsi`. After the Windows workflow completes all tests, the release job publishes a new version as a GitHub Release, including an installer, portable ZIP and SHA-256 checksums. Existing published versions are retained. Version tags must match Directory.Build.props.
 
 ## Architecture
 

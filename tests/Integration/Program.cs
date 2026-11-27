@@ -223,6 +223,62 @@ try
     try { _=new PackOptions(NoFragments:true,AlwaysFragments:true).Arguments(); }
     catch (ArgumentException) { invalid=true; }
     Require(invalid,"Conflicting flags accepted");
+    // Exercise actual compressor-specific options, including Unicode paths and block sizes.
+    var advancedSource=Path.Combine(root,"高级设置");
+    Directory.CreateDirectory(advancedSource);
+    byte[] advancedData=Enumerable.Range(0,65539).Select(i=>(byte)(i%239)).ToArray();
+    File.WriteAllBytes(Path.Combine(advancedSource,"数据.bin"),advancedData);
+    File.WriteAllText(Path.Combine(advancedSource,"skip.txt"),"excluded");
+    var excludes=Path.Combine(root,"排除列表.txt");
+    File.WriteAllText(excludes,"skip.txt\n",new System.Text.UTF8Encoding(false));
+    var variants=new[]
+    {
+        new PackOptions(Codec:"gzip",BlockSize:4096,Threads:2,Level:1,NoFragments:true,NoDuplicates:true,NoXattrs:true,AllRoot:true,NoExports:true,NoSparse:true,GzipWindow:12,ExcludeFile:excludes),
+        new PackOptions(Codec:"xz",BlockSize:131072,Threads:2,XzDictionary:"64K",XzFilters:"x86"),
+        new PackOptions(Codec:"lzo",BlockSize:65536,Threads:2,Level:2,LzoAlgorithm:"lzo1x_999"),
+        new PackOptions(Codec:"lz4",BlockSize:262144,Threads:2,Lz4HighCompression:true,NoFragmentCompression:true),
+        new PackOptions(Codec:"zstd",BlockSize:1048576,Threads:2,Level:-3,AlwaysFragments:true,NoInodeCompression:true)
+    };
+    foreach(var variant in variants)
+    {
+        string output=Path.Combine(root,"高级-"+variant.Codec+".squashfs");
+        await SquashTools.PackAsync(advancedSource,output,variant,null);
+        using var image=new Archive(output);
+        var entry=image.Find("数据.bin") ?? throw new IOException("Unicode file missing");
+        var got=new byte[advancedData.Length];
+        Require(image.BlockSize==variant.BlockSize && image.Read(entry,0,got)==got.Length && got.SequenceEqual(advancedData),"Advanced codec settings round trip: "+variant.Codec);
+        if(variant.ExcludeFile!=null) Require(image.Find("skip.txt")==null,"Exclude-list file was ignored");
+        image.Verify();
+    }
+    var junction=Path.Combine(root,"output-alias");
+    var junctionProcess=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe")
+    {
+        UseShellExecute=false, ArgumentList={"/c","mklink","/J",junction,advancedSource}
+    }) ?? throw new IOException("Cannot start mklink");
+    using(junctionProcess)
+    {
+        await junctionProcess.WaitForExitAsync();
+        Require(junctionProcess.ExitCode==0,"Cannot create test junction");
+    }
+    try
+    {
+        bool aliasRejected=false;
+        try { await SquashTools.PackAsync(advancedSource,Path.Combine(junction,"self.squashfs"),new PackOptions(),null); }
+        catch(IOException ex) { aliasRejected=ex.Message.Contains("outside the source directory"); }
+        Require(aliasRejected && !File.Exists(Path.Combine(advancedSource,"self.squashfs")),"Output inside source through junction was accepted");
+    }
+    finally { Directory.Delete(junction); }
+    using(var cancelled=new CancellationTokenSource())
+    {
+        cancelled.Cancel();
+        string output=Path.Combine(root,"cancelled.squashfs");
+        bool canceled=false;
+        try { await SquashTools.PackAsync(advancedSource,output,new PackOptions(),null,cancelled.Token); }
+        catch(OperationCanceledException) { canceled=true; }
+        Require(canceled && !File.Exists(output),"Canceled packing published an image");
+        Require(!Directory.EnumerateFiles(root,".winsqfs-*.partial").Any(),"Packing left a temporary file");
+    }
+    Console.WriteLine("PASS advanced compressor options, Unicode paths, output containment and pack cancellation");
     var zh=System.Globalization.CultureInfo.GetCultureInfo("zh-CN");
     var en=System.Globalization.CultureInfo.GetCultureInfo("en-US");
     var tw=System.Globalization.CultureInfo.GetCultureInfo("zh-TW");

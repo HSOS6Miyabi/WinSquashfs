@@ -11,14 +11,17 @@ try
         args = args[2..];
     }
     Localization.Initialize(language);
-    if (Localization.IsChinese) Console.OutputEncoding = System.Text.Encoding.UTF8;
+    Console.OutputEncoding = new System.Text.UTF8Encoding(false);
     switch (args)
     {
+        case ["--version"] or ["version"]:
+            Console.WriteLine(typeof(Archive).Assembly.GetName().Version!.ToString(3));
+            break;
         case ["info", var image]:
             using (var archive = new Archive(image))
                 Console.WriteLine($"{archive.Codec} {archive.BlockSize} {archive.ImageSize}");
             break;
-        case ["list", var image, ..]:
+        case ["list", var image, ..] when args.Length is 2 or 3:
             using (var archive = new Archive(image))
             {
                 var root = args.Length == 3 ? archive.Find(args[2]) : archive.Root;
@@ -37,7 +40,7 @@ try
                 Console.WriteLine(Convert.ToHexString(buffer.AsSpan(0,n)));
             }
             break;
-        case ["mount", var image, ..]:
+        case ["mount", var image, ..] when args.Length is 2 or 3:
             using (var mount = new MountedImage(image, args.Length == 3 ? args[2] : null))
             {
                 Console.WriteLine(mount.MountPoint);
@@ -75,14 +78,14 @@ try
         case ["unc-path", var image]:
             Console.WriteLine(UncSettings.Load().GetImagePath(image) ?? throw new IOException(Localization.T("Image is outside the configured UNC roots.")));
             break;
-        case ["pack", var source, var output, ..]:
+        case ["pack", var source, var output, ..] when args.Length is 3 or 4:
             await SquashTools.PackAsync(source, output, new PackOptions(Codec: args.Length == 4 ? args[3] : "zstd"), Console.WriteLine);
             break;
         case ["unpack", var image, var output]:
             await SquashTools.UnpackAsync(image, output, Console.WriteLine);
             break;
         default:
-            Console.Error.WriteLine(Localization.T("Usage: winsqfs [--lang en-US|zh-CN|system] info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."));
+            Console.Error.WriteLine(Localization.T("Usage: winsqfs [--lang en-US|zh-CN|system] --version|info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."));
             return 2;
     }
     return 0;

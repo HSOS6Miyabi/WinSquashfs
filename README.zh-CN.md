@@ -34,6 +34,7 @@ WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI
 
 ## 命令行
 
+    winsqfs --version
     winsqfs --lang zh-CN info image.squashfs
     winsqfs --lang zh-CN list image.squashfs
     winsqfs --lang zh-CN verify image.squashfs
@@ -54,6 +55,6 @@ Windows 文件系统仅映射普通文件和目录。Linux 符号链接和特殊
 
 ## 构建与许可证
 
-参见 [英文 README](README.md) 中的构建说明。Windows CI 会运行文件系统、压缩算法、安装和中英文界面自动化测试，并上传窗口截图。
+参见 [英文 README](README.md) 中的构建说明。Windows CI 会运行文件系统、压缩算法、安装和中英文界面自动化测试，并上传窗口截图。项目版本号统一在 Directory.Build.props 中设置。Windows CI 完成所有测试后，发布尚未公开的版本，生成安装程序、便携版 ZIP 和 SHA-256 校验文件。
 
 本项目采用 GPL-3.0-only 许可证，依赖组件的许可证见 [THIRD-PARTY.md](THIRD-PARTY.md)。

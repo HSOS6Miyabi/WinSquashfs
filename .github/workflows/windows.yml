@@ -62,18 +62,27 @@ jobs:
           name: WinSquashfs-UI-screenshots
           path: artifacts/screenshots/
           if-no-files-found: warn
+      - name: Test packaged application and cross-language UNC communication
+        shell: pwsh
+        run: |
+          $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          ./tests/distribution.ps1 -AppDirectory (Resolve-Path artifacts/dist).Path -Version $version
       - name: Build NSIS installer
         shell: pwsh
         run: |
           choco install nsis --yes --no-progress
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $nsis=Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'NSIS\makensis.exe'
-          & $nsis installer/WinSquashfs.nsi
+          $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          & $nsis "/DPRODUCT_VERSION=$version" installer/WinSquashfs.nsi
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify installation, registry and uninstallation
         shell: pwsh
         run: |
-          $p=Start-Process (Resolve-Path artifacts/WinSquashfs-Setup-x64.exe) -ArgumentList '/S' -Wait -PassThru
+          $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          $setup=(Resolve-Path artifacts/WinSquashfs-Setup-x64.exe).Path
+          if ([Diagnostics.FileVersionInfo]::GetVersionInfo($setup).FileVersion -ne "$version") { throw 'Installer version mismatch' }
+          $p=Start-Process $setup -ArgumentList @('/S','/LANG=1033') -Wait -PassThru
           if ($p.ExitCode) { throw "Installer exit $($p.ExitCode)" }
           $install=Join-Path $env:ProgramFiles 'WinSquashfs'
           if (!(Test-Path "$install/app/WinSquashfs.exe")) { throw 'Missing GUI' }
@@ -83,6 +92,11 @@ jobs:
           if (!(Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image\shell\open\command')) { throw 'Missing file association' }
           if (!(Test-Path 'HKLM:\Software\Classes\SystemFileAssociations\.squashfs\shell\WinSquashfs.Mount\command')) { throw 'Missing mount verb' }
           if (!(Test-Path 'HKLM:\Software\Classes\Directory\shell\WinSquashfs.Pack\command')) { throw 'Missing pack verb' }
+          $registered=(Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\WinSquashfs').DisplayVersion
+          if ($registered -ne $version) { throw "Installed version mismatch: $registered" }
+          $key=Get-Item 'HKLM:\Software\Classes\SystemFileAssociations\.squashfs\shell\WinSquashfs.Browse'
+          if ($key.GetValue('') -ne 'Browse with WinSquashfs') { throw 'English Explorer verb was not registered' }
+          ./tests/distribution.ps1 -AppDirectory "$install/app" -Version $version
           $p=Start-Process "$install/Uninstall.exe" -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode) { throw "Uninstaller exit $($p.ExitCode)" }
           if (Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image') { throw 'Association not removed' }
@@ -92,6 +106,8 @@ jobs:
           if ($key.GetValue('') -ne '使用 WinSquashfs 浏览') { throw 'Chinese Explorer verb was not registered' }
           $language=(Get-ItemProperty 'HKLM:\Software\WinSquashfs').InstallerLanguage
           if ($language -ne 2052) { throw 'Chinese installer language was not saved' }
+          $registered=(Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\WinSquashfs').DisplayVersion
+          if ($registered -ne $version) { throw "Installed version mismatch: $registered" }
           $p=Start-Process "$install/Uninstall.exe" -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode -or (Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image')) { throw 'Chinese uninstallation failed' }
       - name: Upload installer and portable distribution
@@ -103,21 +119,21 @@ jobs:
             artifacts/dist/
           if-no-files-found: error
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.repository }}
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: WinSquashfs-windows-x64
           path: output
-      - name: Package and publish release
+      - name: Package, verify and publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          cd output/dist
-          zip -qr ../WinSquashfs-portable-x64.zip .
-          cd ../..
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes output/WinSquashfs-Setup-x64.exe output/WinSquashfs-portable-x64.zip
+        run: bash scripts/release.sh

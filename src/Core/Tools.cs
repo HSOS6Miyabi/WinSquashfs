@@ -20,7 +20,7 @@ public sealed record PackOptions(string Codec = "zstd", int BlockSize = 131072, 
                               Codec == "zstd" && (Level is >= 1 and <= 22 || Level is >= -131072 and <= -1) ||
                               Codec == "lzo" && Level is >= 1 and <= 9))
             throw new ArgumentException(Localization.T("Compression level is not supported by this compressor."));
-        var a = new List<string> { "-noappend", "-comp", Codec, "-b", BlockSize.ToString(), "-no-progress" };
+        var a = new List<string> { "-noappend", "-comp", Codec, "-b", BlockSize.ToString(), "-no-progress", "-exit-on-error" };
         if (Threads > 0) a.AddRange(new[] { "-processors", Threads.ToString() });
         if (Level.HasValue) a.AddRange(new[] { "-Xcompression-level", Level.Value.ToString() });
         if (NoFragments) a.Add("-no-fragments");
@@ -76,7 +76,12 @@ public static class SquashTools
     {
         if (tool is not ("mksquashfs" or "unsquashfs" or "sqfscat")) throw new ArgumentException(Localization.T("Unknown tool."));
         var exe = Path.Combine(AppContext.BaseDirectory, "tools", tool + ".exe");
-        var si = new ProcessStartInfo(exe) { UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true };
+        var si = new ProcessStartInfo(exe)
+        {
+            UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true,
+            StandardOutputEncoding = System.Text.Encoding.UTF8, StandardErrorEncoding = System.Text.Encoding.UTF8
+        };
+        si.Environment["LC_ALL"] = "C.UTF-8";
         foreach (var arg in args) si.ArgumentList.Add(arg);
         using var p = new Process { StartInfo = si };
         p.OutputDataReceived += (_, e) => { if (e.Data != null) log?.Invoke(e.Data); };
@@ -99,11 +104,18 @@ public static class SquashTools
         string relative = Path.GetRelativePath(source, output);
         if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new IOException(Localization.T("Output must be outside the source directory."));
-        string temporary = Path.Combine(Path.GetDirectoryName(output)!, ".winsqfs-" + Guid.NewGuid().ToString("N") + ".partial");
+        string outputDirectory = Path.GetDirectoryName(output) ?? throw new IOException(Localization.T("Output already exists."));
+        if (!Directory.Exists(outputDirectory)) throw new DirectoryNotFoundException(outputDirectory);
+        if (WindowsPath.ContainsDirectory(source, outputDirectory))
+            throw new IOException(Localization.T("Output must be outside the source directory."));
+        string temporary = Path.Combine(outputDirectory, ".winsqfs-" + Guid.NewGuid().ToString("N") + ".partial");
         try
         {
             var args = new[] { ToolPath(source), ToolPath(temporary) }.Concat(options.Arguments());
             await RunAsync("mksquashfs", args, log, token);
+            token.ThrowIfCancellationRequested();
+            // Validate the completed filesystem before making the image visible at its final path.
+            using (var image = new Archive(temporary)) { }
             token.ThrowIfCancellationRequested();
             File.Move(temporary, output);
         }

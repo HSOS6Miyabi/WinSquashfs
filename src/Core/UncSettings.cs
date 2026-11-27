@@ -71,13 +71,13 @@ public static class UncAgentControl
     }
     public static string ExecutablePath => Path.Combine(AppContext.BaseDirectory, "WinSquashfs.Unc.exe");
     public static Mutex CreateInstanceMutex() => new(false, Name("Instance"));
-    public static EventWaitHandle CreateStopEvent() => new(false, EventResetMode.ManualReset, Name(Localization.T("Stop")));
-    public static EventWaitHandle CreateReadyEvent() => new(false, EventResetMode.ManualReset, Name(Localization.T("Ready")));
+    public static EventWaitHandle CreateStopEvent() => new(false, EventResetMode.ManualReset, Name("Stop"));
+    public static EventWaitHandle CreateReadyEvent() => new(false, EventResetMode.ManualReset, Name("Ready"));
     private static bool IsStartingOrRunning
     {
         get
         {
-            if (!EventWaitHandle.TryOpenExisting(Name(Localization.T("Stop")), out var e)) return false;
+            if (!EventWaitHandle.TryOpenExisting(Name("Stop"), out var e)) return !InstanceStopped();
             e.Dispose(); return true;
         }
     }
@@ -85,7 +85,7 @@ public static class UncAgentControl
     {
         get
         {
-            if (!EventWaitHandle.TryOpenExisting(Name(Localization.T("Ready")), out var e)) return false;
+            if (!EventWaitHandle.TryOpenExisting(Name("Ready"), out var e)) return false;
             using (e) return e.WaitOne(0);
         }
     }
@@ -152,16 +152,16 @@ public static class UncAgentControl
     public static async Task StopAsync(CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
-        if (EventWaitHandle.TryOpenExisting(Name(Localization.T("Stop")), out var stop))
+        for (int i = 0; i < 150; i++)
         {
-            using (stop) stop.Set();
-            for (int i = 0; i < 150; i++)
+            if (EventWaitHandle.TryOpenExisting(Name("Stop"), out var stop))
             {
-                if (InstanceStopped()) return;
-                await Task.Delay(100);
+                using (stop) stop.Set();
             }
-            throw new IOException(Localization.T("UNC background application did not stop."));
+            if (InstanceStopped()) return;
+            await Task.Delay(100);
         }
+        throw new IOException(Localization.T("UNC background application did not stop."));
     }
 
     public static void Log(Exception error)

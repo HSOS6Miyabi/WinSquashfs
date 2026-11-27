@@ -216,5 +216,5 @@
   "The application will close the current window and reopen. Unsaved input will be lost.": "程序将关闭并重新打开当前窗口，尚未保存的输入将丢失。",
   "Unmount all images before restarting. Your language preference has been saved.": "重新启动前请卸载所有镜像。语言设置已保存。",
   "Language setting is invalid.": "语言设置无效。",
-  "Usage: winsqfs [--lang en-US|zh-CN|system] info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...": "用法：winsqfs [--lang en-US|zh-CN|system] info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."
+  "Usage: winsqfs [--lang en-US|zh-CN|system] --version|info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...": "用法：winsqfs [--lang en-US|zh-CN|system] --version|info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."
 }
