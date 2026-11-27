@@ -116,7 +116,7 @@ public sealed partial class MainWindow
             var settings = UncSettings.Load();
             var shares = settings.Shares();
             UncShares.Text = string.Join(Environment.NewLine, shares.Select(s => s.UncPath + "  →  " + (s.IsNetworkNamespace ? Localization.T("Network shares") : s.Root)));
-            UncImagePathBox.Text = uncTargetPath == null ? "" : shares.Select(s => s.ImagePath(uncTargetPath)).FirstOrDefault(s => s != null) ?? "";
+            UncImagePathBox.Text = uncTargetPath == null ? "" : settings.GetImagePath(uncTargetPath) ?? "";
         }
         catch (Exception ex)
         {

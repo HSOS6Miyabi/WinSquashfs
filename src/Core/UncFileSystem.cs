@@ -18,6 +18,31 @@ public sealed record UncShare(string Name, string Root, bool IsNetworkNamespace 
     public string Prefix => "\\" + ServerName + "\\" + Name;
     public string UncPath => "\\" + Prefix;
 
+    internal static string NormalizeSourcePath(string path)
+    {
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            path = @"\\" + path[8..];
+        else if (path.Length >= 7 && path.StartsWith(@"\\?\", StringComparison.Ordinal) &&
+            char.IsAsciiLetter(path[4]) && path[5] == ':' && path[6] == '\\')
+            path = path[4..];
+        return Path.GetFullPath(path);
+    }
+
+    internal static bool IsProjectedPath(string path)
+    {
+        if (path.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            var server = path[2..].Split('\\', 2)[0];
+            return string.Equals(server, ServerName, StringComparison.OrdinalIgnoreCase);
+        }
+        try
+        {
+            var root = Path.GetPathRoot(path);
+            return root != null && string.Equals(new DriveInfo(root).DriveFormat, "SquashFS", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return false; }
+    }
+
     internal static string? NormalizeNetworkPath(string path)
     {
         if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
@@ -42,34 +67,26 @@ public sealed record UncShare(string Name, string Root, bool IsNetworkNamespace 
         }
         if (string.Equals(Name, NetworkShareName, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException(Localization.T("The UNC share name is reserved for network sources."));
-        if (string.IsNullOrWhiteSpace(Name) || Name.Length > 64 ||
-            !Name.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
-            throw new ArgumentException(Localization.T("Share name must contain 1–64 ASCII letters, digits, underscores or hyphens."));
-        if (!Path.IsPathFullyQualified(Root) || Root.StartsWith(@"\\", StringComparison.Ordinal))
-            throw new ArgumentException(Localization.T("Choose an absolute local directory as the share root."));
-        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Root));
-        var drive = new DriveInfo(Path.GetPathRoot(root)!);
-        if (drive.DriveType is not (DriveType.Fixed or DriveType.Removable) ||
-            string.Equals(drive.DriveFormat, "SquashFS", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException(Localization.T("Share roots must be on a local physical drive."));
-        if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
-        for (DirectoryInfo? dir = new(root); dir != null; dir = dir.Parent)
-            if ((dir.Attributes & FileAttributes.ReparsePoint) != 0)
-                throw new ArgumentException(Localization.T("The share root cannot traverse a reparse point."));
-        return new UncShare(Name, root);
+        if (string.IsNullOrWhiteSpace(Name) || !UncFileSystem.SafeComponent(Name) || Prefix.Length >= 192)
+            throw new ArgumentException(Localization.T("Enter a valid Windows share name."));
+        string root = NormalizeSourcePath(Root);
+        if (!Path.IsPathFullyQualified(root))
+            throw new ArgumentException(Localization.T("Choose an absolute source directory."));
+        if (IsProjectedPath(root))
+            throw new ArgumentException(Localization.T("The source cannot be another WinSquashfs volume."));
+        return new UncShare(Name, Path.TrimEndingDirectorySeparator(root));
     }
     public string? ImagePath(string image)
     {
         if (IsNetworkNamespace)
         {
             var network = NormalizeNetworkPath(image);
-            if (network == null || !UncFileSystem.IsImageName(network)) return null;
+            if (network == null || network[2..].Count(c => c == '\\') < 2) return null;
             return UncPath + "\\" + network[2..];
         }
-        var relative = Path.GetRelativePath(Root, Path.GetFullPath(image));
+        var relative = Path.GetRelativePath(Root, NormalizeSourcePath(image));
         if (relative == "." || Path.IsPathRooted(relative) || relative == ".." ||
             relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)) return null;
-        if (!UncFileSystem.IsImageName(relative)) return null;
         return UncPath + "\\" + relative;
     }
 }
@@ -123,62 +140,100 @@ internal sealed class UncFileSystem : FileSystemBase
 
     private Node? Resolve(string name) => readIdentity.Run(() => ResolveCore(name));
 
-    internal static bool IsPlainPath(string path)
-    {
-        string? networkRoot = path.StartsWith(@"\\", StringComparison.Ordinal) ? Path.GetPathRoot(path) : null;
-        for (string? p = path; p != null; p = Path.GetDirectoryName(p))
-        {
-            if (networkRoot != null && Compare.Equals(Path.TrimEndingDirectorySeparator(p),
-                    Path.TrimEndingDirectorySeparator(networkRoot))) return Directory.Exists(networkRoot);
-            var attr = File.GetAttributes(p);
-            if ((attr & FileAttributes.ReparsePoint) != 0) return false;
-        }
-        return true;
-    }
-
     private Node? ResolveCore(string name)
     {
         var parts = name.Split('\\', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Any(p => !SafeComponent(p))) return null;
-        string physical = share.Root;
-        string normalized = "";
+        string root = share.Root;
+        string prefix = "";
         int start = 0;
         if (share.IsNetworkNamespace)
         {
             if (parts.Length == 0) return new Node("\\", share.Root, virtualDirectory: true);
             if (Compare.Equals(parts[0], UncShare.ServerName)) return null;
             if (parts.Length == 1) return new Node("\\" + parts[0], @"\\" + parts[0], virtualDirectory: true);
-            physical = @"\\" + parts[0] + "\\" + parts[1];
-            normalized = "\\" + parts[0] + "\\" + parts[1];
-            if (!Directory.Exists(physical)) return null;
-            var known = networkShares.GetOrAdd(parts[0], _ => new ConcurrentDictionary<string, byte>(Compare));
-            known.TryAdd(parts[1], 0);
+            root = @"\\" + parts[0] + "\\" + parts[1];
+            prefix = "\\" + parts[0] + "\\" + parts[1];
             start = 2;
         }
-        else if (!IsPlainPath(share.Root)) return null;
-        for (int i = start; i < parts.Length; i++)
+
+        string Physical(int count) => count == start ? root :
+            Path.Combine(root, string.Join("\\", parts.Skip(start).Take(count - start)));
+        string Virtual(int count) => prefix + (count == start ? "" :
+            "\\" + string.Join("\\", parts.Skip(start).Take(count - start)));
+
+        void RememberNetworkShare()
         {
-            physical = Path.Combine(physical, parts[i]);
-            FileAttributes attributes;
-            try { attributes = File.GetAttributes(physical); }
-            catch (FileNotFoundException) { return null; }
-            catch (DirectoryNotFoundException) { return null; }
-            if ((attributes & FileAttributes.ReparsePoint) != 0) return null;
-            normalized += "\\" + parts[i];
-            if ((attributes & FileAttributes.Directory) != 0) continue;
-            if (!IsImageName(parts[i])) return null;
+            if (!share.IsNetworkNamespace) return;
+            var known = networkShares.GetOrAdd(parts[0], _ => new ConcurrentDictionary<string, byte>(Compare));
+            known.TryAdd(parts[1], 0);
+        }
+
+        Node? OpenImage(int count, string physical)
+        {
+            if (UncShare.IsProjectedPath(physical)) return null;
             var lease = cache.Acquire(physical, readIdentity);
             try
             {
                 lease.Image.EnsureSourceValid();
-                var entry = lease.Image.Find(string.Join("\\", parts.Skip(i + 1)));
+                var entry = lease.Image.Find(string.Join("\\", parts.Skip(count)));
                 if (entry == null || (!entry.IsDirectory && !entry.IsFile))
                 { lease.Dispose(); return null; }
-                return new Node(normalized + (entry.Parent == null ? "" : entry.WindowsPath), physical, entry, lease);
+                RememberNetworkShare();
+                return new Node(Virtual(count) + (entry.Parent == null ? "" : entry.WindowsPath), physical, entry, lease);
             }
             catch { lease.Dispose(); throw; }
         }
-        return new Node(normalized.Length == 0 ? "\\" : normalized, physical);
+
+        // Known image extensions are a fast path. Do not require read-attribute
+        // or directory-list permissions on every ancestor of a readable file.
+        for (int count = start + 1; count <= parts.Length; count++)
+        {
+            if (!IsImageName(parts[count - 1])) continue;
+            string physical = Physical(count);
+            try
+            {
+                if ((File.GetAttributes(physical) & FileAttributes.Directory) == 0)
+                    return OpenImage(count, physical);
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+            catch (UnauthorizedAccessException) when (count < parts.Length) { }
+        }
+
+        // Explicit paths can also refer to SquashFS files with other names.
+        // A real directory takes precedence; otherwise locate the source file
+        // in the path and let the decoder recognize and validate its format.
+        for (int count = parts.Length; count > start; count--)
+        {
+            if (IsImageName(parts[count - 1])) continue;
+            string physical = Physical(count);
+            FileAttributes attributes;
+            try { attributes = File.GetAttributes(physical); }
+            catch (FileNotFoundException) { continue; }
+            catch (DirectoryNotFoundException) { continue; }
+            catch (UnauthorizedAccessException) when (count < parts.Length) { continue; }
+            if ((attributes & FileAttributes.Directory) == 0)
+                return OpenImage(count, physical);
+            if (count == parts.Length)
+            {
+                RememberNetworkShare();
+                return new Node(Virtual(count), physical);
+            }
+            return null;
+        }
+
+        string path = Physical(parts.Length);
+        if (parts.Length == start && share.IsNetworkNamespace)
+        {
+            // The server may permit traversal without allowing listing of the
+            // share root. Directory enumeration uses the server's actual ACL.
+            return new Node(prefix, root);
+        }
+        if (!Directory.Exists(path)) return null;
+        RememberNetworkShare();
+        string normalized = Virtual(parts.Length);
+        return new Node(normalized.Length == 0 ? "\\" : normalized, path);
     }
 
     private static ulong Index(string path, uint inode = 0)
@@ -314,7 +369,6 @@ internal sealed class UncFileSystem : FileSystemBase
             }
             yield break;
         }
-        if (dir.Entry == null && !IsPlainPath(dir.PhysicalPath)) throw new UnauthorizedAccessException(Localization.T("Directory is a reparse point."));
         if (dir.Name != "\\")
         {
             yield return new Row(".", Info(dir));
@@ -340,7 +394,7 @@ internal sealed class UncFileSystem : FileSystemBase
             FileAttributes attr;
             try { attr = child.Attributes; }
             catch (IOException) { continue; }
-            if ((attr & FileAttributes.ReparsePoint) != 0 || !SafeComponent(child.Name)) continue;
+            if (!SafeComponent(child.Name)) continue;
             if ((attr & FileAttributes.Directory) == 0 && !IsImageName(child.Name)) continue;
             yield return new Row(child.Name, DirectoryInfoFor(child.FullName));
         }

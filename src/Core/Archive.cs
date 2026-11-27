@@ -117,6 +117,7 @@ public sealed class Archive : IDisposable
 
     public bool SourceValid => source?.Valid != false;
     internal bool UsesOplock => source?.UsesOplock == true;
+    internal bool CanCacheIdle => source?.HasStableIdentity != false;
     internal long IdentityChecks => source?.IdentityChecks ?? 0;
     internal void ValidateSourcePath() => source?.ValidatePath();
     public event Action? SourceInvalidated
@@ -133,7 +134,7 @@ public sealed class Archive : IDisposable
     internal Archive(string path, LocalReadIdentity? readIdentity, bool ownsIdentity = false)
     {
         ownedIdentity = ownsIdentity ? readIdentity : null;
-        Path = System.IO.Path.GetFullPath(path);
+        Path = UncShare.NormalizeSourcePath(path);
         try
         {
             if (readIdentity != null)

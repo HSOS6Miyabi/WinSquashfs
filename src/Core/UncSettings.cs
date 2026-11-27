@@ -29,8 +29,9 @@ public sealed record UncSettings(string Root, string Alias = "path", bool Includ
                 UncShare share;
                 try
                 {
-                    if (drive.DriveType is not (DriveType.Fixed or DriveType.Removable) || !drive.IsReady ||
-                        string.Equals(drive.DriveFormat, "SquashFS", StringComparison.OrdinalIgnoreCase)) continue;
+                    // Include every accessible drive type, including mapped
+                    // network drives, SUBST drives, and other file systems.
+                    if (UncShare.IsProjectedPath(drive.RootDirectory.FullName)) continue;
                     share = new UncShare(drive.Name[..1].ToUpperInvariant(), drive.RootDirectory.FullName).Validate();
                 }
                 catch (IOException) { continue; }
@@ -45,6 +46,7 @@ public sealed record UncSettings(string Root, string Alias = "path", bool Includ
     }
     public string? GetImagePath(string path)
     {
+        path = UncShare.NormalizeSourcePath(path);
         if (path.StartsWith(@"\\", StringComparison.Ordinal))
             return UncShare.NetworkNamespace.ImagePath(path);
         return Shares().Select(s => s.ImagePath(path)).FirstOrDefault(p => p != null);

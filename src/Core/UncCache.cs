@@ -173,7 +173,7 @@ internal sealed class ImageCache : IDisposable
         lock (sync)
         {
             if (disposed || !Current(item) || --item.References != 0) return;
-            if (!item.Image.SourceValid || idleMilliseconds == 0 || maxIdle == 0)
+            if (!item.Image.SourceValid || !item.Image.CanCacheIdle || idleMilliseconds == 0 || maxIdle == 0)
             {
                 RemoveLocked(item);
                 release = new List<Cached> { item };

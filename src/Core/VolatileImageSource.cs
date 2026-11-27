@@ -23,6 +23,7 @@ internal sealed class VolatileImageSource : IDisposable
     internal ulong Size => checked((ulong)original.Length);
     internal bool Valid => Volatile.Read(ref invalid) == 0 && Volatile.Read(ref disposed) == 0;
     internal bool UsesOplock { get; }
+    internal bool HasStableIdentity => original.IdLow != 0 || original.IdHigh != 0;
     internal long IdentityChecks => Interlocked.Read(ref identityChecks);
     internal event Action? Invalidated;
 
@@ -72,40 +73,64 @@ internal sealed class VolatileImageSource : IDisposable
 
     private static ulong Join(uint high, uint low) => ((ulong)high << 32) | low;
 
+    [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, System.Text.StringBuilder path, uint length, uint flags);
+
+    private static string? ResolvedPath(SafeFileHandle handle)
+    {
+        var buffer = new System.Text.StringBuilder(512);
+        uint length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+        if (length == 0) return null;
+        if (length >= buffer.Capacity)
+        {
+            buffer.EnsureCapacity(checked((int)length + 1));
+            length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+        }
+        if (length == 0 || length >= buffer.Capacity) return null;
+        return UncShare.NormalizeSourcePath(buffer.ToString());
+    }
+
     private Stamp Snapshot(SafeFileHandle handle)
     {
         Interlocked.Increment(ref identityChecks);
-        if (!GetFileInformationByHandle(handle, out var info))
-            throw new IOException(Localization.T("Cannot query source file identity."), new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
-        if ((info.Attributes & ((uint)FileAttributes.Directory | (uint)FileAttributes.ReparsePoint)) != 0)
+        bool hasInfo = GetFileInformationByHandle(handle, out var info);
+        bool hasBasic = GetBasic(handle, 0, out var basic, (uint)Marshal.SizeOf<BasicInformation>());
+        bool hasStandard = GetStandard(handle, 1, out var standard, (uint)Marshal.SizeOf<StandardInformation>());
+        if ((hasInfo && (info.Attributes & (uint)FileAttributes.Directory) != 0) ||
+            (hasBasic && (basic.Attributes & (uint)FileAttributes.Directory) != 0) ||
+            (hasStandard && standard.Directory != 0))
             throw new IOException(Localization.T("Source is not a regular file."));
-        if (GetStandard(handle, 1, out var standard, (uint)Marshal.SizeOf<StandardInformation>()) &&
-            (standard.DeletePending != 0 || standard.Directory != 0))
-            throw new FileNotFoundException();
-        long change = GetBasic(handle, 0, out var basic, (uint)Marshal.SizeOf<BasicInformation>()) ? basic.Change : 0;
-        var id = new IdInformation { Volume = info.VolumeSerial, Low = Join(info.IndexHigh, info.IndexLow) };
+        if (hasStandard && standard.DeletePending != 0) throw new FileNotFoundException();
+
+        // Network servers may return only partial identity information.
+        // File length and available timestamps are sufficient for a best-effort
+        // generation check; missing IDs do not prevent reading an image.
+        var id = new IdInformation { Volume = hasInfo ? info.VolumeSerial : 0,
+            Low = hasInfo ? Join(info.IndexHigh, info.IndexLow) : 0 };
         if (GetId(handle, 18, out var extended, (uint)Marshal.SizeOf<IdInformation>()) &&
             (extended.Low != 0 || extended.High != 0))
             id = extended;
-        return new Stamp(id.Volume, id.Low, id.High, checked((long)Join(info.SizeHigh, info.SizeLow)),
-            Join(info.CreationHigh, info.CreationLow), Join(info.WriteHigh, info.WriteLow), change);
+        long length = hasStandard ? standard.Length : RandomAccess.GetLength(handle);
+        ulong creation = hasBasic ? unchecked((ulong)basic.Creation) :
+            hasInfo ? Join(info.CreationHigh, info.CreationLow) : 0;
+        ulong write = hasBasic ? unchecked((ulong)basic.Write) :
+            hasInfo ? Join(info.WriteHigh, info.WriteLow) : 0;
+        return new Stamp(id.Volume, id.Low, id.High, length, creation, write, hasBasic ? basic.Change : 0);
     }
 
     private SafeFileHandle Open() => identity.Run(() =>
     {
-        if (!UncFileSystem.IsPlainPath(path)) throw new UnauthorizedAccessException(path);
         return File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete,
             FileOptions.Asynchronous | FileOptions.RandomAccess);
     });
 
     private SafeFileHandle OpenProbe() => identity.Run(() =>
     {
-        if (!UncFileSystem.IsPlainPath(path)) throw new UnauthorizedAccessException(path);
         string nativePath = path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path :
             path.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + path[2..] : @"\\?\" + path;
         // Metadata-only access with all sharing flags does not introduce a
         // conflicting data handle while another program edits the source.
-        var handle = CreateFile(nativePath, 0x80, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        var handle = CreateFile(nativePath, 0x80, 7, IntPtr.Zero, 3, 0, IntPtr.Zero);
         if (handle.IsInvalid)
         {
             int error = Marshal.GetLastWin32Error();
@@ -127,10 +152,18 @@ internal sealed class VolatileImageSource : IDisposable
             {
                 // Subscribe before capturing identity, so concurrent changes
                 // during initialization also invalidate the generation.
-                completeWatch = SubscribeChanges();
+                completeWatch = SubscribeChanges(path);
                 initial = Open();
-                if (!path.StartsWith(@"\\", StringComparison.Ordinal) &&
-                    new DriveInfo(Path.GetPathRoot(path)!).DriveType != DriveType.Network)
+                string? resolved = ResolvedPath(initial);
+                if (resolved != null)
+                {
+                    if (UncShare.IsProjectedPath(resolved))
+                        throw new IOException(Localization.T("The source cannot be another WinSquashfs volume."));
+                    if (!string.Equals(path, resolved, StringComparison.OrdinalIgnoreCase))
+                        completeWatch &= SubscribeChanges(resolved);
+                }
+                string effectivePath = resolved ?? path;
+                if (!effectivePath.StartsWith(@"\\", StringComparison.Ordinal))
                     oplock = SourceOplock.TryRequest(initial);
 
                 original = Snapshot(initial);
@@ -141,8 +174,6 @@ internal sealed class VolatileImageSource : IDisposable
                     UsesOplock = true;
                     oplock.Monitor(Invalidate);
                 }
-                else if (original.IdLow == 0 && original.IdHigh == 0)
-                    throw new IOException(Localization.T("The source filesystem did not provide a stable file identifier."));
 
                 EnsureValid();
             }
@@ -151,12 +182,12 @@ internal sealed class VolatileImageSource : IDisposable
         finally { initial?.Dispose(); }
     }
 
-    private bool SubscribeChanges()
+    private bool SubscribeChanges(string watchedPath)
     {
         bool complete = true;
         // Share watches among images in the same directory. Ancestor watches
         // detect directory renames/deletions; only name changes are relevant.
-        string? item = path;
+        string? item = watchedPath;
         bool ancestor = false;
         while (item != null && Path.GetDirectoryName(item) is string parent &&
             !string.IsNullOrEmpty(Path.GetFileName(item)))
@@ -186,7 +217,7 @@ internal sealed class VolatileImageSource : IDisposable
             lock (gate)
             {
                 EnsureValid();
-                if (oplock != null && !oplock.Broken && completeWatch) return;
+                if (oplock != null && !oplock.Broken && completeWatch && HasStableIdentity) return;
                 using var handle = OpenProbe();
                 if (Snapshot(handle) != original || (oplock != null && oplock.Broken))
                     throw new IOException(Localization.T("The source image was removed, replaced or modified."));
