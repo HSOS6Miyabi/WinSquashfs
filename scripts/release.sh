@@ -33,7 +33,7 @@ if [[ -n "$tag_refs" ]]; then
 fi
 
 test -f output/WinSquashfs-Setup-x64.exe
-for name in WinSquashfs.exe winsqfs.exe WinSquashfs.Unc.exe winsqfs-native.dll README.md README.zh-CN.md LICENSE THIRD-PARTY.md tools/mksquashfs.exe tools/unsquashfs.exe; do
+for name in WinSquashfs.exe winsqfs.exe WinSquashfs.Unc.exe winsqfs-native.dll README.md README.zh-CN.md LICENSE THIRD-PARTY.md tools/mksquashfs.exe tools/unsquashfs.exe prerequisites/WinFsp.msi; do
   test -f "output/dist/$name"
 done
 mkdir -p release

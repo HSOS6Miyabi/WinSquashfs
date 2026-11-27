@@ -2,8 +2,12 @@
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
+!include "WordFunc.nsh"
 !ifndef PRODUCT_VERSION
   !error "Pass /DPRODUCT_VERSION=<version> from Directory.Build.props"
+!endif
+!ifndef WINFSP_MIN_VERSION
+  !error "Pass /DWINFSP_MIN_VERSION from Directory.Build.props"
 !endif
 VIProductVersion "${PRODUCT_VERSION}.0"
 !define PROGID "WinSquashfs.Image"
@@ -50,6 +54,12 @@ LangString UninstallLink ${LANG_ENGLISH} "Uninstall"
 LangString UninstallLink ${LANG_SIMPCHINESE} "卸载"
 LangString DriverError ${LANG_ENGLISH} "WinFsp installation failed (exit code $1)."
 LangString DriverError ${LANG_SIMPCHINESE} "WinFsp 安装失败（退出代码：$1）。"
+LangString DriverIncompatible ${LANG_ENGLISH} "Installed WinFsp $4 is incompatible with this release. WinFsp ${WINFSP_MIN_VERSION} or a later 2.x release is required."
+LangString DriverIncompatible ${LANG_SIMPCHINESE} "当前安装的 WinFsp $4 与本版本不兼容。需要 WinFsp ${WINFSP_MIN_VERSION} 或更新的 2.x 版本。"
+LangString DriverMissing ${LANG_ENGLISH} "WinFsp installation did not provide a compatible runtime. Restart Windows if required, then reinstall WinSquashfs."
+LangString DriverMissing ${LANG_SIMPCHINESE} "WinFsp 安装后仍缺少兼容的运行时。请按需重新启动 Windows，再重新安装 WinSquashfs。"
+LangString DriverRestart ${LANG_ENGLISH} "Restart Windows before mounting images or starting UNC access."
+LangString DriverRestart ${LANG_SIMPCHINESE} "请重新启动 Windows 后再挂载镜像或启动 UNC 访问。"
 
 Function .onInit
   SetRegView 64
@@ -102,24 +112,63 @@ FunctionEnd
   DeleteRegKey HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Unc"
 !macroend
 
-Section "WinFsp runtime"
+Function ReadWinFspVersion
   SetRegView 32
   ReadRegStr $0 HKLM "SOFTWARE\WinFsp" "InstallDir"
   SetRegView 64
+  StrCpy $4 ""
+  StrCpy $5 0
   ${If} $0 != ""
-    ${If} ${FileExists} "$0\bin\winfsp-x64.dll"
-      Goto winfsp_done
+    ClearErrors
+    GetDLLVersion "$0\bin\winfsp-x64.dll" $2 $3
+    ${IfNot} ${Errors}
+      IntOp $5 $2 >> 16
+      IntOp $6 $2 & 0xFFFF
+      IntOp $7 $3 >> 16
+      IntOp $8 $3 & 0xFFFF
+      StrCpy $4 "$5.$6.$7.$8"
     ${EndIf}
   ${EndIf}
+FunctionEnd
+
+Section "WinFsp runtime"
+  Call ReadWinFspVersion
+  ${If} $4 != ""
+    ${VersionCompare} "$4" "${WINFSP_MIN_VERSION}" $6
+    ${If} $5 == 2
+      ${If} $6 != 2
+        DetailPrint "WinFsp $4"
+        Goto winfsp_done
+      ${EndIf}
+    ${ElseIf} $5 > 2
+      MessageBox MB_ICONSTOP "$(DriverIncompatible)" /SD IDOK
+      SetErrorLevel 1
+      Quit
+    ${EndIf}
+  ${EndIf}
+
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
   File /oname=winfsp.msi "..\artifacts\winfsp.msi"
-  ExecWait 'msiexec.exe /i "$PLUGINSDIR\winfsp.msi" /qn /norestart ADDLOCAL=ALL' $1
+  ExecWait 'msiexec.exe /i "$PLUGINSDIR\winfsp.msi" /qn /norestart /L*v "$TEMP\WinSquashfs-WinFsp-install.log"' $1
   ${If} $1 == 3010
     SetRebootFlag true
+    DetailPrint "$(DriverRestart)"
+    SetErrorLevel 3010
+    Goto winfsp_done
   ${ElseIf} $1 != 0
-    MessageBox MB_ICONSTOP "$(DriverError)"
-    Abort
+    MessageBox MB_ICONSTOP "$(DriverError)" /SD IDOK
+    SetErrorLevel $1
+    Quit
+  ${EndIf}
+  Call ReadWinFspVersion
+  ${VersionCompare} "$4" "${WINFSP_MIN_VERSION}" $6
+  ${If} $4 == ""
+  ${OrIf} $5 != 2
+  ${OrIf} $6 == 2
+    MessageBox MB_ICONSTOP "$(DriverMissing)" /SD IDOK
+    SetErrorLevel 1
+    Quit
   ${EndIf}
   winfsp_done:
 SectionEnd

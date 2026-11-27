@@ -1,27 +1,24 @@
-# WinSquashfs v0.1.0
+# WinSquashfs v0.1.1
 
-First public release for Windows x64.
+Windows x64 maintenance release.
 
-- WinUI 3 interface in English and Simplified Chinese, including language selection.
-- Browse and preview SquashFS images, extract files and directories, and verify image readability.
-- Mount images as read-only volumes through WinFsp with direct in-memory random access.
-- Direct UNC access using `\\sfs$\C\...`, directory aliases, and configurable idle caching.
-- Create SquashFS images with gzip, XZ, LZO, LZ4, or Zstandard and advanced compression settings.
-- Bundled mksquashfs, unsquashfs, sqfscat, and sqfstar, and the winsqfs command-line utility.
-- NSIS installation with file associations and Explorer context menus.
+- Requires WinFsp 2026 (2.2.26323) or a later compatible 2.x runtime. The installer upgrades older installations and includes the official WinFsp MSI.
+- Loads the native WinFsp DLL from its registered installation directory, checks its version, and reports detailed initialization failures.
+- Adds a WinFsp runtime diagnostic in the GUI and the winsqfs doctor command.
+- The portable distribution includes prerequisites/WinFsp.msi for offline driver installation.
 
 ## Downloads
 
 - **WinSquashfs-Setup-x64.exe**: includes the application and WinFsp installer.
-- **WinSquashfs-portable-x64.zip**: extract to a local directory. Install WinFsp separately to use mounting and UNC access.
+- **WinSquashfs-portable-x64.zip**: includes the application and the prerequisite MSI.
 - **SHA256SUMS.txt**: SHA-256 checksums for both distributions.
 
-Windows 10 version 1809 or later is required. Linux symbolic links and special files are displayed in the browser; Windows mounting and extraction expose ordinary files and directories. The application binaries are not Authenticode-signed.
+Windows 10 version 1809 or later is required. The application binaries are not Authenticode-signed.
 
 # 简体中文
 
-Windows x64 首个公开版本。支持中英文界面、镜像浏览与预览、文件及目录提取、镜像可读性校验、WinFsp 只读挂载、UNC 按需访问和高级压缩参数。安装程序包含 WinFsp，并注册文件关联和资源管理器右键菜单。
+Windows x64 维护版本。安装程序会检查 WinFsp 运行时版本，并在需要时安装或升级至 WinFsp 2026（2.2.26323）。便携版内含 prerequisites\WinFsp.msi，可离线安装。
 
-安装程序：WinSquashfs-Setup-x64.exe。便携版：WinSquashfs-portable-x64.zip。SHA256SUMS.txt 提供两种发布文件的 SHA-256 校验值。便携版使用挂载和 UNC 访问功能时需要单独安装 WinFsp。
+程序从 WinFsp 的注册安装目录加载匹配的原生 DLL，并在运行时初始化失败时显示详细信息。可通过“工具与关于 → 检查 WinFsp 运行时”或 winsqfs doctor 查看安装情况。
 
-最低支持 Windows 10 1809。Windows 挂载及提取功能支持普通文件和目录，浏览器可以识别 Linux 符号链接及特殊文件。应用程序二进制文件尚未进行 Authenticode 签名。
+发布文件包括安装程序、便携版 ZIP 和 SHA-256 校验文件。最低支持 Windows 10 1809，应用程序二进制文件尚未进行 Authenticode 签名。

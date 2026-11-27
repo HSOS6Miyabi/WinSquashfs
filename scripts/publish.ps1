@@ -13,5 +13,8 @@ dotnet publish src/UncAgent/UncAgent.csproj -c Release -r win-x64 --self-contain
 if ($LASTEXITCODE) { throw 'UNC background application publish failed' }
 Copy-Item "$agent\WinSquashfs.Unc.exe","$agent\WinSquashfs.Unc.dll","$agent\WinSquashfs.Unc.deps.json","$agent\WinSquashfs.Unc.runtimeconfig.json" -Destination $dist -Force
 Copy-Item 'artifacts\native\*' $dist -Recurse -Force
+$prerequisites=Join-Path $dist 'prerequisites'
+New-Item -ItemType Directory -Force $prerequisites | Out-Null
+Copy-Item 'artifacts\winfsp.msi' (Join-Path $prerequisites 'WinFsp.msi') -Force
 Copy-Item README.md,README.zh-CN.md,LICENSE,THIRD-PARTY.md -Destination $dist
 if (!(Test-Path "$dist\winsqfs-native.dll")) { throw 'Missing native reader' }

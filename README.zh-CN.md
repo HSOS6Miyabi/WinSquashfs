@@ -16,7 +16,7 @@ WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI
 
 ## 安装及语言设置
 
-从 [Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) 或 [Actions](https://github.com/HSOS6Miyabi/WinSquashfs/actions) 下载 Windows x64 安装程序或便携版。安装程序集成 WinFsp；便携版的挂载与 UNC 功能需要系统中已安装 WinFsp。
+从 [Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) 或 [Actions](https://github.com/HSOS6Miyabi/WinSquashfs/actions) 下载 Windows x64 安装程序或便携版。挂载与 UNC 访问需要 WinFsp 2.2.26323（WinFsp 2026）或兼容的更新 2.x 版本。安装程序会在需要时安装或升级 WinFsp。便携版包含 prerequisites\WinFsp.msi，可离线安装驱动程序。可运行 `winsqfs doctor` 或在“工具与关于”中点击“检查 WinFsp 运行时”查看当前安装情况。
 
 界面默认跟随 Windows 显示语言，可在“工具与关于 → 界面语言”选择简体中文或英文，保存后重新启动程序。安装程序支持简体中文和英文，右键菜单使用安装时选择的语言。
 
@@ -35,6 +35,7 @@ WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI
 ## 命令行
 
     winsqfs --version
+    winsqfs doctor
     winsqfs --lang zh-CN info image.squashfs
     winsqfs --lang zh-CN list image.squashfs
     winsqfs --lang zh-CN verify image.squashfs

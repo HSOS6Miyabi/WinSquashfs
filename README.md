@@ -18,7 +18,7 @@ A WinUI 3 desktop application for SquashFS images on Windows x64. Browse image c
 
 ## Installation
 
-Download the x64 installer from [Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) or the Windows build artifact from [Actions](https://github.com/HSOS6Miyabi/WinSquashfs/actions). The installer includes the WinFsp runtime and a self-contained Windows App SDK/.NET application. Windows 10 version 1809 or newer is required. A portable distribution requires WinFsp to be installed separately for mounting.
+Download the x64 installer from [Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) or the Windows build artifact from [Actions](https://github.com/HSOS6Miyabi/WinSquashfs/actions). The installer includes the WinFsp runtime and a self-contained Windows App SDK/.NET application. Windows 10 version 1809 or newer is required. Mounting and UNC access require WinFsp 2.2.26323 (WinFsp 2026) or a later compatible 2.x version. The installer installs or upgrades the runtime when necessary. The portable distribution includes prerequisites/WinFsp.msi for offline installation. Use `winsqfs doctor` or **Tools & about → Check WinFsp runtime** to inspect the installed native runtime.
 
 ## Language
 
@@ -49,6 +49,7 @@ The image browser can copy the current image's UNC path or open it in Explorer. 
 ## Command line
 
     winsqfs --version
+    winsqfs doctor
     winsqfs info image.squashfs
     winsqfs list image.squashfs
     winsqfs list image.squashfs /directory
@@ -73,7 +74,7 @@ On Windows x64, install .NET 8, Visual Studio with Windows SDK and desktop devel
     pwsh scripts/install-winfsp.ps1
     pwsh scripts/publish.ps1
 
-The distribution is written to artifacts/dist. The project version is defined in Directory.Build.props. Build the installer with `makensis /DPRODUCT_VERSION=<version> installer/WinSquashfs.nsi`. After the Windows workflow completes all tests, the release job publishes a new version as a GitHub Release, including an installer, portable ZIP and SHA-256 checksums. Existing published versions are retained. Version tags must match Directory.Build.props.
+The distribution is written to artifacts/dist. The project version is defined in Directory.Build.props. Build the installer with `makensis /DPRODUCT_VERSION=<version> /DWINFSP_MIN_VERSION=<runtime-version>.0 installer/WinSquashfs.nsi`, using the versions from Directory.Build.props. After the Windows workflow completes all tests, the release job publishes a new version as a GitHub Release, including an installer, portable ZIP and SHA-256 checksums. Existing published versions are retained. Version tags must match Directory.Build.props.
 
 ## Architecture
 

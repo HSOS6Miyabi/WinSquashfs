@@ -280,6 +280,9 @@
       </Border>
       <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="10">
+        <TextBlock Text="{StaticResource L_WinFsp_runtime}" FontWeight="SemiBold"/>
+        <TextBlock Text="{StaticResource L_Check_the_installed_driver_library}" TextWrapping="Wrap"/>
+        <Button Click="CheckWinFspClicked" Content="{StaticResource L_Check_WinFsp_runtime}" AutomationProperties.AutomationId="CheckWinFsp"/>
         <TextBlock Text="{StaticResource L_Linux_SquashFS_command_line_tools}" FontWeight="SemiBold"/>
         <TextBlock Text="{StaticResource L_The_distribution_includes_the_MSYS2_builds_of_mksquashfs_unsquashfs_and_sqfscat_Use_the_buttons_to_inspect_t}" TextWrapping="Wrap"/>
         <StackPanel Orientation="Horizontal" Spacing="8">

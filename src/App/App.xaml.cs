@@ -7,7 +7,7 @@ public partial class App : Application
 {
     private MainWindow? window;
 
-    private static void RecordException(Exception? exception)
+    internal static void RecordException(Exception? exception)
     {
         if (exception == null) return;
         try

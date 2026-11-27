@@ -138,13 +138,15 @@ public sealed partial class MainWindow : Window
 
     private async Task ShowErrorAsync(Exception e)
     {
-        StatusText.Text = e.Message;
+        App.RecordException(e);
+        string message = e is TypeInitializationException ? e.GetBaseException().Message : e.Message;
+        StatusText.Text = message;
         if (errorDialogOpen || closing || Root.XamlRoot == null) return;
         errorDialogOpen = true;
         try
         {
             var dialog = new ContentDialog { Title = Localization.T("Operation failed"),
-                Content = new TextBlock { Text = e.Message, TextWrapping = TextWrapping.Wrap, MaxWidth = 520 },
+                Content = new ScrollViewer { MaxHeight = 340, Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, MaxWidth = 520, IsTextSelectionEnabled = true } },
                 CloseButtonText = Localization.T("Close"), XamlRoot = Root.XamlRoot };
             await dialog.ShowAsync();
         }
@@ -509,6 +511,15 @@ public sealed partial class MainWindow : Window
                 Process.Start(new ProcessStartInfo(item.MountPoint.TrimEnd('\\') + "\\") { UseShellExecute = true });
         }
         catch (Exception ex) { await ShowErrorAsync(ex); }
+    }
+
+    private async void CheckWinFspClicked(object sender, RoutedEventArgs e)
+    {
+        ToolsLog.Text = "";
+        await RunAsync(Localization.T("Checking WinFsp runtime…"), async token =>
+        {
+            ToolsLog.Text = await Task.Run(WinFspRuntime.Describe, token);
+        });
     }
 
     private async void MkVersionClicked(object sender, RoutedEventArgs e) => await VersionAsync("mksquashfs");

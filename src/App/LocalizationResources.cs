@@ -8,6 +8,9 @@ internal static class LocalizationResources
 {
     internal static void Install(ResourceDictionary resources)
     {
+        resources["L_WinFsp_runtime"] = Localization.T("WinFsp runtime");
+        resources["L_Check_the_installed_driver_library"] = Localization.T("Check the installed driver library before mounting or using UNC access.");
+        resources["L_Check_WinFsp_runtime"] = Localization.T("Check WinFsp runtime");
         resources["L_Image_workspace"] = Localization.T("Image workspace");
         resources["L_Read_only_volumes"] = Localization.T("Read-only volumes");
         resources["L_Browse_image"] = Localization.T("Browse image");
