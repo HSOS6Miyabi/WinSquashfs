@@ -18,6 +18,8 @@ OutFile "..\artifacts\WinSquashfs-Setup-x64.exe"
 InstallDir "$PROGRAMFILES64\WinSquashfs"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
+!define MUI_ICON "..\src\App\Assets\app-icon.ico"
+!define MUI_UNICON "..\src\App\Assets\app-icon.ico"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "..\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
@@ -190,10 +192,11 @@ Section "WinSquashfs"
   WriteRegStr HKLM "Software\WinSquashfs" "InstallDir" "$INSTDIR"
   WriteRegDWORD HKLM "Software\WinSquashfs" "InstallerLanguage" $LANGUAGE
   WriteRegStr HKLM "Software\WinSquashfs\Capabilities" "ApplicationName" "WinSquashfs"
+  WriteRegStr HKLM "Software\WinSquashfs\Capabilities" "ApplicationIcon" '"$INSTDIR\app\WinSquashfs.exe",0'
   WriteRegStr HKLM "Software\WinSquashfs\Capabilities" "ApplicationDescription" "$(Description)"
   WriteRegStr HKLM "Software\RegisteredApplications" "WinSquashfs" "Software\WinSquashfs\Capabilities"
   WriteRegStr HKLM "Software\Classes\${PROGID}" "" "$(ImageType)"
-  WriteRegStr HKLM "Software\Classes\${PROGID}\DefaultIcon" "" "$INSTDIR\app\WinSquashfs.exe,0"
+  WriteRegStr HKLM "Software\Classes\${PROGID}\DefaultIcon" "" '"$INSTDIR\app\Assets\file-icon.ico",0'
   WriteRegStr HKLM "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\app\WinSquashfs.exe" --open "%1"'
   !insertmacro RegisterExtension ".squashfs"
   !insertmacro RegisterExtension ".sqfs"

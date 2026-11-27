@@ -37,6 +37,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app-icon.ico"));
         Root.Language = Localization.Language;
         LanguageBox.ItemsSource = new[] { Localization.T("Follow Windows"), "English", "简体中文" };
         LanguageBox.SelectedIndex = Localization.Preference switch { "en-US" => 1, "zh-CN" => 2, _ => 0 };

@@ -5,6 +5,8 @@ param(
 )
 $ErrorActionPreference='Stop'
 $AppDirectory=(Resolve-Path $AppDirectory).Path
+. (Join-Path $PSScriptRoot 'icons.ps1')
+Assert-IconAssets -AppDirectory $AppDirectory
 $cli=Join-Path $AppDirectory 'winsqfs.exe'
 [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
 function Invoke-CliExpect {

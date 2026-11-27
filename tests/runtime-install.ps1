@@ -99,6 +99,8 @@ try {
     if(!$installed -or $installed.Version.Major -ne $required.Major -or $installed.Version -lt $required){throw "Setup did not install the required WinFsp runtime: $installed"}
     Write-Host "PASS $Scenario installed WinFsp $($installed.Version) from the product installer"
     $app=Join-Path $env:ProgramFiles 'WinSquashfs\app'
+    . (Join-Path $PSScriptRoot 'icons.ps1')
+    Assert-InstalledIcons -AppDirectory $app -Setup $Setup
     $installedCli=Join-Path $app 'winsqfs.exe'
     & $installedCli doctor
     if($LASTEXITCODE){throw 'Installed native library cannot initialize'}
