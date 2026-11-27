@@ -39,6 +39,10 @@ $img="$root\ui.squashfs"
 $p=$null
 $env:WINSQUASHFS_DIAGNOSTICS=Join-Path $root "application.log"
 $started=Get-Date
+$uncSettings=Join-Path $env:LOCALAPPDATA 'WinSquashfs\unc.json'
+$backup=$null
+if(Test-Path $uncSettings){$backup=[IO.File]::ReadAllBytes($uncSettings)}
+$agentStarted=$false
 try {
   $p=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--pack',('"'+"$root\src"+'"')) -WorkingDirectory $AppDirectory -PassThru
   $window=Get-AppWindow $p 'PackSource'
@@ -80,12 +84,55 @@ try {
   }
   if($mounted.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)){throw 'Unmount failed'}
   Write-Host 'WinUI creation, navigation and mount controls passed.'
+
+  # Exercise the actual background process from the GUI, then close the GUI.
+  $nav=Wait-Control $window 'NavUnc' $true
+  $pattern=$null
+  if($nav.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)) {
+    $pattern.Select()
+  } else {
+    $nav.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+  }
+  $alias='ui-' + [guid]::NewGuid().ToString('N').Substring(0,8)
+  Set-Value $window 'UncRoot' $root
+  Set-Value $window 'UncAlias' $alias
+  $toggle=(Wait-Control $window 'UncDrives' $true).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+  if($toggle.Current.ToggleState -eq [System.Windows.Automation.ToggleState]::On){$toggle.Toggle()}
+  $drivesBefore=[IO.DriveInfo]::GetDrives().Name | Sort-Object
+  Invoke-Control $window 'StartUnc'
+  $agentStarted=$true
+  $null=Wait-Control $window 'StopUnc' $true
+  $unc="\\sqfs\$alias\ui.squashfs"
+  $uncActual=(Wait-Control $window 'UncImagePath').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+  if($uncActual -ne $unc){throw "Unexpected UNC path: $uncActual"}
+  if([IO.File]::ReadAllText("$unc\nested\hello.txt") -ne 'hello'){throw 'GUI-launched UNC read failed'}
+  if(Compare-Object $drivesBefore ([IO.DriveInfo]::GetDrives().Name | Sort-Object)){throw 'UNC assigned a drive letter'}
+  Invoke-Control $window 'StopUnc'
+  $agentStarted=$false
+  $null=Wait-Control $window 'StartUnc' $true
+  if([IO.Directory]::Exists($unc)){throw 'GUI stop did not remove UNC share'}
+  Invoke-Control $window 'StartUnc'
+  $agentStarted=$true
+  $null=Wait-Control $window 'StopUnc' $true
+  $p.CloseMainWindow()|Out-Null
+  if(!$p.WaitForExit(10000)){throw 'GUI did not close with UNC access enabled'}
+  if([IO.File]::ReadAllText("$unc\nested\hello.txt") -ne 'hello'){throw 'Closing GUI stopped UNC access'}
+  $stop=Start-Process "$AppDirectory\WinSquashfs.Unc.exe" -ArgumentList '--stop' -Wait -PassThru
+  if($stop.ExitCode){throw "UNC agent stop exit code $($stop.ExitCode)"}
+  $agentStarted=$false
+  if([IO.Directory]::Exists($unc)){throw 'Background process did not release UNC share'}
+  Write-Host 'WinUI UNC configuration, start, stop and background persistence passed.'
 } catch {
   if(Test-Path $env:WINSQUASHFS_DIAGNOSTICS){Get-Content $env:WINSQUASHFS_DIAGNOSTICS | Write-Host}
+  $uncLog=Join-Path $env:LOCALAPPDATA 'WinSquashfs\unc.log'
+  if(Test-Path $uncLog){Get-Content $uncLog | Write-Host}
   Get-WinEvent -FilterHashtable @{LogName="Application";StartTime=$started;Level=2} -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object { Write-Host $_.Message }
   throw
 } finally {
   Remove-Item Env:WINSQUASHFS_DIAGNOSTICS -ErrorAction SilentlyContinue
   if($p -and !$p.HasExited){$p.CloseMainWindow()|Out-Null;if(!$p.WaitForExit(10000)){$p.Kill();$p.WaitForExit()}}
+  if($agentStarted){Start-Process "$AppDirectory\WinSquashfs.Unc.exe" -ArgumentList '--stop' -Wait}
+  if($backup -ne $null){[IO.File]::WriteAllBytes($uncSettings,$backup)}
+  elseif(Test-Path $uncSettings){Remove-Item $uncSettings -Force}
   Remove-Item $root -Recurse -Force
 }

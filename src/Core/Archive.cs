@@ -218,6 +218,9 @@ public sealed class Archive : IDisposable
 
     public void ExportEntry(Entry entry, string path, CancellationToken token = default)
     {
+        var owner = entry;
+        while (owner.Parent != null) owner = owner.Parent;
+        if (!ReferenceEquals(owner, Root)) throw new ArgumentException("Entry belongs to another image.");
         if (entry.IsFile) { ExportFile(entry, path, token); return; }
         if (!entry.IsDirectory) throw new IOException("Select a file or directory.");
         if (File.Exists(path) || Directory.Exists(path)) throw new IOException("Destination already exists.");

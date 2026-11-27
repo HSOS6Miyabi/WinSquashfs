@@ -22,6 +22,10 @@ public sealed record UncShare(string Name, string Root)
         if (!Path.IsPathFullyQualified(Root) || Root.StartsWith(@"\\", StringComparison.Ordinal))
             throw new ArgumentException("Choose an absolute local directory as the share root.");
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Root));
+        var drive = new DriveInfo(Path.GetPathRoot(root)!);
+        if (drive.DriveType is not (DriveType.Fixed or DriveType.Removable) ||
+            string.Equals(drive.DriveFormat, "SquashFS", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Share roots must be on a local physical drive.");
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
         for (DirectoryInfo? dir = new(root); dir != null; dir = dir.Parent)
             if ((dir.Attributes & FileAttributes.ReparsePoint) != 0)
@@ -48,6 +52,7 @@ internal sealed class UncFileSystem : FileSystemBase
     private readonly UncShare share;
     private readonly ImageCache cache;
     private readonly byte[] security;
+    private readonly LocalReadIdentity readIdentity;
     private static readonly StringComparer Compare = StringComparer.OrdinalIgnoreCase;
 
     private sealed class Node : IDisposable
@@ -63,10 +68,11 @@ internal sealed class UncFileSystem : FileSystemBase
     }
     private sealed record Row(string Name, FileInfo Info);
 
-    internal UncFileSystem(UncShare share, ImageCache cache)
+    internal UncFileSystem(UncShare share, ImageCache cache, LocalReadIdentity readIdentity)
     {
         this.share = share;
         this.cache = cache;
+        this.readIdentity = readIdentity;
         using var identity = WindowsIdentity.GetCurrent();
         string sid = identity.User?.Value ?? throw new UnauthorizedAccessException("Cannot identify the current account.");
         var sd = new RawSecurityDescriptor($"O:{sid}G:{sid}D:P(A;;0x1200A9;;;{sid})");
@@ -80,7 +86,9 @@ internal sealed class UncFileSystem : FileSystemBase
         !part.EndsWith('.') && !part.EndsWith(' ') && part.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 &&
         part.IndexOf(':') < 0;
 
-    private Node? Resolve(string name)
+    private Node? Resolve(string name) => readIdentity.Run(() => ResolveCore(name));
+
+    private Node? ResolveCore(string name)
     {
         var parts = name.Split('\\', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Any(p => !SafeComponent(p))) return null;
@@ -132,7 +140,7 @@ internal sealed class UncFileSystem : FileSystemBase
             IndexNumber = Index(path, entry.Parent == null ? 0 : entry.Inode)
         };
     }
-    private static FileInfo Info(Node node) => node.Entry == null ? DirectoryInfoFor(node.PhysicalPath) : ArchiveInfo(node.PhysicalPath, node.Entry);
+    private FileInfo Info(Node node) => node.Entry == null ? readIdentity.Run(() => DirectoryInfoFor(node.PhysicalPath)) : ArchiveInfo(node.PhysicalPath, node.Entry);
 
     public override int Init(object host)
     {
@@ -207,7 +215,9 @@ internal sealed class UncFileSystem : FileSystemBase
         return STATUS_SUCCESS;
     }
 
-    private IEnumerable<Row> List(Node dir)
+    private IReadOnlyList<Row> List(Node dir) => readIdentity.Run(() => ListCore(dir).ToArray());
+
+    private IEnumerable<Row> ListCore(Node dir)
     {
         if (dir.Name != "\\")
         {
@@ -278,6 +288,7 @@ internal sealed class UncFileSystem : FileSystemBase
 public sealed class UncSession : IDisposable
 {
     private readonly ImageCache cache;
+    private readonly LocalReadIdentity readIdentity;
     private readonly List<FileSystemHost> hosts = new();
     public IReadOnlyList<UncShare> Shares { get; }
     public int CachedImages => cache.Count;
@@ -289,11 +300,13 @@ public sealed class UncSession : IDisposable
         if (Shares.Count == 0 || Shares.Select(s => s.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Shares.Count)
             throw new ArgumentException("At least one share is required; names must be unique.");
         cache = new ImageCache(idleSeconds, maxIdleImages);
+        try { readIdentity = new LocalReadIdentity(); }
+        catch { cache.Dispose(); throw; }
         try
         {
             foreach (var share in Shares)
             {
-                var host = new FileSystemHost(new UncFileSystem(share, cache));
+                var host = new FileSystemHost(new UncFileSystem(share, cache, readIdentity));
                 hosts.Add(host);
                 int status = host.Mount(null);
                 if (status < 0) throw new IOException($"Cannot start {share.UncPath} (NTSTATUS 0x{status:X8}).");
@@ -306,5 +319,6 @@ public sealed class UncSession : IDisposable
         foreach (var host in hosts) host.Dispose();
         hosts.Clear();
         cache.Dispose();
+        readIdentity.Dispose();
     }
 }

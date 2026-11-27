@@ -26,14 +26,20 @@ public sealed record UncSettings(string Root, string Alias = "path", bool Includ
         if (IncludeDrives)
         {
             foreach (var drive in DriveInfo.GetDrives())
-                if (drive.DriveType is DriveType.Fixed or DriveType.Removable && drive.IsReady &&
-                    !string.Equals(drive.DriveFormat, "SquashFS", StringComparison.OrdinalIgnoreCase))
+            {
+                UncShare share;
+                try
                 {
-                    var name = drive.Name[..1].ToUpperInvariant();
-                    if (result.Any(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)))
-                        throw new ArgumentException("Choose an alias different from a drive letter.");
-                    result.Add(new UncShare(name, drive.RootDirectory.FullName).Validate());
+                    if (drive.DriveType is not (DriveType.Fixed or DriveType.Removable) || !drive.IsReady ||
+                        string.Equals(drive.DriveFormat, "SquashFS", StringComparison.OrdinalIgnoreCase)) continue;
+                    share = new UncShare(drive.Name[..1].ToUpperInvariant(), drive.RootDirectory.FullName).Validate();
                 }
+                catch (IOException) { continue; }
+                catch (UnauthorizedAccessException) { continue; }
+                if (result.Any(s => string.Equals(s.Name, share.Name, StringComparison.OrdinalIgnoreCase)))
+                    throw new ArgumentException("Choose an alias different from a drive letter.");
+                result.Add(share);
+            }
         }
         return result;
     }
@@ -67,6 +73,14 @@ public static class UncAgentControl
     public static Mutex CreateInstanceMutex() => new(false, Name("Instance"));
     public static EventWaitHandle CreateStopEvent() => new(false, EventResetMode.ManualReset, Name("Stop"));
     public static EventWaitHandle CreateReadyEvent() => new(false, EventResetMode.ManualReset, Name("Ready"));
+    private static bool IsStartingOrRunning
+    {
+        get
+        {
+            if (!EventWaitHandle.TryOpenExisting(Name("Stop"), out var e)) return false;
+            e.Dispose(); return true;
+        }
+    }
     public static bool IsRunning
     {
         get
@@ -86,7 +100,7 @@ public static class UncAgentControl
         {
             token.ThrowIfCancellationRequested();
             if (IsRunning) return;
-            if (p.HasExited) break;
+            if (p.HasExited && !IsStartingOrRunning) break;
             await Task.Delay(100, token);
         }
         if (IsRunning) return;
