@@ -89,6 +89,11 @@ try {
         if([IO.DriveInfo]::new($driveRoot).DriveFormat -ne 'SquashFS'){throw 'Unexpected filesystem name'}
         if([Convert]::ToHexString([IO.File]::ReadAllBytes($driveRoot+'测试.txt')) -ne '0001027FFF'){throw 'Packaged mount read mismatch'}
         if($ShellEject) {
+            $handler=Get-Item 'HKLM:\Software\Classes\Drive\shellex\ContextMenuHandlers\WinSquashfs.Eject'
+            $clsid=$handler.GetValue('')
+            if($clsid -ne '{9B20352F-1BC4-48E6-AE3B-146F32657DA9}'){throw 'Eject handler registration missing'}
+            $server=(Get-Item "HKLM:\Software\Classes\CLSID\$clsid\InprocServer32").GetValue('')
+            if(!(Test-Path -LiteralPath $server)){throw 'Eject shell extension DLL missing'}
             $shell=New-Object -ComObject Shell.Application
             $computer=$shell.NameSpace(17)
             $item=$null

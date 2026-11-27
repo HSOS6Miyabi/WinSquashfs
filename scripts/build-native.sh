@@ -13,6 +13,9 @@ test -f "$root/include/lzo/lzo1x.h"
 gcc -std=c11 -O2 -Wall -Wextra -Werror -shared -I"$root/include" native/reader.c \
   -L"$root/lib" -lsquashfs -llzo2 -o artifacts/native/winsqfs-native.dll
 cp "$root"/bin/*.dll artifacts/native/
+g++ -std=c++17 -O2 -Wall -Wextra -Werror -shared -static -finput-charset=UTF-8 \
+  native/shell-eject.cpp -lole32 -lshell32 -ladvapi32 -luuid -luser32 \
+  -o artifacts/native/winsqfs-shell.dll
 for exe in mksquashfs unsquashfs sqfscat sqfstar; do
   cp "/usr/bin/$exe.exe" artifacts/native/tools/
 done

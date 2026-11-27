@@ -13,6 +13,8 @@ dotnet publish src/UncAgent/UncAgent.csproj -c Release -r win-x64 --self-contain
 if ($LASTEXITCODE) { throw 'UNC background application publish failed' }
 Copy-Item "$agent\WinSquashfs.Unc.exe","$agent\WinSquashfs.Unc.dll","$agent\WinSquashfs.Unc.deps.json","$agent\WinSquashfs.Unc.runtimeconfig.json" -Destination $dist -Force
 Copy-Item 'artifacts\native\*' $dist -Recurse -Force
+$version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+Rename-Item (Join-Path $dist 'winsqfs-shell.dll') "winsqfs-shell-$version.dll" -Force
 $prerequisites=Join-Path $dist 'prerequisites'
 New-Item -ItemType Directory -Force $prerequisites | Out-Null
 Copy-Item 'artifacts\winfsp.msi' (Join-Path $prerequisites 'WinFsp.msi') -Force

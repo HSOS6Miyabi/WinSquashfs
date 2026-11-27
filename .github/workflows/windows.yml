@@ -159,7 +159,8 @@ jobs:
         run: |
           $p=Start-Process "$env:ProgramFiles\WinSquashfs\Uninstall.exe" -ArgumentList '/S' -Wait -PassThru
           if($p.ExitCode){throw "Uninstall returned $($p.ExitCode)"}
-          if(Test-Path 'HKLM:\Software\Classes\Drive\shell\WinSquashfs.Eject'){throw 'Eject menu was not removed'}
+          if(Test-Path 'HKLM:\Software\Classes\Drive\shellex\ContextMenuHandlers\WinSquashfs.Eject'){throw 'Eject menu was not removed'}
+          if(Test-Path 'HKLM:\Software\Classes\CLSID\{9B20352F-1BC4-48E6-AE3B-146F32657DA9}'){throw 'Eject COM class was not removed'}
           if(Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image'){throw 'File association was not removed'}
       - name: Upload installed application screenshots
         if: always()
