@@ -43,7 +43,7 @@ public sealed class Entry
     public DateTimeOffset Modified { get; }
     public bool IsDirectory => Type is 1 or 8;
     public bool IsFile => Type is 2 or 9;
-    public string Kind => IsDirectory ? "Folder" : IsFile ? "File" : Type is 3 or 10 ? "Symbolic link" : "Special file";
+    public string Kind => IsDirectory ? Localization.T("Folder") : IsFile ? Localization.T("File") : Type is 3 or 10 ? Localization.T("Symbolic link") : Localization.T("Special file");
     public string ArchivePath => BuildPath('/', false);
     public string WindowsPath => BuildPath('\\', true);
     private string BuildPath(char separator, bool windows)
@@ -60,7 +60,7 @@ public sealed class Entry
     {
         Pointer = p; Parent = parent;
         Children = ChildList.AsReadOnly();
-        Name = parent is null ? "" : Marshal.PtrToStringUTF8(Native.ws_name(p)) ?? throw new IOException("Invalid file name.");
+        Name = parent is null ? "" : Marshal.PtrToStringUTF8(Native.ws_name(p)) ?? throw new IOException(Localization.T("Invalid file name."));
         WindowsName = Name;
         Type = Native.ws_type(p); Inode = Native.ws_inode(p); Size = Native.ws_size(p);
         Modified = DateTimeOffset.FromUnixTimeSeconds(Native.ws_mtime(p));
@@ -115,7 +115,7 @@ public sealed class Archive : IDisposable
     {
         Path = System.IO.Path.GetFullPath(path);
         int status = Native.ws_open(Path, out handle);
-        if (status != 0) { handle?.Dispose(); throw new IOException($"Cannot open SquashFS image (error {status})."); }
+        if (status != 0) { handle?.Dispose(); throw new IOException(Localization.T("Cannot open SquashFS image (error {0}).", status)); }
         try
         {
             ImageSize = Native.ws_image_size(handle); BlockSize = Native.ws_block_size(handle); Compression = Native.ws_compression(handle);
@@ -156,14 +156,14 @@ public sealed class Archive : IDisposable
         lock (gate)
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (!entry.IsFile) throw new IOException("Not a regular file.");
+            if (!entry.IsFile) throw new IOException(Localization.T("Not a regular file."));
             var owner = entry;
             while (owner.Parent != null) owner = owner.Parent;
-            if (!ReferenceEquals(owner, Root)) throw new ArgumentException("Entry belongs to another image.");
+            if (!ReferenceEquals(owner, Root)) throw new ArgumentException(Localization.T("Entry belongs to another image."));
             if (offset >= entry.Size || length == 0) return 0;
             length = (uint)Math.Min((ulong)length, entry.Size - offset);
             int result = Native.ws_read(handle, entry.Pointer, offset, buffer, length);
-            if (result < 0) throw new IOException($"SquashFS read failed (error {result}).");
+            if (result < 0) throw new IOException(Localization.T("SquashFS read failed (error {0}).", result));
             return result;
         }
     }
@@ -180,7 +180,7 @@ public sealed class Archive : IDisposable
             ObjectDisposedException.ThrowIf(disposed, this);
             var owner = entry;
             while (owner.Parent != null) owner = owner.Parent;
-            if (!ReferenceEquals(owner, Root)) throw new ArgumentException("Entry belongs to another image.");
+            if (!ReferenceEquals(owner, Root)) throw new ArgumentException(Localization.T("Entry belongs to another image."));
         }
     }
 
@@ -188,7 +188,7 @@ public sealed class Archive : IDisposable
     {
         ValidateEntry(entry);
         token.ThrowIfCancellationRequested();
-        if (!entry.IsFile) throw new IOException("Select a regular file.");
+        if (!entry.IsFile) throw new IOException(Localization.T("Select a regular file."));
         using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         var buffer = new byte[1024 * 1024];
         try
@@ -230,7 +230,7 @@ public sealed class Archive : IDisposable
                 token.ThrowIfCancellationRequested();
                 int read;
                 try { read = Read(item, offset, buffer); }
-                catch (IOException ex) { throw new IOException($"Unable to read {item.ArchivePath} at offset {offset}.", ex); }
+                catch (IOException ex) { throw new IOException(Localization.T("Unable to read {0} at offset {1}.", item.ArchivePath, offset), ex); }
                 if (read == 0) throw new EndOfStreamException(item.ArchivePath);
                 offset += (uint)read;
                 bytes = checked(bytes + (uint)read);
@@ -247,8 +247,8 @@ public sealed class Archive : IDisposable
         ValidateEntry(entry);
         token.ThrowIfCancellationRequested();
         if (entry.IsFile) { ExportFile(entry, path, token); return; }
-        if (!entry.IsDirectory) throw new IOException("Select a file or directory.");
-        if (File.Exists(path) || Directory.Exists(path)) throw new IOException("Destination already exists.");
+        if (!entry.IsDirectory) throw new IOException(Localization.T("Select a file or directory."));
+        if (File.Exists(path) || Directory.Exists(path)) throw new IOException(Localization.T("Destination already exists."));
         path = System.IO.Path.GetFullPath(path);
         string staging = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, ".winsqfs-" + Guid.NewGuid().ToString("N") + ".partial");
         try
@@ -274,7 +274,7 @@ public sealed class Archive : IDisposable
                     {
                         ExportFile(child, destination, token);
                     }
-                    else log?.Invoke("Skipped " + child.ArchivePath + " (" + child.Kind + ")");
+                    else log?.Invoke(Localization.T("Skipped {0} ({1})", child.ArchivePath, child.Kind));
                 }
             }
             for (int i = directories.Count - 1; i >= 0; i--)

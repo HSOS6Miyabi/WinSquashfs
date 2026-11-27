@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 using Microsoft.UI.Xaml;
+using WinSquashfs.Core;
 
 namespace WinSquashfs;
 public partial class App : Application
@@ -28,7 +29,14 @@ public partial class App : Application
     {
         UnhandledException += (_, args) => RecordException(args.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, args) => RecordException(args.ExceptionObject as Exception);
-        try { InitializeComponent(); }
+        try
+        {
+            Localization.Initialize();
+            try { Windows.Globalization.ApplicationLanguages.PrimaryLanguageOverride = Localization.Language; }
+            catch (Exception) { }
+            InitializeComponent();
+            LocalizationResources.Install(Resources);
+        }
         catch (Exception e) { RecordException(e); throw; }
     }
 

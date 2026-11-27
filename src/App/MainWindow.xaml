@@ -8,59 +8,59 @@
   <Grid Padding="20,8" ColumnDefinitions="*,Auto">
    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
     <TextBlock Text="WinSquashfs" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
-    <TextBlock Text="Image workspace" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+    <TextBlock Text="{StaticResource L_Image_workspace}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
    </StackPanel>
    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
     <FontIcon Glyph="&#xE72E;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-    <TextBlock Text="Read-only volumes" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+    <TextBlock Text="{StaticResource L_Read_only_volumes}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
    </StackPanel>
   </Grid>
   <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" OpenPaneLength="200" CompactModeThresholdWidth="640" ExpandedModeThresholdWidth="980"
     IsBackButtonVisible="Collapsed" IsSettingsVisible="False" IsPaneToggleButtonVisible="True"
     SelectionChanged="NavigationChanged">
    <NavigationView.MenuItems>
-    <NavigationViewItem x:Name="BrowseNav" Content="Browse image" Icon="Folder" Tag="browse" AutomationProperties.AutomationId="NavBrowse"/>
-    <NavigationViewItem x:Name="PackNav" Content="Create image" Icon="Add" Tag="pack" AutomationProperties.AutomationId="NavPack"/>
-    <NavigationViewItem x:Name="MountNav" Content="Mounted images" Icon="Folder" Tag="mount" AutomationProperties.AutomationId="NavMount"/>
-    <NavigationViewItem x:Name="UncNav" Content="UNC access" Icon="Link" Tag="unc" AutomationProperties.AutomationId="NavUnc"/>
-    <NavigationViewItem x:Name="ToolsNav" Content="Tools &amp; about" Icon="Setting" Tag="tools" AutomationProperties.AutomationId="NavTools"/>
+    <NavigationViewItem x:Name="BrowseNav" Content="{StaticResource L_Browse_image}" Icon="Folder" Tag="browse" AutomationProperties.AutomationId="NavBrowse"/>
+    <NavigationViewItem x:Name="PackNav" Content="{StaticResource L_Create_image}" Icon="Add" Tag="pack" AutomationProperties.AutomationId="NavPack"/>
+    <NavigationViewItem x:Name="MountNav" Content="{StaticResource L_Mounted_images}" Icon="Folder" Tag="mount" AutomationProperties.AutomationId="NavMount"/>
+    <NavigationViewItem x:Name="UncNav" Content="{StaticResource L_UNC_access}" Icon="Link" Tag="unc" AutomationProperties.AutomationId="NavUnc"/>
+    <NavigationViewItem x:Name="ToolsNav" Content="{StaticResource L_Tools_about}" Icon="Setting" Tag="tools" AutomationProperties.AutomationId="NavTools"/>
    </NavigationView.MenuItems>
    <Grid Padding="20,8,20,12">
     <Grid x:Name="BrowsePage" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="12" AllowDrop="True" DragOver="ImageDragOver" Drop="ImageDropped">
      <Grid ColumnDefinitions="*,Auto">
       <StackPanel Spacing="3">
-       <TextBlock Text="Image browser" Style="{StaticResource SubtitleTextBlockStyle}"/>
-       <TextBlock x:Name="ImageSummary" MaxLines="2" TextTrimming="CharacterEllipsis" Text="Open a SquashFS image to explore its contents." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="ImageSummary"/>
+       <TextBlock Text="{StaticResource L_Image_browser}" Style="{StaticResource SubtitleTextBlockStyle}"/>
+       <TextBlock x:Name="ImageSummary" MaxLines="2" TextTrimming="CharacterEllipsis" Text="{StaticResource L_Open_a_SquashFS_image_to_explore_its_contents}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="ImageSummary"/>
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-       <Button x:Name="CloseImageButton" Content="Close" Click="CloseImageClicked" ToolTipService.ToolTip="Close current image" AutomationProperties.AutomationId="CloseImage"/>
-       <Button x:Name="RecentButton" Content="Recent" AutomationProperties.AutomationId="RecentImages">
+       <Button x:Name="CloseImageButton" Content="{StaticResource L_Close}" Click="CloseImageClicked" ToolTipService.ToolTip="{StaticResource L_Close_current_image}" AutomationProperties.AutomationId="CloseImage"/>
+       <Button x:Name="RecentButton" Content="{StaticResource L_Recent}" AutomationProperties.AutomationId="RecentImages">
         <Button.Flyout><MenuFlyout x:Name="RecentMenu"/></Button.Flyout>
        </Button>
        <Button x:Name="OpenButton" Click="OpenClicked" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="OpenImage">
-        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="OpenFile"/><TextBlock Text="Open image"/></StackPanel>
+        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="OpenFile"/><TextBlock Text="{StaticResource L_Open_image}"/></StackPanel>
        </Button>
       </StackPanel>
      </Grid>
      <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-      <Button x:Name="UpButton" Click="UpClicked" ToolTipService.ToolTip="Parent directory" AutomationProperties.AutomationId="UpFolder"><SymbolIcon Symbol="Up"/></Button>
-      <TextBox Grid.Column="1" x:Name="PathBox" Text="\" PlaceholderText="Path inside image" KeyDown="PathKeyDown" AutomationProperties.AutomationId="ArchivePath"/>
-      <TextBox Grid.Column="2" x:Name="SearchBox" Width="175" PlaceholderText="Filter files" TextChanged="FilterChanged" AutomationProperties.AutomationId="FilterFiles"/>
+      <Button x:Name="UpButton" Click="UpClicked" ToolTipService.ToolTip="{StaticResource L_Parent_directory}" AutomationProperties.AutomationId="UpFolder"><SymbolIcon Symbol="Up"/></Button>
+      <TextBox Grid.Column="1" x:Name="PathBox" Text="\" PlaceholderText="{StaticResource L_Path_inside_image}" KeyDown="PathKeyDown" AutomationProperties.AutomationId="ArchivePath"/>
+      <TextBox Grid.Column="2" x:Name="SearchBox" Width="175" PlaceholderText="{StaticResource L_Filter_files}" TextChanged="FilterChanged" AutomationProperties.AutomationId="FilterFiles"/>
      </Grid>
      <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
-      <Button x:Name="EnterButton" Click="EnterClicked" Content="Open folder" AutomationProperties.AutomationId="OpenFolder"/>
-      <Button x:Name="ExtractButton" Click="ExtractSelectedClicked" Content="Extract selected" AutomationProperties.AutomationId="ExtractSelected"/>
-      <Button x:Name="ExtractAllButton" Click="ExtractAllClicked" Content="Extract all" AutomationProperties.AutomationId="ExtractAll"/>
-      <Button x:Name="MountButton" Click="MountClicked" Content="Mount image" AutomationProperties.AutomationId="MountImage"/>
-      <Button x:Name="VerifyButton" Click="VerifyClicked" Content="Verify" ToolTipService.ToolTip="Read every file and verify image readability" AutomationProperties.AutomationId="VerifyImage"/>
+      <Button x:Name="EnterButton" Click="EnterClicked" Content="{StaticResource L_Open_folder}" AutomationProperties.AutomationId="OpenFolder"/>
+      <Button x:Name="ExtractButton" Click="ExtractSelectedClicked" Content="{StaticResource L_Extract_selected}" AutomationProperties.AutomationId="ExtractSelected"/>
+      <Button x:Name="ExtractAllButton" Click="ExtractAllClicked" Content="{StaticResource L_Extract_all}" AutomationProperties.AutomationId="ExtractAll"/>
+      <Button x:Name="MountButton" Click="MountClicked" Content="{StaticResource L_Mount_image}" AutomationProperties.AutomationId="MountImage"/>
+      <Button x:Name="VerifyButton" Click="VerifyClicked" Content="{StaticResource L_Verify}" ToolTipService.ToolTip="{StaticResource L_Read_every_file_and_verify_image_readability}" AutomationProperties.AutomationId="VerifyImage"/>
      </StackPanel>
      <Grid Grid.Row="3" ColumnDefinitions="3*,2*" ColumnSpacing="12">
       <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
        <Grid RowDefinitions="Auto,*">
         <Grid Padding="12,8" ColumnDefinitions="*,100,90">
-         <TextBlock Text="Name" FontWeight="SemiBold"/>
-         <TextBlock Grid.Column="1" Text="Type" FontWeight="SemiBold"/>
-         <TextBlock Grid.Column="2" Text="Size" FontWeight="SemiBold" TextAlignment="Right"/>
+         <TextBlock Text="{StaticResource L_Name}" FontWeight="SemiBold"/>
+         <TextBlock Grid.Column="1" Text="{StaticResource L_Type}" FontWeight="SemiBold"/>
+         <TextBlock Grid.Column="2" Text="{StaticResource L_Size}" FontWeight="SemiBold" TextAlignment="Right"/>
         </Grid>
         <ListView Grid.Row="1" x:Name="Entries" SelectionMode="Single" SelectionChanged="EntrySelectionChanged" DoubleTapped="EntryDoubleTapped" AutomationProperties.AutomationId="FileList">
          <ListView.ItemContainerStyle>
@@ -79,14 +79,14 @@
           </DataTemplate>
          </ListView.ItemTemplate>
         </ListView>
-        <TextBlock Grid.Row="1" x:Name="BrowserEmpty" Text="Open or drop a SquashFS image to begin." TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="12" IsHitTestVisible="False"/>
+        <TextBlock Grid.Row="1" x:Name="BrowserEmpty" Text="{StaticResource L_Open_or_drop_a_SquashFS_image_to_begin}" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="12" IsHitTestVisible="False"/>
        </Grid>
       </Border>
       <Border Grid.Column="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="14" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
        <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
-        <TextBlock Text="File details" FontWeight="SemiBold"/>
-        <TextBlock Grid.Row="1" x:Name="Details" Text="Select an entry to view its properties." TextWrapping="Wrap" MaxLines="7" TextTrimming="CharacterEllipsis"/>
-        <TextBox Grid.Row="2" x:Name="Preview" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" ScrollViewer.VerticalScrollBarVisibility="Auto" Header="Preview · first 16 KiB" AutomationProperties.AutomationId="FilePreview"/>
+        <TextBlock Text="{StaticResource L_File_details}" FontWeight="SemiBold"/>
+        <TextBlock Grid.Row="1" x:Name="Details" Text="{StaticResource L_Select_an_entry_to_view_its_properties}" TextWrapping="Wrap" MaxLines="7" TextTrimming="CharacterEllipsis"/>
+        <TextBox Grid.Row="2" x:Name="Preview" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" ScrollViewer.VerticalScrollBarVisibility="Auto" Header="{StaticResource L_Preview_first_16_KiB}" AutomationProperties.AutomationId="FilePreview"/>
        </Grid>
       </Border>
      </Grid>
@@ -96,82 +96,82 @@
      <ScrollViewer x:Name="PackScroll" VerticalScrollBarVisibility="Visible" AutomationProperties.AutomationId="PackScroll">
      <StackPanel Spacing="8" Padding="0,0,8,10">
       <StackPanel Spacing="3">
-       <TextBlock Text="Create a SquashFS image" Style="{StaticResource SubtitleTextBlockStyle}"/>
-       <TextBlock Text="Choose a source folder and compression settings. The image is written to a new file." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+       <TextBlock Text="{StaticResource L_Create_a_SquashFS_image}" Style="{StaticResource SubtitleTextBlockStyle}"/>
+       <TextBlock Text="{StaticResource L_Choose_a_source_folder_and_compression_settings_The_image_is_written_to_a_new_file}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
       </StackPanel>
       <Border CornerRadius="8" Padding="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="8">
-        <TextBlock Text="Source and destination" FontWeight="SemiBold"/>
+        <TextBlock Text="{StaticResource L_Source_and_destination}" FontWeight="SemiBold"/>
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-         <TextBox x:Name="SourceBox" Header="Source directory" AutomationProperties.AutomationId="PackSource"/>
-         <Button Grid.Column="1" Content="Browse…" Click="SourceClicked" VerticalAlignment="Bottom"/>
+         <TextBox x:Name="SourceBox" Header="{StaticResource L_Source_directory}" AutomationProperties.AutomationId="PackSource"/>
+         <Button Grid.Column="1" Content="{StaticResource L_Browse}" Click="SourceClicked" VerticalAlignment="Bottom"/>
         </Grid>
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-         <TextBox x:Name="OutputBox" Header="Output image" AutomationProperties.AutomationId="PackOutput"/>
-         <Button Grid.Column="1" Content="Choose folder…" Click="OutputClicked" VerticalAlignment="Bottom"/>
+         <TextBox x:Name="OutputBox" Header="{StaticResource L_Output_image}" AutomationProperties.AutomationId="PackOutput"/>
+         <Button Grid.Column="1" Content="{StaticResource L_Choose_folder}" Click="OutputClicked" VerticalAlignment="Bottom"/>
         </Grid>
        </StackPanel>
       </Border>
       <Border CornerRadius="8" Padding="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="8">
-        <TextBlock Text="Compression" FontWeight="SemiBold"/>
+        <TextBlock Text="{StaticResource L_Compression}" FontWeight="SemiBold"/>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <ComboBox x:Name="CodecBox" Header="Algorithm" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="CompressionCodec"/>
-         <ComboBox Grid.Column="1" x:Name="BlockBox" Header="Data block size" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="BlockSize"/>
+         <ComboBox x:Name="CodecBox" Header="{StaticResource L_Algorithm}" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="CompressionCodec"/>
+         <ComboBox Grid.Column="1" x:Name="BlockBox" Header="{StaticResource L_Data_block_size}" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="BlockSize"/>
         </Grid>
         <TextBlock x:Name="CodecHelp" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <NumberBox x:Name="LevelBox" PlaceholderText="Default" Header="Compression level (optional)" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="CompressionLevel"/>
-         <NumberBox Grid.Column="1" x:Name="ThreadsBox" Header="Processors (0 = automatic)" Value="0" Minimum="0" Maximum="1024" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="ProcessorCount"/>
+         <NumberBox x:Name="LevelBox" PlaceholderText="{StaticResource L_Default}" Header="{StaticResource L_Compression_level_optional}" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="CompressionLevel"/>
+         <NumberBox Grid.Column="1" x:Name="ThreadsBox" Header="{StaticResource L_Processors_0_automatic}" Value="0" Minimum="0" Maximum="1024" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="ProcessorCount"/>
         </Grid>
        </StackPanel>
       </Border>
-      <Expander Header="Advanced parameters" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False" AutomationProperties.AutomationId="AdvancedParameters">
+      <Expander Header="{StaticResource L_Advanced_parameters}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False" AutomationProperties.AutomationId="AdvancedParameters">
        <StackPanel Spacing="8" Padding="0,6,0,6">
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <NumberBox x:Name="MemoryBox" PlaceholderText="Automatic" Header="Memory limit (MiB, optional)" Minimum="64" Maximum="1048576" SpinButtonPlacementMode="Compact"/>
-         <TextBox Grid.Column="1" x:Name="TimestampBox" Header="Reproducible timestamp (Unix seconds)" PlaceholderText="Optional"/>
+         <NumberBox x:Name="MemoryBox" PlaceholderText="{StaticResource L_Automatic}" Header="{StaticResource L_Memory_limit_MiB_optional}" Minimum="64" Maximum="1048576" SpinButtonPlacementMode="Compact"/>
+         <TextBox Grid.Column="1" x:Name="TimestampBox" Header="{StaticResource L_Reproducible_timestamp_Unix_seconds}" PlaceholderText="{StaticResource L_Optional}"/>
         </Grid>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
          <StackPanel Spacing="3">
-          <CheckBox x:Name="NoFragments" Content="Disable fragments"/>
-          <CheckBox x:Name="AlwaysFragments" Content="Pack tail ends into fragments"/>
-          <CheckBox x:Name="NoDuplicates" Content="Disable duplicate detection"/>
-          <CheckBox x:Name="NoSparse" Content="Disable sparse-file detection"/>
-          <CheckBox x:Name="NoXattrs" Content="Omit extended attributes"/>
-          <CheckBox x:Name="AllRoot" Content="Set owner and group to root"/>
+          <CheckBox x:Name="NoFragments" Content="{StaticResource L_Disable_fragments}"/>
+          <CheckBox x:Name="AlwaysFragments" Content="{StaticResource L_Pack_tail_ends_into_fragments}"/>
+          <CheckBox x:Name="NoDuplicates" Content="{StaticResource L_Disable_duplicate_detection}"/>
+          <CheckBox x:Name="NoSparse" Content="{StaticResource L_Disable_sparse_file_detection}"/>
+          <CheckBox x:Name="NoXattrs" Content="{StaticResource L_Omit_extended_attributes}"/>
+          <CheckBox x:Name="AllRoot" Content="{StaticResource L_Set_owner_and_group_to_root}"/>
          </StackPanel>
          <StackPanel Grid.Column="1" Spacing="3">
-          <CheckBox x:Name="NoExports" Content="Omit export table"/>
-          <CheckBox x:Name="NoDataCompression" Content="Store data without compression"/>
-          <CheckBox x:Name="NoInodeCompression" Content="Store inodes without compression"/>
-          <CheckBox x:Name="NoFragmentCompression" Content="Store fragments without compression"/>
-          <CheckBox x:Name="Lz4Hc" Content="LZ4 high compression"/>
-          <CheckBox x:Name="KeepDirectory" Content="Keep source directory as root child"/>
+          <CheckBox x:Name="NoExports" Content="{StaticResource L_Omit_export_table}"/>
+          <CheckBox x:Name="NoDataCompression" Content="{StaticResource L_Store_data_without_compression}"/>
+          <CheckBox x:Name="NoInodeCompression" Content="{StaticResource L_Store_inodes_without_compression}"/>
+          <CheckBox x:Name="NoFragmentCompression" Content="{StaticResource L_Store_fragments_without_compression}"/>
+          <CheckBox x:Name="Lz4Hc" Content="{StaticResource L_LZ4_high_compression}"/>
+          <CheckBox x:Name="KeepDirectory" Content="{StaticResource L_Keep_source_directory_as_root_child}"/>
          </StackPanel>
         </Grid>
-        <TextBox x:Name="ExcludeBox" Header="Exclude-list file (optional)" PlaceholderText="Full path to a text file"/>
+        <TextBox x:Name="ExcludeBox" Header="{StaticResource L_Exclude_list_file_optional}" PlaceholderText="{StaticResource L_Full_path_to_a_text_file}"/>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <TextBox x:Name="XzDict" Header="XZ dictionary size (optional)" PlaceholderText="e.g. 75% or 64K"/>
-         <TextBox Grid.Column="1" x:Name="XzFilters" Header="XZ BCJ filters (optional)" PlaceholderText="e.g. x86,arm"/>
+         <TextBox x:Name="XzDict" Header="{StaticResource L_XZ_dictionary_size_optional}" PlaceholderText="{StaticResource L_e_g_75_or_64K}"/>
+         <TextBox Grid.Column="1" x:Name="XzFilters" Header="{StaticResource L_XZ_BCJ_filters_optional}" PlaceholderText="{StaticResource L_e_g_x86_arm}"/>
         </Grid>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <NumberBox x:Name="GzipWindow" PlaceholderText="Default" Header="GZIP window size (optional)" Minimum="8" Maximum="15" SpinButtonPlacementMode="Compact"/>
-         <ComboBox Grid.Column="1" x:Name="LzoAlgorithm" Header="LZO algorithm" HorizontalAlignment="Stretch"/>
+         <NumberBox x:Name="GzipWindow" PlaceholderText="{StaticResource L_Default}" Header="{StaticResource L_GZIP_window_size_optional}" Minimum="8" Maximum="15" SpinButtonPlacementMode="Compact"/>
+         <ComboBox Grid.Column="1" x:Name="LzoAlgorithm" Header="{StaticResource L_LZO_algorithm}" HorizontalAlignment="Stretch"/>
         </Grid>
        </StackPanel>
       </Expander>
-      <Expander x:Name="LogExpander" Header="Operation log" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+      <Expander x:Name="LogExpander" Header="{StaticResource L_Operation_log}" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
        <TextBox x:Name="OperationLog" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100" MaxHeight="220" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.AutomationId="OperationLog"/>
       </Expander>
      </StackPanel>
      </ScrollViewer>
      <Border Grid.Row="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" Padding="10,8">
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-       <TextBlock Text="Creates a new image without overwriting an existing file." TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+       <TextBlock Text="{StaticResource L_Creates_a_new_image_without_overwriting_an_existing_file}" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-        <Button x:Name="ResetPackButton" Click="ResetClicked" Content="Restore defaults"/>
-        <Button x:Name="CreateButton" Click="CreateClicked" Content="Create image" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="CreateImage"/>
+        <Button x:Name="ResetPackButton" Click="ResetClicked" Content="{StaticResource L_Restore_defaults}"/>
+        <Button x:Name="CreateButton" Click="CreateClicked" Content="{StaticResource L_Create_image}" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="CreateImage"/>
        </StackPanel>
       </Grid>
      </Border>
@@ -179,14 +179,14 @@
 
     <Grid x:Name="MountPage" Visibility="Collapsed" RowDefinitions="Auto,Auto,*" RowSpacing="14">
      <StackPanel Spacing="4">
-      <TextBlock Text="Mounted images" Style="{StaticResource SubtitleTextBlockStyle}"/>
-      <TextBlock Text="Mount images as read-only Windows volumes. Data blocks are read directly from the image." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+      <TextBlock Text="{StaticResource L_Mounted_images}" Style="{StaticResource SubtitleTextBlockStyle}"/>
+      <TextBlock Text="{StaticResource L_Mount_images_as_read_only_Windows_volumes_Data_blocks_are_read_directly_from_the_image}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
      </StackPanel>
      <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
       <ComboBox x:Name="DriveBox" Width="150" AutomationProperties.AutomationId="MountDrive"/>
-      <Button x:Name="MountHereButton" Click="MountHereClicked" Content="Mount current image" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="MountCurrent"/>
-      <Button x:Name="ExplorerButton" Click="ExplorerClicked" Content="Open in Explorer" AutomationProperties.AutomationId="OpenExplorer"/>
-      <Button x:Name="UnmountButton" Click="UnmountClicked" Content="Unmount" AutomationProperties.AutomationId="UnmountImage"/>
+      <Button x:Name="MountHereButton" Click="MountHereClicked" Content="{StaticResource L_Mount_current_image}" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="MountCurrent"/>
+      <Button x:Name="ExplorerButton" Click="ExplorerClicked" Content="{StaticResource L_Open_in_Explorer}" AutomationProperties.AutomationId="OpenExplorer"/>
+      <Button x:Name="UnmountButton" Click="UnmountClicked" Content="{StaticResource L_Unmount}" AutomationProperties.AutomationId="UnmountImage"/>
      </StackPanel>
      <ListView Grid.Row="2" x:Name="MountedList" SelectionMode="Single" SelectionChanged="MountSelectionChanged" AutomationProperties.AutomationId="MountedList">
       <ListView.ItemTemplate>
@@ -201,91 +201,101 @@
        </DataTemplate>
       </ListView.ItemTemplate>
      </ListView>
-     <TextBlock Grid.Row="2" x:Name="MountEmpty" Text="No mounted images. Open an image to mount it." TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsHitTestVisible="False"/>
+     <TextBlock Grid.Row="2" x:Name="MountEmpty" Text="{StaticResource L_No_mounted_images_Open_an_image_to_mount_it}" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsHitTestVisible="False"/>
     </Grid>
 
     <Grid x:Name="UncPage" Visibility="Collapsed" RowDefinitions="*,Auto" RowSpacing="10" MaxWidth="900" HorizontalAlignment="Stretch">
      <ScrollViewer x:Name="UncScroll" VerticalScrollBarVisibility="Visible" AutomationProperties.AutomationId="UncScroll">
      <StackPanel Spacing="10" Padding="0,0,8,10">
       <StackPanel Spacing="4">
-       <TextBlock Text="Direct UNC access" Style="{StaticResource SubtitleTextBlockStyle}"/>
-       <TextBlock Text="Open any image in a configured directory using its UNC path. No drive letter or extracted copy is created." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+       <TextBlock Text="{StaticResource L_Direct_UNC_access}" Style="{StaticResource SubtitleTextBlockStyle}"/>
+       <TextBlock Text="{StaticResource L_Open_any_image_in_a_configured_directory_using_its_UNC_path_No_drive_letter_or_extracted_copy_is_created}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
       </StackPanel>
       <Border Padding="12" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="10">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
          <StackPanel Spacing="4">
-          <TextBlock Text="Background process" FontWeight="SemiBold"/>
-          <TextBlock x:Name="UncStatus" Text="Stopped" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="UncStatus"/>
+          <TextBlock Text="{StaticResource L_Background_process}" FontWeight="SemiBold"/>
+          <TextBlock x:Name="UncStatus" Text="{StaticResource L_Stopped}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="UncStatus"/>
          </StackPanel>
          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-          <Button x:Name="StartUncButton" Content="Start" Click="StartUncClicked" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="StartUnc"/>
-          <Button x:Name="StopUncButton" Content="Stop" Click="StopUncClicked" AutomationProperties.AutomationId="StopUnc"/>
+          <Button x:Name="StartUncButton" Content="{StaticResource L_Start}" Click="StartUncClicked" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="StartUnc"/>
+          <Button x:Name="StopUncButton" Content="{StaticResource L_Stop}" Click="StopUncClicked" AutomationProperties.AutomationId="StopUnc"/>
          </StackPanel>
         </Grid>
-        <TextBlock Text="Access remains available after closing this window. Images open on demand." TextWrapping="Wrap"/>
+        <TextBlock Text="{StaticResource L_Access_remains_available_after_closing_this_window_Images_open_on_demand}" TextWrapping="Wrap"/>
         <ScrollViewer MaxHeight="76" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="UncShares" TextWrapping="Wrap" FontFamily="Consolas" AutomationProperties.AutomationId="UncShares"/></ScrollViewer>
        </StackPanel>
       </Border>
       <Border Padding="12" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="10">
-        <TextBlock Text="Current image UNC path" FontWeight="SemiBold"/>
+        <TextBlock Text="{StaticResource L_Current_image_UNC_path}" FontWeight="SemiBold"/>
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
-         <TextBox x:Name="UncImagePathBox" PlaceholderText="Open an image to see its UNC path" IsReadOnly="True" AutomationProperties.AutomationId="UncImagePath"/>
-         <Button Grid.Column="1" x:Name="CopyUncButton" Content="Copy" Click="CopyUncClicked" AutomationProperties.AutomationId="CopyUnc"/>
-         <Button Grid.Column="2" x:Name="OpenUncButton" Content="Open in Explorer" Click="OpenUncClicked" AutomationProperties.AutomationId="OpenUnc"/>
+         <TextBox x:Name="UncImagePathBox" PlaceholderText="{StaticResource L_Open_an_image_to_see_its_UNC_path}" IsReadOnly="True" AutomationProperties.AutomationId="UncImagePath"/>
+         <Button Grid.Column="1" x:Name="CopyUncButton" Content="{StaticResource L_Copy}" Click="CopyUncClicked" AutomationProperties.AutomationId="CopyUnc"/>
+         <Button Grid.Column="2" x:Name="OpenUncButton" Content="{StaticResource L_Open_in_Explorer}" Click="OpenUncClicked" AutomationProperties.AutomationId="OpenUnc"/>
         </Grid>
        </StackPanel>
       </Border>
       <Border Padding="12" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="8">
-        <TextBlock Text="Share configuration" FontWeight="SemiBold"/>
+        <TextBlock Text="{StaticResource L_Share_configuration}" FontWeight="SemiBold"/>
         <Grid ColumnDefinitions="*,Auto,150" ColumnSpacing="8">
-         <TextBox x:Name="UncRootBox" Header="Local directory" AutomationProperties.AutomationId="UncRoot"/>
-         <Button Grid.Column="1" Content="Browse…" VerticalAlignment="Bottom" Click="UncRootClicked"/>
-         <TextBox Grid.Column="2" x:Name="UncAliasBox" Header="Share name" PlaceholderText="path" AutomationProperties.AutomationId="UncAlias"/>
+         <TextBox x:Name="UncRootBox" Header="{StaticResource L_Local_directory}" AutomationProperties.AutomationId="UncRoot"/>
+         <Button Grid.Column="1" Content="{StaticResource L_Browse}" VerticalAlignment="Bottom" Click="UncRootClicked"/>
+         <TextBox Grid.Column="2" x:Name="UncAliasBox" Header="{StaticResource L_Share_name}" PlaceholderText="path" AutomationProperties.AutomationId="UncAlias"/>
         </Grid>
-        <CheckBox x:Name="UncDrivesBox" Content="Include local fixed and removable drives" AutomationProperties.AutomationId="UncDrives"/>
-        <TextBlock Text="For example, C:\images\demo.squashfs becomes \\sfs$\C\images\demo.squashfs. Only the current Windows account is granted access." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <CheckBox x:Name="UncDrivesBox" Content="{StaticResource L_Include_local_fixed_and_removable_drives}" AutomationProperties.AutomationId="UncDrives"/>
+        <TextBlock Text="{StaticResource L_For_example_C_images_demo_squashfs_becomes_sfs_C_images_demo_squashfs_Only_the_current_Windows_account_is_gr}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-         <NumberBox x:Name="UncIdleBox" Header="Idle timeout (seconds)" Minimum="0" Maximum="86400" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="UncIdle"/>
-         <NumberBox Grid.Column="1" x:Name="UncLimitBox" Header="Maximum idle images" Minimum="0" Maximum="1024" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="UncLimit"/>
+         <NumberBox x:Name="UncIdleBox" Header="{StaticResource L_Idle_timeout_seconds}" Minimum="0" Maximum="86400" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="UncIdle"/>
+         <NumberBox Grid.Column="1" x:Name="UncLimitBox" Header="{StaticResource L_Maximum_idle_images}" Minimum="0" Maximum="1024" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="UncLimit"/>
         </Grid>
-        <TextBlock Text="Set either value to zero to release an image as soon as no open handle remains. Active handles retain their image." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        <CheckBox x:Name="UncLoginBox" Content="Start direct UNC access when I sign in" AutomationProperties.AutomationId="UncLogin"/>
+        <TextBlock Text="{StaticResource L_Set_either_value_to_zero_to_release_an_image_as_soon_as_no_open_handle_remains_Active_handles_retain_their_i}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <CheckBox x:Name="UncLoginBox" Content="{StaticResource L_Start_direct_UNC_access_when_I_sign_in}" AutomationProperties.AutomationId="UncLogin"/>
        </StackPanel>
       </Border>
      </StackPanel>
      </ScrollViewer>
      <Border Grid.Row="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" Padding="10,8">
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
-       <TextBlock Text="Applying changes restarts a running background process." TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-       <Button Grid.Column="1" x:Name="UncApplyButton" Content="Save and apply" Click="UncApplyClicked" AutomationProperties.AutomationId="ApplyUnc"/>
+       <TextBlock Text="{StaticResource L_Applying_changes_restarts_a_running_background_process}" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+       <Button Grid.Column="1" x:Name="UncApplyButton" Content="{StaticResource L_Save_and_apply}" Click="UncApplyClicked" AutomationProperties.AutomationId="ApplyUnc"/>
       </Grid>
      </Border>
     </Grid>
 
     <ScrollViewer x:Name="ToolsPage" Visibility="Collapsed">
      <StackPanel Spacing="16" MaxWidth="760">
-      <TextBlock Text="Tools &amp; about" Style="{StaticResource SubtitleTextBlockStyle}"/>
+      <TextBlock Text="{StaticResource L_Tools_about}" Style="{StaticResource SubtitleTextBlockStyle}"/>
+      <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="8">
+        <TextBlock Text="{StaticResource L_Language}" FontWeight="SemiBold"/>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+         <ComboBox x:Name="LanguageBox" Header="{StaticResource L_Interface_language}" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="InterfaceLanguage"/>
+         <Button Grid.Column="1" x:Name="SaveLanguageButton" Content="{StaticResource L_Save_language}" VerticalAlignment="Bottom" Click="SaveLanguageClicked" AutomationProperties.AutomationId="SaveLanguage"/>
+        </Grid>
+        <TextBlock Text="{StaticResource L_Language_changes_apply_when_the_application_restarts}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+       </StackPanel>
+      </Border>
       <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="10">
-        <TextBlock Text="Linux SquashFS command-line tools" FontWeight="SemiBold"/>
-        <TextBlock Text="The distribution includes the MSYS2 builds of mksquashfs, unsquashfs and sqfscat. Use the buttons to inspect their version information." TextWrapping="Wrap"/>
+        <TextBlock Text="{StaticResource L_Linux_SquashFS_command_line_tools}" FontWeight="SemiBold"/>
+        <TextBlock Text="{StaticResource L_The_distribution_includes_the_MSYS2_builds_of_mksquashfs_unsquashfs_and_sqfscat_Use_the_buttons_to_inspect_t}" TextWrapping="Wrap"/>
         <StackPanel Orientation="Horizontal" Spacing="8">
          <Button Click="MkVersionClicked" Content="mksquashfs -version"/>
          <Button Click="UnVersionClicked" Content="unsquashfs -version"/>
-         <Button Click="ToolsFolderClicked" Content="Open tools folder"/>
+         <Button Click="ToolsFolderClicked" Content="{StaticResource L_Open_tools_folder}"/>
         </StackPanel>
         <TextBox x:Name="ToolsLog" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap" MinHeight="110"/>
        </StackPanel>
       </Border>
       <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="8">
-        <TextBlock Text="About WinSquashfs" FontWeight="SemiBold"/>
+        <TextBlock Text="{StaticResource L_About_WinSquashfs}" FontWeight="SemiBold"/>
         <TextBlock Text="WinUI 3 • WinFsp • libsquashfs" />
-        <TextBlock Text="Windows x64. Mounting and previewing use in-memory block decompression. Linux-specific file types appear in the browser; only regular files and directories are projected onto Windows drives." TextWrapping="Wrap"/>
-        <HyperlinkButton Content="Project on GitHub" NavigateUri="https://github.com/HSOS6Miyabi/WinSquashfs"/>
+        <TextBlock Text="{StaticResource L_Windows_x64_Mounting_and_previewing_use_in_memory_block_decompression_Linux_specific_file_types_appear_in_th}" TextWrapping="Wrap"/>
+        <HyperlinkButton Content="{StaticResource L_Project_on_GitHub}" NavigateUri="https://github.com/HSOS6Miyabi/WinSquashfs"/>
        </StackPanel>
       </Border>
      </StackPanel>
@@ -293,9 +303,9 @@
    </Grid>
   </NavigationView>
   <Grid Grid.Row="2" Padding="18,8" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
-   <TextBlock x:Name="StatusText" Text="Ready" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" AutomationProperties.AutomationId="Status"/>
+   <TextBlock x:Name="StatusText" Text="{StaticResource L_Ready}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" AutomationProperties.AutomationId="Status"/>
    <ProgressRing Grid.Column="1" x:Name="BusyRing" Width="22" Height="22" IsActive="False"/>
-   <Button Grid.Column="2" x:Name="CancelButton" Content="Cancel" Click="CancelClicked" IsEnabled="False" AutomationProperties.AutomationId="CancelOperation"/>
+   <Button Grid.Column="2" x:Name="CancelButton" Content="{StaticResource L_Cancel}" Click="CancelClicked" IsEnabled="False" AutomationProperties.AutomationId="CancelOperation"/>
   </Grid>
  </Grid>
 </Window>

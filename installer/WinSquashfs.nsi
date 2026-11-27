@@ -1,4 +1,4 @@
-Unicode true
+﻿Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
@@ -17,9 +17,30 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
+!insertmacro MUI_LANGUAGE "SimpChinese"
+
+LangString BrowseVerb ${LANG_ENGLISH} "Browse with WinSquashfs"
+LangString BrowseVerb ${LANG_SIMPCHINESE} "使用 WinSquashfs 浏览"
+LangString MountVerb ${LANG_ENGLISH} "Mount with WinSquashfs"
+LangString MountVerb ${LANG_SIMPCHINESE} "使用 WinSquashfs 挂载"
+LangString ExtractVerb ${LANG_ENGLISH} "Extract with WinSquashfs"
+LangString ExtractVerb ${LANG_SIMPCHINESE} "使用 WinSquashfs 提取"
+LangString UncVerb ${LANG_ENGLISH} "Open via SquashFS UNC path"
+LangString UncVerb ${LANG_SIMPCHINESE} "通过 SquashFS UNC 路径打开"
+LangString PackVerb ${LANG_ENGLISH} "Create SquashFS image"
+LangString PackVerb ${LANG_SIMPCHINESE} "创建 SquashFS 镜像"
+LangString Description ${LANG_ENGLISH} "Browse, create and mount SquashFS images."
+LangString Description ${LANG_SIMPCHINESE} "浏览、创建和挂载 SquashFS 镜像。"
+LangString ImageType ${LANG_ENGLISH} "SquashFS image"
+LangString ImageType ${LANG_SIMPCHINESE} "SquashFS 镜像"
+LangString UninstallLink ${LANG_ENGLISH} "Uninstall"
+LangString UninstallLink ${LANG_SIMPCHINESE} "卸载"
+LangString DriverError ${LANG_ENGLISH} "WinFsp installation failed (exit code $1)."
+LangString DriverError ${LANG_SIMPCHINESE} "WinFsp 安装失败（退出代码：$1）。"
 
 Function .onInit
   SetRegView 64
+  !insertmacro MUI_LANGDLL_DISPLAY
   ReadRegStr $0 HKLM "Software\WinSquashfs" "InstallDir"
   ${If} $0 != ""
     StrCpy $INSTDIR $0
@@ -33,13 +54,13 @@ FunctionEnd
   ${EndIf}
   WriteRegStr HKLM "Software\Classes\${EXT}\OpenWithProgids" "${PROGID}" ""
   WriteRegStr HKLM "Software\WinSquashfs\Capabilities\FileAssociations" "${EXT}" "${PROGID}"
-  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Browse" "" "Browse with WinSquashfs"
+  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Browse" "" "$(BrowseVerb)"
   WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Browse\command" "" '"$INSTDIR\app\WinSquashfs.exe" --open "%1"'
-  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Mount" "" "Mount with WinSquashfs"
+  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Mount" "" "$(MountVerb)"
   WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Mount\command" "" '"$INSTDIR\app\WinSquashfs.exe" --mount "%1"'
-  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Extract" "" "Extract with WinSquashfs"
+  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Extract" "" "$(ExtractVerb)"
   WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Extract\command" "" '"$INSTDIR\app\WinSquashfs.exe" --extract "%1"'
-  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Unc" "" "Open via SquashFS UNC path"
+  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Unc" "" "$(UncVerb)"
   WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Unc\command" "" '"$INSTDIR\app\WinSquashfs.exe" --unc "%1"'
 !macroend
 !macro UnregisterExtension EXT
@@ -70,7 +91,7 @@ Section "WinFsp runtime"
   ${If} $1 == 3010
     SetRebootFlag true
   ${ElseIf} $1 != 0
-    MessageBox MB_ICONSTOP "WinFsp installation failed (exit code $1)."
+    MessageBox MB_ICONSTOP "$(DriverError)"
     Abort
   ${EndIf}
   winfsp_done:
@@ -86,18 +107,19 @@ Section "WinSquashfs"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\WinSquashfs"
   CreateShortCut "$SMPROGRAMS\WinSquashfs\WinSquashfs.lnk" "$INSTDIR\app\WinSquashfs.exe"
-  CreateShortCut "$SMPROGRAMS\WinSquashfs\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortCut "$SMPROGRAMS\WinSquashfs\$(UninstallLink).lnk" "$INSTDIR\Uninstall.exe"
   WriteRegStr HKLM "Software\WinSquashfs" "InstallDir" "$INSTDIR"
+  WriteRegDWORD HKLM "Software\WinSquashfs" "InstallerLanguage" $LANGUAGE
   WriteRegStr HKLM "Software\WinSquashfs\Capabilities" "ApplicationName" "WinSquashfs"
-  WriteRegStr HKLM "Software\WinSquashfs\Capabilities" "ApplicationDescription" "Browse, create and mount SquashFS images."
+  WriteRegStr HKLM "Software\WinSquashfs\Capabilities" "ApplicationDescription" "$(Description)"
   WriteRegStr HKLM "Software\RegisteredApplications" "WinSquashfs" "Software\WinSquashfs\Capabilities"
-  WriteRegStr HKLM "Software\Classes\${PROGID}" "" "SquashFS image"
+  WriteRegStr HKLM "Software\Classes\${PROGID}" "" "$(ImageType)"
   WriteRegStr HKLM "Software\Classes\${PROGID}\DefaultIcon" "" "$INSTDIR\app\WinSquashfs.exe,0"
   WriteRegStr HKLM "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\app\WinSquashfs.exe" --open "%1"'
   !insertmacro RegisterExtension ".squashfs"
   !insertmacro RegisterExtension ".sqfs"
   !insertmacro RegisterExtension ".sfs"
-  WriteRegStr HKLM "Software\Classes\Directory\shell\WinSquashfs.Pack" "" "Create SquashFS image"
+  WriteRegStr HKLM "Software\Classes\Directory\shell\WinSquashfs.Pack" "" "$(PackVerb)"
   WriteRegStr HKLM "Software\Classes\Directory\shell\WinSquashfs.Pack\command" "" '"$INSTDIR\app\WinSquashfs.exe" --pack "%1"'
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "WinSquashfs"
   WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "0.1.0"
@@ -108,6 +130,11 @@ Section "WinSquashfs"
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
+
+Function un.onInit
+  SetRegView 64
+  ReadRegDWORD $LANGUAGE HKLM "Software\WinSquashfs" "InstallerLanguage"
+FunctionEnd
 
 Section "Uninstall"
   IfFileExists "$INSTDIR\app\WinSquashfs.Unc.exe" 0 +2

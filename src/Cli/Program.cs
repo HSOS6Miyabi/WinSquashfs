@@ -3,6 +3,15 @@ using WinSquashfs.Core;
 
 try
 {
+    string language = "en-US";
+    if (args.Length >= 2 && args[0] == "--lang")
+    {
+        language = args[1];
+        if (language is not ("en-US" or "zh-CN" or "system")) throw new ArgumentException(Localization.T("Language setting is invalid."));
+        args = args[2..];
+    }
+    Localization.Initialize(language);
+    if (Localization.IsChinese) Console.OutputEncoding = System.Text.Encoding.UTF8;
     switch (args)
     {
         case ["info", var image]:
@@ -13,7 +22,7 @@ try
             using (var archive = new Archive(image))
             {
                 var root = args.Length == 3 ? archive.Find(args[2]) : archive.Root;
-                if (root is null || !root.IsDirectory) throw new IOException("Directory not found.");
+                if (root is null || !root.IsDirectory) throw new IOException(Localization.T("Directory not found."));
                 foreach (var e in root.Children) Console.WriteLine($"{e.Kind}\t{e.Size}\t{e.Name}");
             }
             break;
@@ -22,7 +31,7 @@ try
             {
                 var e = archive.Find(entry) ?? throw new FileNotFoundException(entry);
                 var size = int.Parse(count);
-                if (size < 0 || size > 16 * 1024 * 1024) throw new ArgumentException("Count must be between 0 and 16 MiB.");
+                if (size < 0 || size > 16 * 1024 * 1024) throw new ArgumentException(Localization.T("Count must be between 0 and 16 MiB."));
                 byte[] buffer = new byte[size];
                 int n = archive.Read(e, ulong.Parse(offset), buffer);
                 Console.WriteLine(Convert.ToHexString(buffer.AsSpan(0,n)));
@@ -41,7 +50,7 @@ try
             using (var archive = new Archive(image))
             {
                 var report = archive.Verify();
-                Console.WriteLine($"Verified {report.Files} files, {report.Bytes} bytes.");
+                Console.WriteLine(Localization.T("Verified {0} files, {1} bytes.", report.Files, report.Bytes));
             }
             break;
         case ["serve", var alias, var root, ..] when args.Length is 3 or 4:
@@ -61,10 +70,10 @@ try
             await UncAgentControl.StopAsync();
             break;
         case ["unc-status"]:
-            Console.WriteLine(UncAgentControl.IsRunning ? "Running" : "Stopped");
+            Console.WriteLine(UncAgentControl.IsRunning ? Localization.T("Running") : Localization.T("Stopped"));
             break;
         case ["unc-path", var image]:
-            Console.WriteLine(UncSettings.Load().GetImagePath(image) ?? throw new IOException("Image is outside the configured UNC roots."));
+            Console.WriteLine(UncSettings.Load().GetImagePath(image) ?? throw new IOException(Localization.T("Image is outside the configured UNC roots.")));
             break;
         case ["pack", var source, var output, ..]:
             await SquashTools.PackAsync(source, output, new PackOptions(Codec: args.Length == 4 ? args[3] : "zstd"), Console.WriteLine);
@@ -73,7 +82,7 @@ try
             await SquashTools.UnpackAsync(image, output, Console.WriteLine);
             break;
         default:
-            Console.Error.WriteLine("winsqfs info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...");
+            Console.Error.WriteLine(Localization.T("Usage: winsqfs [--lang en-US|zh-CN|system] info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."));
             return 2;
     }
     return 0;

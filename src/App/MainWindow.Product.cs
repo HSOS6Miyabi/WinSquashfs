@@ -15,7 +15,7 @@ public sealed partial class MainWindow
         var paths = RecentImages.Load();
         if (paths.Count == 0)
         {
-            RecentMenu.Items.Add(new MenuFlyoutItem { Text = "No recent images", IsEnabled = false });
+            RecentMenu.Items.Add(new MenuFlyoutItem { Text = Localization.T("No recent images"), IsEnabled = false });
             return;
         }
         foreach (var path in paths)
@@ -27,7 +27,7 @@ public sealed partial class MainWindow
                 {
                     RecentImages.Remove(path);
                     RefreshRecent();
-                    await ShowErrorAsync(new FileNotFoundException("Image no longer exists.", path));
+                    await ShowErrorAsync(new FileNotFoundException(Localization.T("Image no longer exists."), path));
                     return;
                 }
                 await LoadAsync(path);
@@ -35,7 +35,7 @@ public sealed partial class MainWindow
             RecentMenu.Items.Add(item);
         }
         RecentMenu.Items.Add(new MenuFlyoutSeparator());
-        var clear = new MenuFlyoutItem { Text = "Clear recent images" };
+        var clear = new MenuFlyoutItem { Text = Localization.T("Clear recent images") };
         clear.Click += (_, _) => { RecentImages.Clear(); RefreshRecent(); };
         RecentMenu.Items.Add(clear);
     }
@@ -53,7 +53,7 @@ public sealed partial class MainWindow
             var items = await e.DataView.GetStorageItemsAsync();
             if (items.Count == 1 && items[0] is StorageFile file)
                 await LoadAsync(file.Path);
-            else StatusText.Text = "Drop one SquashFS image.";
+            else StatusText.Text = Localization.T("Drop one SquashFS image.");
         }
         catch (Exception ex) { await ShowErrorAsync(ex); }
     }
@@ -63,14 +63,14 @@ public sealed partial class MainWindow
         var image = archive;
         if (image == null || operation != null) return;
         ArchiveVerification? report = null;
-        if (await RunAsync("Verifying image…", async token =>
+        if (await RunAsync(Localization.T("Verifying image…"), async token =>
         {
             report = await Task.Run(() => image.Verify((files, bytes) =>
-                DispatcherQueue.TryEnqueue(() => StatusText.Text = $"Verified {files:N0} files · {FormatSize(bytes)}"), token), token);
+                DispatcherQueue.TryEnqueue(() => StatusText.Text = Localization.T("Verified {0:N0} files · {1}", files, FormatSize(bytes))), token), token);
         }))
         {
             var result = report!;
-            StatusText.Text = $"Verified {result.Files:N0} files · {FormatSize(result.Bytes)}";
+            StatusText.Text = Localization.T("Verified {0:N0} files · {1}", result.Files, FormatSize(result.Bytes));
         }
     }
 
@@ -78,7 +78,7 @@ public sealed partial class MainWindow
     {
         UncSettings settings;
         try { settings = UncSettings.Load(); }
-        catch (Exception ex) { settings = UncSettings.Default; StatusText.Text = "UNC settings: " + ex.Message; }
+        catch (Exception ex) { settings = UncSettings.Default; StatusText.Text = Localization.T("UNC settings: {0}", ex.Message); }
         UncRootBox.Text = settings.Root;
         UncAliasBox.Text = settings.Alias;
         UncDrivesBox.IsChecked = settings.IncludeDrives;
@@ -97,7 +97,7 @@ public sealed partial class MainWindow
         try
         {
             bool running = UncAgentControl.IsRunning;
-            UncStatus.Text = running ? "Running" : "Stopped";
+            UncStatus.Text = running ? Localization.T("Running") : Localization.T("Stopped");
             bool idle = operation == null;
             StartUncButton.IsEnabled = idle && !running;
             StopUncButton.IsEnabled = idle && running;
@@ -132,7 +132,7 @@ public sealed partial class MainWindow
     }
     private async void StartUncClicked(object sender, RoutedEventArgs e)
     {
-        await RunAsync("Starting direct UNC access…", async token =>
+        await RunAsync(Localization.T("Starting direct UNC access…"), async token =>
         {
             ReadUncSettings().Save();
             await UncAgentControl.StartAsync(token);
@@ -140,11 +140,11 @@ public sealed partial class MainWindow
     }
     private async void StopUncClicked(object sender, RoutedEventArgs e)
     {
-        await RunAsync("Stopping direct UNC access…", token => UncAgentControl.StopAsync(token));
+        await RunAsync(Localization.T("Stopping direct UNC access…"), token => UncAgentControl.StopAsync(token));
     }
     private async void UncApplyClicked(object sender, RoutedEventArgs e)
     {
-        await RunAsync("Applying UNC settings…", async token =>
+        await RunAsync(Localization.T("Applying UNC settings…"), async token =>
         {
             var settings = ReadUncSettings();
             _ = settings.Shares();
@@ -161,7 +161,7 @@ public sealed partial class MainWindow
             var package = new DataPackage();
             package.SetText(UncImagePathBox.Text);
             Clipboard.SetContent(package);
-            StatusText.Text = "UNC path copied.";
+            StatusText.Text = Localization.T("UNC path copied.");
         }
         catch (Exception ex) { StatusText.Text = ex.Message; }
     }
@@ -171,14 +171,14 @@ public sealed partial class MainWindow
     }
     private async Task OpenDirectImageAsync(string path)
     {
-        await RunAsync("Opening image via UNC…", async token =>
+        await RunAsync(Localization.T("Opening image via UNC…"), async token =>
         {
             uncTargetPath = Path.GetFullPath(path);
             var settings = UncSettings.Load();
-            string unc = settings.GetImagePath(uncTargetPath) ?? throw new IOException("Image is outside the configured UNC shares. Configure a local directory or enable local drives.");
+            string unc = settings.GetImagePath(uncTargetPath) ?? throw new IOException(Localization.T("Image is outside the configured UNC shares. Configure a local directory or enable local drives."));
             await UncAgentControl.StartAsync(token);
             if (!await Task.Run(() => Directory.Exists(unc), token))
-                throw new IOException("The image cannot be opened through its UNC path: " + unc);
+                throw new IOException(Localization.T("The image cannot be opened through its UNC path: {0}", unc));
             Process.Start(new ProcessStartInfo(unc) { UseShellExecute = true });
         });
     }

@@ -19,18 +19,18 @@ public sealed record UncShare(string Name, string Root)
     {
         if (string.IsNullOrWhiteSpace(Name) || Name.Length > 64 ||
             !Name.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
-            throw new ArgumentException("Share name must contain 1–64 ASCII letters, digits, underscores or hyphens.");
+            throw new ArgumentException(Localization.T("Share name must contain 1–64 ASCII letters, digits, underscores or hyphens."));
         if (!Path.IsPathFullyQualified(Root) || Root.StartsWith(@"\\", StringComparison.Ordinal))
-            throw new ArgumentException("Choose an absolute local directory as the share root.");
+            throw new ArgumentException(Localization.T("Choose an absolute local directory as the share root."));
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Root));
         var drive = new DriveInfo(Path.GetPathRoot(root)!);
         if (drive.DriveType is not (DriveType.Fixed or DriveType.Removable) ||
             string.Equals(drive.DriveFormat, "SquashFS", StringComparison.OrdinalIgnoreCase))
-            throw new ArgumentException("Share roots must be on a local physical drive.");
+            throw new ArgumentException(Localization.T("Share roots must be on a local physical drive."));
         if (!Directory.Exists(root)) throw new DirectoryNotFoundException(root);
         for (DirectoryInfo? dir = new(root); dir != null; dir = dir.Parent)
             if ((dir.Attributes & FileAttributes.ReparsePoint) != 0)
-                throw new ArgumentException("The share root cannot traverse a reparse point.");
+                throw new ArgumentException(Localization.T("The share root cannot traverse a reparse point."));
         return new UncShare(Name, root);
     }
     public string? ImagePath(string image)
@@ -75,7 +75,7 @@ internal sealed class UncFileSystem : FileSystemBase
         this.cache = cache;
         this.readIdentity = readIdentity;
         using var identity = WindowsIdentity.GetCurrent();
-        string sid = identity.User?.Value ?? throw new UnauthorizedAccessException("Cannot identify the current account.");
+        string sid = identity.User?.Value ?? throw new UnauthorizedAccessException(Localization.T("Cannot identify the current account."));
         var sd = new RawSecurityDescriptor($"O:{sid}G:{sid}D:P(A;;0x1200A9;;;{sid})");
         security = new byte[sd.BinaryLength];
         sd.GetBinaryForm(security, 0);
@@ -231,7 +231,7 @@ internal sealed class UncFileSystem : FileSystemBase
 
     private IEnumerable<Row> ListCore(Node dir)
     {
-        if (dir.Entry == null && !IsPlainPath(dir.PhysicalPath)) throw new UnauthorizedAccessException("Directory is a reparse point.");
+        if (dir.Entry == null && !IsPlainPath(dir.PhysicalPath)) throw new UnauthorizedAccessException(Localization.T("Directory is a reparse point."));
         if (dir.Name != "\\")
         {
             yield return new Row(".", Info(dir));
@@ -312,7 +312,7 @@ public sealed class UncSession : IDisposable
     {
         Shares = shares.Select(s => s.Validate()).ToArray();
         if (Shares.Count == 0 || Shares.Select(s => s.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Shares.Count)
-            throw new ArgumentException("At least one share is required; names must be unique.");
+            throw new ArgumentException(Localization.T("At least one share is required; names must be unique."));
         cache = new ImageCache(idleSeconds, maxIdleImages);
         try { readIdentity = new LocalReadIdentity(); }
         catch { cache.Dispose(); throw; }
@@ -323,7 +323,7 @@ public sealed class UncSession : IDisposable
                 var host = new FileSystemHost(new UncFileSystem(share, cache, readIdentity));
                 hosts.Add(host);
                 int status = host.Mount(null);
-                if (status < 0) throw new IOException($"Cannot start {share.UncPath} (NTSTATUS 0x{status:X8}).");
+                if (status < 0) throw new IOException(Localization.T("Cannot start {0} (NTSTATUS 0x{1:X8}).", share.UncPath, status));
             }
         }
         catch { Dispose(); throw; }

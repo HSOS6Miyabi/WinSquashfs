@@ -21,7 +21,7 @@ internal sealed class ReadOnlyFileSystem : FileSystemBase
     {
         this.archive = archive;
         using var identity = WindowsIdentity.GetCurrent();
-        string sid = identity.User?.Value ?? throw new UnauthorizedAccessException("Cannot identify current Windows account.");
+        string sid = identity.User?.Value ?? throw new UnauthorizedAccessException(Localization.T("Cannot identify current Windows account."));
         var sd = new RawSecurityDescriptor($"O:{sid}G:{sid}D:P(A;;0x1200A9;;;{sid})");
         security = new byte[sd.BinaryLength];
         sd.GetBinaryForm(security, 0);
@@ -148,14 +148,14 @@ public sealed class MountedImage : IDisposable
     public MountedImage(string path, string? drive = null)
     {
         if (drive != null && (drive.Length != 2 || !char.IsAsciiLetter(drive[0]) || drive[1] != ':'))
-            throw new ArgumentException("Use a drive letter such as X:.");
+            throw new ArgumentException(Localization.T("Use a drive letter such as X:."));
         archive = new Archive(path);
         FileSystemHost? h = null;
         try
         {
             h = new FileSystemHost(new ReadOnlyFileSystem(archive));
             int result = h.Mount(drive);
-            if (result < 0) throw new IOException($"WinFsp mount failed (NTSTATUS 0x{result:X8}).");
+            if (result < 0) throw new IOException(Localization.T("WinFsp mount failed (NTSTATUS 0x{0:X8}).", result));
             MountPoint = h.MountPoint();
             host = h;
         }

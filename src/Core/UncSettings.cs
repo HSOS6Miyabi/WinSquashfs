@@ -17,11 +17,11 @@ public sealed record UncSettings(string Root, string Alias = "path", bool Includ
     public static UncSettings Load()
     {
         if (!File.Exists(SettingsPath)) return Default;
-        return JsonSerializer.Deserialize<UncSettings>(File.ReadAllText(SettingsPath)) ?? throw new IOException("Invalid UNC settings.");
+        return JsonSerializer.Deserialize<UncSettings>(File.ReadAllText(SettingsPath)) ?? throw new IOException(Localization.T("Invalid UNC settings."));
     }
     public IReadOnlyList<UncShare> Shares()
     {
-        if (IdleSeconds is < 0 or > 86400 || MaxIdleImages is < 0 or > 1024) throw new ArgumentException("Invalid cache limits.");
+        if (IdleSeconds is < 0 or > 86400 || MaxIdleImages is < 0 or > 1024) throw new ArgumentException(Localization.T("Invalid cache limits."));
         var result = new List<UncShare> { new UncShare(Alias, Root).Validate() };
         if (IncludeDrives)
         {
@@ -37,7 +37,7 @@ public sealed record UncSettings(string Root, string Alias = "path", bool Includ
                 catch (IOException) { continue; }
                 catch (UnauthorizedAccessException) { continue; }
                 if (result.Any(s => string.Equals(s.Name, share.Name, StringComparison.OrdinalIgnoreCase)))
-                    throw new ArgumentException("Choose an alias different from a drive letter.");
+                    throw new ArgumentException(Localization.T("Choose an alias different from a drive letter."));
                 result.Add(share);
             }
         }
@@ -71,13 +71,13 @@ public static class UncAgentControl
     }
     public static string ExecutablePath => Path.Combine(AppContext.BaseDirectory, "WinSquashfs.Unc.exe");
     public static Mutex CreateInstanceMutex() => new(false, Name("Instance"));
-    public static EventWaitHandle CreateStopEvent() => new(false, EventResetMode.ManualReset, Name("Stop"));
-    public static EventWaitHandle CreateReadyEvent() => new(false, EventResetMode.ManualReset, Name("Ready"));
+    public static EventWaitHandle CreateStopEvent() => new(false, EventResetMode.ManualReset, Name(Localization.T("Stop")));
+    public static EventWaitHandle CreateReadyEvent() => new(false, EventResetMode.ManualReset, Name(Localization.T("Ready")));
     private static bool IsStartingOrRunning
     {
         get
         {
-            if (!EventWaitHandle.TryOpenExisting(Name("Stop"), out var e)) return false;
+            if (!EventWaitHandle.TryOpenExisting(Name(Localization.T("Stop")), out var e)) return false;
             e.Dispose(); return true;
         }
     }
@@ -85,7 +85,7 @@ public static class UncAgentControl
     {
         get
         {
-            if (!EventWaitHandle.TryOpenExisting(Name("Ready"), out var e)) return false;
+            if (!EventWaitHandle.TryOpenExisting(Name(Localization.T("Ready")), out var e)) return false;
             using (e) return e.WaitOne(0);
         }
     }
@@ -94,9 +94,9 @@ public static class UncAgentControl
     {
         token.ThrowIfCancellationRequested();
         if (IsRunning) return;
-        if (!File.Exists(ExecutablePath)) throw new FileNotFoundException("UNC background application is missing.", ExecutablePath);
+        if (!File.Exists(ExecutablePath)) throw new FileNotFoundException(Localization.T("UNC background application is missing."), ExecutablePath);
         using var p = Process.Start(new ProcessStartInfo(ExecutablePath) { UseShellExecute = false, CreateNoWindow = true })
-            ?? throw new IOException("Cannot start UNC background application.");
+            ?? throw new IOException(Localization.T("Cannot start UNC background application."));
         try
         {
             for (int i = 0; i < 150; i++)
@@ -110,7 +110,7 @@ public static class UncAgentControl
             if (!p.HasExited)
             {
                 await TerminateStartupAsync(p);
-                throw new IOException("UNC background application did not become ready.");
+                throw new IOException(Localization.T("UNC background application did not become ready."));
             }
         }
         catch (OperationCanceledException)
@@ -120,7 +120,7 @@ public static class UncAgentControl
             throw;
         }
         string error = File.Exists(UncSettings.LogPath) ? File.ReadAllText(UncSettings.LogPath) : "";
-        throw new IOException("UNC background application could not start. " + error);
+        throw new IOException(Localization.T("UNC background application could not start. {0}", error));
     }
 
     private static async Task TerminateStartupAsync(Process process)
@@ -152,7 +152,7 @@ public static class UncAgentControl
     public static async Task StopAsync(CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
-        if (EventWaitHandle.TryOpenExisting(Name("Stop"), out var stop))
+        if (EventWaitHandle.TryOpenExisting(Name(Localization.T("Stop")), out var stop))
         {
             using (stop) stop.Set();
             for (int i = 0; i < 150; i++)
@@ -160,7 +160,7 @@ public static class UncAgentControl
                 if (InstanceStopped()) return;
                 await Task.Delay(100);
             }
-            throw new IOException("UNC background application did not stop.");
+            throw new IOException(Localization.T("UNC background application did not stop."));
         }
     }
 

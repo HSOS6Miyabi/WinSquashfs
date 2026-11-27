@@ -32,7 +32,7 @@ internal sealed class LocalReadIdentity : IDisposable
             if (!GetTokenInformation(identity.AccessToken, TokenLinkedToken, buffer, IntPtr.Size, out _))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             limited = new SafeAccessTokenHandle(Marshal.ReadIntPtr(buffer));
-            if (limited.IsInvalid) throw new UnauthorizedAccessException("Cannot obtain the ordinary user access token.");
+            if (limited.IsInvalid) throw new UnauthorizedAccessException(Localization.T("Cannot obtain the ordinary user access token."));
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }

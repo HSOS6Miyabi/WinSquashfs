@@ -37,6 +37,9 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Root.Language = Localization.Language;
+        LanguageBox.ItemsSource = new[] { Localization.T("Follow Windows"), "English", "简体中文" };
+        LanguageBox.SelectedIndex = Localization.Preference switch { "en-US" => 1, "zh-CN" => 2, _ => 0 };
         var display = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
         var area = display.WorkArea;
         double scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
@@ -51,7 +54,7 @@ public sealed partial class MainWindow : Window
         MountedList.ItemsSource = mounts;
         CodecBox.ItemsSource = new[] { "zstd", "gzip", "xz", "lz4", "lzo" };
         BlockBox.ItemsSource = new[] { "4 KiB", "8 KiB", "16 KiB", "32 KiB", "64 KiB", "128 KiB", "256 KiB", "512 KiB", "1024 KiB" };
-        LzoAlgorithm.ItemsSource = new[] { "Default", "lzo1x_1", "lzo1x_1_11", "lzo1x_1_12", "lzo1x_1_15", "lzo1x_999" };
+        LzoAlgorithm.ItemsSource = new[] { Localization.T("Default"), "lzo1x_1", "lzo1x_1_11", "lzo1x_1_12", "lzo1x_1_15", "lzo1x_999" };
         CodecBox.SelectionChanged += (_,_) => { if (ready) LevelBox.Value = double.NaN; UpdateCodec(); };
         LzoAlgorithm.SelectionChanged += (_,_) => UpdateLzoLevel();
         NoFragments.Checked += (_,_) => AlwaysFragments.IsChecked = false;
@@ -74,7 +77,7 @@ public sealed partial class MainWindow : Window
                 e.Cancel = true;
                 closing = true;
                 operation.Cancel();
-                StatusText.Text = "Cancelling the current operation…";
+                StatusText.Text = Localization.T("Cancelling the current operation…");
             }
         };
         Closed += (_,_) =>
@@ -105,7 +108,7 @@ public sealed partial class MainWindow : Window
             string mode = args.Length == 1 ? "--open" : args[0];
             string path = args.Length == 1 ? args[0] : args[1];
             if (mode is not ("--open" or "--mount" or "--extract") || args.Length > 2)
-                throw new ArgumentException("Usage: WinSquashfs [--open|--mount|--extract] image or --pack directory");
+                throw new ArgumentException(Localization.T("Usage: WinSquashfs [--open|--mount|--extract] image or --pack directory"));
             await LoadAsync(path);
             if (archive == null) return;
             if (mode == "--mount") await MountAsync();
@@ -140,9 +143,9 @@ public sealed partial class MainWindow : Window
         errorDialogOpen = true;
         try
         {
-            var dialog = new ContentDialog { Title = "Operation failed",
+            var dialog = new ContentDialog { Title = Localization.T("Operation failed"),
                 Content = new TextBlock { Text = e.Message, TextWrapping = TextWrapping.Wrap, MaxWidth = 520 },
-                CloseButtonText = "Close", XamlRoot = Root.XamlRoot };
+                CloseButtonText = Localization.T("Close"), XamlRoot = Root.XamlRoot };
             await dialog.ShowAsync();
         }
         finally { errorDialogOpen = false; }
@@ -155,16 +158,16 @@ public sealed partial class MainWindow : Window
         operation = cts; BusyRing.IsActive = true; CancelButton.IsEnabled = true;
         OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = MountButton.IsEnabled = ExtractButton.IsEnabled = ExtractAllButton.IsEnabled = VerifyButton.IsEnabled = CloseImageButton.IsEnabled = false;
         StartUncButton.IsEnabled = StopUncButton.IsEnabled = UncApplyButton.IsEnabled = CopyUncButton.IsEnabled = OpenUncButton.IsEnabled = false;
-        ResetPackButton.IsEnabled = false;
+        ResetPackButton.IsEnabled = SaveLanguageButton.IsEnabled = LanguageBox.IsEnabled = false;
         UpdateMountButtons();
         StatusText.Text = title;
-        try { await action(cts.Token); StatusText.Text = "Completed"; return true; }
-        catch (OperationCanceledException) { StatusText.Text = "Cancelled"; return false; }
+        try { await action(cts.Token); StatusText.Text = Localization.T("Completed"); return true; }
+        catch (OperationCanceledException) { StatusText.Text = Localization.T("Cancelled"); return false; }
         catch (Exception e) { await ShowErrorAsync(e); return false; }
         finally
         {
             operation = null; BusyRing.IsActive = false; CancelButton.IsEnabled = false;
-            OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = ResetPackButton.IsEnabled = true;
+            OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = ResetPackButton.IsEnabled = SaveLanguageButton.IsEnabled = LanguageBox.IsEnabled = true;
             UpdateButtons();
             if (UncPage.Visibility == Visibility.Visible) RefreshUncStatus();
             if (closing) DispatcherQueue.TryEnqueue(() => Close());
@@ -198,7 +201,7 @@ public sealed partial class MainWindow : Window
 
     private async Task LoadAsync(string path)
     {
-        await RunAsync("Reading image metadata…", async token =>
+        await RunAsync(Localization.T("Reading image metadata…"), async token =>
         {
             var next = await Task.Run(() => new Archive(path), token);
             if (token.IsCancellationRequested) { next.Dispose(); token.ThrowIfCancellationRequested(); }
@@ -209,7 +212,7 @@ public sealed partial class MainWindow : Window
             current = next.Root;
             RecentImages.Add(next.Path);
             RefreshRecent();
-            ImageSummary.Text = $"{Path.GetFileName(next.Path)}  ·  {next.Codec.ToUpperInvariant()}  ·  {FormatSize(next.ImageSize)}  ·  {FormatSize(next.BlockSize)} blocks";
+            ImageSummary.Text = Localization.T("{0} · {1} · {2} · {3} blocks", Path.GetFileName(next.Path), next.Codec.ToUpperInvariant(), FormatSize(next.ImageSize), FormatSize(next.BlockSize));
             SearchBox.Text = "";
             Navigation.SelectedItem = BrowseNav;
             RefreshEntries();
@@ -227,8 +230,8 @@ public sealed partial class MainWindow : Window
             .Select(e => new BrowserRow(e)).ToArray() ?? Array.Empty<BrowserRow>();
         ++previewGeneration;
         Preview.Text = "";
-        Details.Text = current == null ? "Open an image and select an entry." : $"{current.Children.Count} entries in {current.ArchivePath}";
-        BrowserEmpty.Text = current == null ? "Open or drop a SquashFS image to begin." : "No matching entries.";
+        Details.Text = current == null ? Localization.T("Open an image and select an entry.") : Localization.T("{0} entries in {1}", current.Children.Count, current.ArchivePath);
+        BrowserEmpty.Text = current == null ? Localization.T("Open or drop a SquashFS image to begin.") : Localization.T("No matching entries.");
         BrowserEmpty.Visibility = Entries.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
     }
@@ -255,10 +258,10 @@ public sealed partial class MainWindow : Window
         archive = null;
         current = null;
         uncTargetPath = null;
-        ImageSummary.Text = "Open a SquashFS image to explore its contents.";
+        ImageSummary.Text = Localization.T("Open a SquashFS image to explore its contents.");
         SearchBox.Text = "";
         RefreshEntries();
-        StatusText.Text = "Image closed";
+        StatusText.Text = Localization.T("Image closed");
     }
 
     private void UpdateMountButtons()
@@ -289,7 +292,7 @@ public sealed partial class MainWindow : Window
         if (e.Key != VirtualKey.Enter) return;
         var entry = archive?.Find(PathBox.Text);
         if (entry?.IsDirectory == true) Go(entry);
-        else StatusText.Text = "Directory not found.";
+        else StatusText.Text = Localization.T("Directory not found.");
     }
 
     private async void EntrySelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -302,11 +305,11 @@ public sealed partial class MainWindow : Window
         var owner = archive;
         if (entry == null || owner == null)
         {
-            Details.Text = current == null ? "Open an image and select an entry." : $"{current.Children.Count} entries in {current.ArchivePath}";
+            Details.Text = current == null ? Localization.T("Open an image and select an entry.") : Localization.T("{0} entries in {1}", current.Children.Count, current.ArchivePath);
             return;
         }
-        Details.Text = $"{entry.Name}\n{entry.Kind} · {FormatSize(entry.Size)}\nModified: {entry.Modified.LocalDateTime:g}\nInode: {entry.Inode}" +
-            (entry.Name == entry.WindowsName ? "" : $"\nWindows name: {entry.WindowsName}");
+        Details.Text = Localization.T("{0}\n{1} · {2}\nModified: {3:g}\nInode: {4}", entry.Name, entry.Kind, FormatSize(entry.Size), entry.Modified.LocalDateTime, entry.Inode) +
+            (entry.Name == entry.WindowsName ? "" : Localization.T("\nWindows name: {0}", entry.WindowsName));
         if (!entry.IsFile) return;
         try
         {
@@ -339,7 +342,7 @@ public sealed partial class MainWindow : Window
         {
             var folder = await PickFolderAsync();
             if (folder == null || !ReferenceEquals(owner, archive)) return;
-            await RunAsync("Extracting selected entry…", token => Task.Run(() => owner.ExportEntry(entry, Path.Combine(folder,entry.WindowsName), token),token));
+            await RunAsync(Localization.T("Extracting selected entry…"), token => Task.Run(() => owner.ExportEntry(entry, Path.Combine(folder,entry.WindowsName), token),token));
         }
         catch (Exception ex) { await ShowErrorAsync(ex); }
     }
@@ -356,7 +359,7 @@ public sealed partial class MainWindow : Window
             string name = Path.GetFileNameWithoutExtension(image);
             string destination = Path.Combine(folder, name);
             for (int i=2; Directory.Exists(destination) || File.Exists(destination);i++) destination = Path.Combine(folder,$"{name} ({i})");
-            await RunAsync("Extracting image…", token => SquashTools.UnpackAsync(image, destination, message => DispatcherQueue.TryEnqueue(() => StatusText.Text = message), token));
+            await RunAsync(Localization.T("Extracting image…"), token => SquashTools.UnpackAsync(image, destination, message => DispatcherQueue.TryEnqueue(() => StatusText.Text = message), token));
         }
         catch (Exception ex) { await ShowErrorAsync(ex); }
     }
@@ -402,11 +405,11 @@ public sealed partial class MainWindow : Window
         string codec = CodecBox.SelectedItem as string ?? "zstd";
         CodecHelp.Text = codec switch
         {
-            "zstd" => "Balanced compression ratio and fast random reads. Levels 1–22 or negative fast levels.",
-            "gzip" => "Broad Linux compatibility. Levels 1–9.",
-            "xz" => "High compression ratio; larger decompression cost.",
-            "lz4" => "Prioritizes decompression speed.",
-            "lzo" => "Fast decompression with broad compatibility.",
+            "zstd" => Localization.T("Balanced compression ratio and fast random reads. Levels 1–22 or negative fast levels."),
+            "gzip" => Localization.T("Broad Linux compatibility. Levels 1–9."),
+            "xz" => Localization.T("High compression ratio; larger decompression cost."),
+            "lz4" => Localization.T("Prioritizes decompression speed."),
+            "lzo" => Localization.T("Fast decompression with broad compatibility."),
             _ => ""
         };
         LevelBox.Minimum = codec == "zstd" ? -131072 : 1;
@@ -430,7 +433,7 @@ public sealed partial class MainWindow : Window
     private static int? OptionalInt(NumberBox b)
     {
         if (double.IsNaN(b.Value)) return null;
-        if (b.Value != Math.Truncate(b.Value) || b.Value > int.MaxValue || b.Value < int.MinValue) throw new ArgumentException($"{b.Header} must be an integer.");
+        if (b.Value != Math.Truncate(b.Value) || b.Value > int.MaxValue || b.Value < int.MinValue) throw new ArgumentException(Localization.T("{0} must be an integer.", b.Header));
         return (int)b.Value;
     }
     private async void CreateClicked(object sender, RoutedEventArgs e)
@@ -439,7 +442,7 @@ public sealed partial class MainWindow : Window
         try
         {
             string source = SourceBox.Text.Trim(), output = OutputBox.Text.Trim();
-            if (source.Length == 0 || output.Length == 0) throw new ArgumentException("Choose a source directory and output image.");
+            if (source.Length == 0 || output.Length == 0) throw new ArgumentException(Localization.T("Choose a source directory and output image."));
             var options = new PackOptions(Codec: (string)CodecBox.SelectedItem, BlockSize: 4096 << BlockBox.SelectedIndex,
                 Threads: OptionalInt(ThreadsBox) ?? 0, Level: OptionalInt(LevelBox),
                 NoFragments: NoFragments.IsChecked == true, NoDuplicates: NoDuplicates.IsChecked == true,
@@ -453,8 +456,8 @@ public sealed partial class MainWindow : Window
                 LzoAlgorithm: LzoAlgorithm.SelectedIndex <= 0 ? null : (string)LzoAlgorithm.SelectedItem);
             OperationLog.Text = "";
             LogExpander.IsExpanded = true;
-            if (await RunAsync("Creating SquashFS image…", token => SquashTools.PackAsync(source,output,options, line => AppendLog(OperationLog,line), token)))
-                StatusText.Text = "Created " + output;
+            if (await RunAsync(Localization.T("Creating SquashFS image…"), token => SquashTools.PackAsync(source,output,options, line => AppendLog(OperationLog,line), token)))
+                StatusText.Text = Localization.T("Created {0}", output);
         }
         catch (Exception ex) { await ShowErrorAsync(ex); }
     }
@@ -471,18 +474,18 @@ public sealed partial class MainWindow : Window
     {
         var used = DriveInfo.GetDrives().Select(d => d.Name[..2]).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var selected = DriveBox.SelectedItem as string;
-        var items = new[] { "Automatic" }.Concat(Enumerable.Range('D',23).Select(c => $"{(char)c}:").Where(s => !used.Contains(s))).ToArray();
+        var items = new[] { Localization.T("Automatic") }.Concat(Enumerable.Range('D',23).Select(c => $"{(char)c}:").Where(s => !used.Contains(s))).ToArray();
         DriveBox.ItemsSource = items; DriveBox.SelectedItem = selected != null && items.Contains(selected) ? selected : items[0];
     }
     private async void MountClicked(object sender, RoutedEventArgs e) => await MountAsync();
     private async void MountHereClicked(object sender, RoutedEventArgs e) => await MountAsync();
     private async Task MountAsync()
     {
-        if (archive == null || operation != null) { StatusText.Text = "Open an image before mounting."; return; }
+        if (archive == null || operation != null) { StatusText.Text = Localization.T("Open an image before mounting."); return; }
         string path = archive.Path;
-        string? drive = DriveBox.SelectedItem as string; if (drive == "Automatic") drive = null;
+        string? drive = DriveBox.SelectedItem as string; if (drive == Localization.T("Automatic")) drive = null;
         string? mountedPoint = null;
-        if (await RunAsync("Mounting read-only volume…", async token =>
+        if (await RunAsync(Localization.T("Mounting read-only volume…"), async token =>
         {
             var mounted = await Task.Run(() => new MountedImage(path, drive), token);
             if (token.IsCancellationRequested) { mounted.Dispose(); token.ThrowIfCancellationRequested(); }
@@ -491,12 +494,12 @@ public sealed partial class MainWindow : Window
             Navigation.SelectedItem = MountNav;
             MountedList.SelectedItem = mounted;
             RefreshDrives();
-        })) StatusText.Text = "Mounted " + mountedPoint;
+        })) StatusText.Text = Localization.T("Mounted {0}", mountedPoint);
     }
     private async void UnmountClicked(object sender, RoutedEventArgs e)
     {
         if (MountedList.SelectedItem is not MountedImage item || operation != null) return;
-        await RunAsync("Unmounting volume…", async _ => { await Task.Run(item.Dispose); mounts.Remove(item); RefreshDrives(); });
+        await RunAsync(Localization.T("Unmounting volume…"), async _ => { await Task.Run(item.Dispose); mounts.Remove(item); RefreshDrives(); });
     }
     private async void ExplorerClicked(object sender, RoutedEventArgs e)
     {
@@ -513,7 +516,7 @@ public sealed partial class MainWindow : Window
     private async Task VersionAsync(string tool)
     {
         ToolsLog.Text = "";
-        await RunAsync("Reading tool version…", token => SquashTools.RunAsync(tool, new[] { "-version" }, line => AppendLog(ToolsLog,line),token));
+        await RunAsync(Localization.T("Reading tool version…"), token => SquashTools.RunAsync(tool, new[] { "-version" }, line => AppendLog(ToolsLog,line),token));
     }
     private async void ToolsFolderClicked(object sender, RoutedEventArgs e)
     {

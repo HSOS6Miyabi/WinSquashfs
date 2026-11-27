@@ -3,6 +3,7 @@ using WinSquashfs.Core;
 
 try
 {
+    Localization.Initialize();
     if (args is ["--stop"])
     {
         UncAgentControl.StopAsync().GetAwaiter().GetResult();
