@@ -41,9 +41,6 @@ jobs:
           Copy-Item artifacts/native/* artifacts/test -Recurse -Force
           & ./artifacts/test/Integration.exe
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: WinUI end-to-end automation
-        shell: powershell
-        run: ./tests/ui.ps1 -AppDirectory (Resolve-Path artifacts/dist).Path
       - name: Build NSIS installer
         shell: pwsh
         run: |
@@ -66,6 +63,9 @@ jobs:
           $p=Start-Process "$install/Uninstall.exe" -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode) { throw "Uninstaller exit $($p.ExitCode)" }
           if (Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image') { throw 'Association not removed' }
+      - name: WinUI end-to-end automation
+        shell: powershell
+        run: ./tests/ui.ps1 -AppDirectory (Resolve-Path artifacts/dist).Path
       - name: Upload installer and portable distribution
         uses: actions/upload-artifact@v4
         with:

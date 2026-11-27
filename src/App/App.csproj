@@ -7,6 +7,7 @@
     <AssemblyName>WinSquashfs</AssemblyName>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

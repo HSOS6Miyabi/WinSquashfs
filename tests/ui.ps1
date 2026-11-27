@@ -37,8 +37,10 @@ New-Item -ItemType Directory "$root\src\nested" -Force | Out-Null
 Set-Content "$root\src\nested\hello.txt" 'hello' -NoNewline
 $img="$root\ui.squashfs"
 $p=$null
+$env:WINSQUASHFS_DIAGNOSTICS=Join-Path $root "application.log"
+$started=Get-Date
 try {
-  $p=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--pack',('"'+"$root\src"+'"')) -PassThru
+  $p=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--pack',('"'+"$root\src"+'"')) -WorkingDirectory $AppDirectory -PassThru
   $window=Get-AppWindow $p 'PackSource'
   Set-Value $window 'PackSource' "$root\src"
   Set-Value $window 'PackOutput' $img
@@ -48,7 +50,7 @@ try {
   $null=Wait-Control $window 'CreateImage' $true
   $p.CloseMainWindow()|Out-Null
   if(!$p.WaitForExit(10000)){throw 'GUI did not close'}
-  $p=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--open',('"' + $img + '"')) -PassThru
+  $p=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--open',('"' + $img + '"')) -WorkingDirectory $AppDirectory -PassThru
   $window=Get-AppWindow $p 'FileList'
   $null=Wait-Control $window 'MountImage' $true
   $list=Wait-Control $window 'FileList'
@@ -78,7 +80,12 @@ try {
   }
   if($mounted.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)){throw 'Unmount failed'}
   Write-Host 'WinUI creation, navigation and mount controls passed.'
+} catch {
+  if(Test-Path $env:WINSQUASHFS_DIAGNOSTICS){Get-Content $env:WINSQUASHFS_DIAGNOSTICS | Write-Host}
+  Get-WinEvent -FilterHashtable @{LogName="Application";StartTime=$started;Level=2} -ErrorAction SilentlyContinue | Select-Object -First 10 | ForEach-Object { Write-Host $_.Message }
+  throw
 } finally {
+  Remove-Item Env:WINSQUASHFS_DIAGNOSTICS -ErrorAction SilentlyContinue
   if($p -and !$p.HasExited){$p.CloseMainWindow()|Out-Null;if(!$p.WaitForExit(10000)){$p.Kill();$p.WaitForExit()}}
   Remove-Item $root -Recurse -Force
 }
