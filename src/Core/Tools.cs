@@ -7,7 +7,8 @@ public sealed record PackOptions(string Codec = "zstd", int BlockSize = 131072, 
     int? Level = null, bool NoFragments = false, bool NoDuplicates = false, bool NoXattrs = false,
     bool AllRoot = false, bool NoExports = false, bool NoSparse = false, bool NoCompression = false,
     bool AlwaysFragments = false, bool NoInodeCompression = false, bool NoFragmentCompression = false,
-    int? MemoryMiB = null, uint? Timestamp = null, string? ExcludeFile = null)
+    int? MemoryMiB = null, uint? Timestamp = null, string? ExcludeFile = null, bool Lz4HighCompression = false, bool KeepDirectory = false,
+    string? XzDictionary = null, string? XzFilters = null, int? GzipWindow = null, string? LzoAlgorithm = null)
 {
     public IReadOnlyList<string> Arguments()
     {
@@ -16,14 +17,14 @@ public sealed record PackOptions(string Codec = "zstd", int BlockSize = 131072, 
         if (Threads < 0 || Threads > 1024) throw new ArgumentException("Invalid processor count.");
         if (NoFragments && AlwaysFragments) throw new ArgumentException("Fragment options conflict.");
         if (Level.HasValue && !(Codec == "gzip" && Level is >= 1 and <= 9 ||
-                              Codec == "zstd" && Level is >= 1 and <= 22 ||
+                              Codec == "zstd" && (Level is >= 1 and <= 22 || Level is >= -131072 and <= -1) ||
                               Codec == "lzo" && Level is >= 1 and <= 9))
             throw new ArgumentException("Compression level is not supported by this compressor.");
         var a = new List<string> { "-noappend", "-comp", Codec, "-b", BlockSize.ToString(), "-no-progress" };
         if (Threads > 0) a.AddRange(new[] { "-processors", Threads.ToString() });
         if (Level.HasValue) a.AddRange(new[] { "-Xcompression-level", Level.Value.ToString() });
         if (NoFragments) a.Add("-no-fragments");
-        if (AlwaysFragments) a.Add("-always-use-fragments");
+        if (AlwaysFragments) a.Add("-tailends");
         if (NoDuplicates) a.Add("-no-duplicates");
         if (NoXattrs) a.Add("-no-xattrs");
         if (AllRoot) a.Add("-all-root");
@@ -37,7 +38,32 @@ public sealed record PackOptions(string Codec = "zstd", int BlockSize = 131072, 
             if (MemoryMiB < 64) throw new ArgumentException("Memory limit must be at least 64 MiB.");
             a.AddRange(new[] { "-mem", MemoryMiB.Value + "M" });
         }
-        if (Timestamp.HasValue) a.AddRange(new[] { "-all-time", Timestamp.Value.ToString(), "-mkfs-time", Timestamp.Value.ToString() });
+        if (Timestamp.HasValue) a.AddRange(new[] { "-inode-time", Timestamp.Value.ToString(), "-mkfs-time", Timestamp.Value.ToString() });
+        if (Lz4HighCompression) { if (Codec != "lz4") throw new ArgumentException("LZ4 option requires LZ4."); a.Add("-Xhc"); }
+        if (KeepDirectory) a.Add("-keep-as-directory");
+        if (!string.IsNullOrWhiteSpace(XzDictionary))
+        {
+            if (Codec != "xz") throw new ArgumentException("XZ dictionary requires XZ.");
+            a.AddRange(new[] { "-Xdict-size", XzDictionary });
+        }
+        if (!string.IsNullOrWhiteSpace(XzFilters))
+        {
+            if (Codec != "xz" || XzFilters.Split(',').Any(x => x is not ("x86" or "arm" or "armthumb" or "arm64" or "powerpc" or "sparc" or "ia64" or "riscv")))
+                throw new ArgumentException("Invalid XZ filters.");
+            a.AddRange(new[] { "-Xbcj", XzFilters });
+        }
+        if (GzipWindow.HasValue)
+        {
+            if (Codec != "gzip" || GzipWindow is < 8 or > 15) throw new ArgumentException("GZIP window must be 8–15.");
+            a.AddRange(new[] { "-Xwindow-size", GzipWindow.Value.ToString() });
+        }
+        if (!string.IsNullOrWhiteSpace(LzoAlgorithm))
+        {
+            if (Codec != "lzo" || LzoAlgorithm is not ("lzo1x_1" or "lzo1x_1_11" or "lzo1x_1_12" or "lzo1x_1_15" or "lzo1x_999"))
+                throw new ArgumentException("Invalid LZO algorithm.");
+            if (Level.HasValue && LzoAlgorithm != "lzo1x_999") throw new ArgumentException("Compression level requires lzo1x_999.");
+            a.AddRange(new[] { "-Xalgorithm", LzoAlgorithm });
+        }
         if (!string.IsNullOrWhiteSpace(ExcludeFile)) a.AddRange(new[] { "-ef", SquashTools.ToolPath(ExcludeFile) });
         return a;
     }

@@ -1,0 +1,223 @@
+<Window x:Class="WinSquashfs.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+ xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+ mc:Ignorable="d" Title="WinSquashfs">
+ <Grid x:Name="Root" RowDefinitions="Auto,*,Auto">
+  <Grid Padding="24,16" ColumnDefinitions="*,Auto">
+   <StackPanel Spacing="2">
+    <TextBlock Text="WinSquashfs" Style="{StaticResource TitleTextBlockStyle}"/>
+    <TextBlock Text="SquashFS image workspace" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+   </StackPanel>
+   <Border Grid.Column="1" CornerRadius="8" Padding="12,8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+     <FontIcon Glyph="&#xE72E;" FontSize="16"/>
+     <TextBlock Text="Read-only images" VerticalAlignment="Center"/>
+    </StackPanel>
+   </Border>
+  </Grid>
+  <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Left" OpenPaneLength="200"
+    IsBackButtonVisible="Collapsed" IsSettingsVisible="False" IsPaneToggleButtonVisible="True"
+    SelectionChanged="NavigationChanged">
+   <NavigationView.MenuItems>
+    <NavigationViewItem x:Name="BrowseNav" Content="Browse image" Icon="Folder" Tag="browse" AutomationProperties.AutomationId="NavBrowse"/>
+    <NavigationViewItem x:Name="PackNav" Content="Create image" Icon="Add" Tag="pack" AutomationProperties.AutomationId="NavPack"/>
+    <NavigationViewItem x:Name="MountNav" Content="Mounted images" Icon="MapDrive" Tag="mount" AutomationProperties.AutomationId="NavMount"/>
+    <NavigationViewItem x:Name="ToolsNav" Content="Tools &amp; about" Icon="Setting" Tag="tools" AutomationProperties.AutomationId="NavTools"/>
+   </NavigationView.MenuItems>
+   <Grid Padding="20,8,20,12">
+    <Grid x:Name="BrowsePage" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="12">
+     <Grid ColumnDefinitions="*,Auto">
+      <StackPanel Spacing="3">
+       <TextBlock Text="Image browser" Style="{StaticResource SubtitleTextBlockStyle}"/>
+       <TextBlock x:Name="ImageSummary" Text="Open a SquashFS image to explore its contents." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="ImageSummary"/>
+      </StackPanel>
+      <Button Grid.Column="1" x:Name="OpenButton" Click="OpenClicked" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="OpenImage">
+       <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="OpenFile"/><TextBlock Text="Open image"/></StackPanel>
+      </Button>
+     </Grid>
+     <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+      <Button x:Name="UpButton" Click="UpClicked" ToolTipService.ToolTip="Parent directory" AutomationProperties.AutomationId="UpFolder"><SymbolIcon Symbol="Up"/></Button>
+      <TextBox Grid.Column="1" x:Name="PathBox" Text="\" PlaceholderText="Path inside image" KeyDown="PathKeyDown" AutomationProperties.AutomationId="ArchivePath"/>
+      <TextBox Grid.Column="2" x:Name="SearchBox" Width="175" PlaceholderText="Filter files" TextChanged="FilterChanged" AutomationProperties.AutomationId="FilterFiles"/>
+     </Grid>
+     <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+      <Button x:Name="EnterButton" Click="EnterClicked" Content="Open folder" AutomationProperties.AutomationId="OpenFolder"/>
+      <Button x:Name="ExtractButton" Click="ExtractSelectedClicked" Content="Extract selected" AutomationProperties.AutomationId="ExtractSelected"/>
+      <Button x:Name="ExtractAllButton" Click="ExtractAllClicked" Content="Extract all" AutomationProperties.AutomationId="ExtractAll"/>
+      <Button x:Name="MountButton" Click="MountClicked" Content="Mount image" AutomationProperties.AutomationId="MountImage"/>
+     </StackPanel>
+     <Grid Grid.Row="3" ColumnDefinitions="3*,2*" ColumnSpacing="12">
+      <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+       <Grid RowDefinitions="Auto,*">
+        <Grid Padding="12,8" ColumnDefinitions="*,100,90">
+         <TextBlock Text="Name" FontWeight="SemiBold"/>
+         <TextBlock Grid.Column="1" Text="Type" FontWeight="SemiBold"/>
+         <TextBlock Grid.Column="2" Text="Size" FontWeight="SemiBold" TextAlignment="Right"/>
+        </Grid>
+        <ListView Grid.Row="1" x:Name="Entries" SelectionMode="Single" SelectionChanged="EntrySelectionChanged" DoubleTapped="EntryDoubleTapped" AutomationProperties.AutomationId="FileList">
+         <ListView.ItemContainerStyle>
+          <Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style>
+         </ListView.ItemContainerStyle>
+         <ListView.ItemTemplate>
+          <DataTemplate>
+           <Grid ColumnDefinitions="*,100,90" ColumnSpacing="4">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+             <FontIcon Glyph="{Binding Glyph}" FontSize="16"/>
+             <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+            </StackPanel>
+            <TextBlock Grid.Column="1" Text="{Binding Kind}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            <TextBlock Grid.Column="2" Text="{Binding SizeText}" TextAlignment="Right" VerticalAlignment="Center"/>
+           </Grid>
+          </DataTemplate>
+         </ListView.ItemTemplate>
+        </ListView>
+       </Grid>
+      </Border>
+      <Border Grid.Column="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Padding="14" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+       <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10">
+        <TextBlock Text="File details" FontWeight="SemiBold"/>
+        <TextBlock Grid.Row="1" x:Name="Details" Text="Select an entry to view its properties." TextWrapping="Wrap"/>
+        <TextBox Grid.Row="2" x:Name="Preview" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" ScrollViewer.VerticalScrollBarVisibility="Auto" Header="Preview · first 16 KiB" AutomationProperties.AutomationId="FilePreview"/>
+       </Grid>
+      </Border>
+     </Grid>
+    </Grid>
+
+    <ScrollViewer x:Name="PackPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+     <StackPanel Spacing="16" Padding="0,0,4,10" MaxWidth="900" HorizontalAlignment="Stretch">
+      <StackPanel Spacing="3">
+       <TextBlock Text="Create a SquashFS image" Style="{StaticResource SubtitleTextBlockStyle}"/>
+       <TextBlock Text="Choose a source folder and compression settings. The image is written to a new file." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+      </StackPanel>
+      <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="12">
+        <TextBlock Text="Source and destination" FontWeight="SemiBold"/>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+         <TextBox x:Name="SourceBox" Header="Source directory" AutomationProperties.AutomationId="PackSource"/>
+         <Button Grid.Column="1" Content="Browse…" Click="SourceClicked" VerticalAlignment="Bottom"/>
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+         <TextBox x:Name="OutputBox" Header="Output image" AutomationProperties.AutomationId="PackOutput"/>
+         <Button Grid.Column="1" Content="Save as…" Click="OutputClicked" VerticalAlignment="Bottom"/>
+        </Grid>
+       </StackPanel>
+      </Border>
+      <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="12">
+        <TextBlock Text="Compression" FontWeight="SemiBold"/>
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+         <ComboBox x:Name="CodecBox" Header="Algorithm" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="CompressionCodec"/>
+         <ComboBox Grid.Column="1" x:Name="BlockBox" Header="Data block size" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="BlockSize"/>
+        </Grid>
+        <TextBlock x:Name="CodecHelp" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+         <NumberBox x:Name="LevelBox" Header="Compression level (optional)" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="CompressionLevel"/>
+         <NumberBox Grid.Column="1" x:Name="ThreadsBox" Header="Processors (0 = automatic)" Value="0" Minimum="0" Maximum="1024" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="ProcessorCount"/>
+        </Grid>
+       </StackPanel>
+      </Border>
+      <Expander Header="Advanced parameters" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False" AutomationProperties.AutomationId="AdvancedParameters">
+       <StackPanel Spacing="12" Padding="0,6,0,6">
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+         <NumberBox x:Name="MemoryBox" Header="Memory limit (MiB, optional)" Minimum="64" Maximum="1048576" SpinButtonPlacementMode="Compact"/>
+         <TextBox Grid.Column="1" x:Name="TimestampBox" Header="Reproducible timestamp (Unix seconds)" PlaceholderText="Optional"/>
+        </Grid>
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+         <StackPanel Spacing="3">
+          <CheckBox x:Name="NoFragments" Content="Disable fragments"/>
+          <CheckBox x:Name="AlwaysFragments" Content="Pack tail ends into fragments"/>
+          <CheckBox x:Name="NoDuplicates" Content="Disable duplicate detection"/>
+          <CheckBox x:Name="NoSparse" Content="Disable sparse-file detection"/>
+          <CheckBox x:Name="NoXattrs" Content="Omit extended attributes"/>
+          <CheckBox x:Name="AllRoot" Content="Set owner and group to root"/>
+         </StackPanel>
+         <StackPanel Grid.Column="1" Spacing="3">
+          <CheckBox x:Name="NoExports" Content="Omit export table"/>
+          <CheckBox x:Name="NoDataCompression" Content="Store data without compression"/>
+          <CheckBox x:Name="NoInodeCompression" Content="Store inodes without compression"/>
+          <CheckBox x:Name="NoFragmentCompression" Content="Store fragments without compression"/>
+          <CheckBox x:Name="Lz4Hc" Content="LZ4 high compression"/>
+          <CheckBox x:Name="KeepDirectory" Content="Keep source directory as root child"/>
+         </StackPanel>
+        </Grid>
+        <TextBox x:Name="ExcludeBox" Header="Exclude-list file (optional)" PlaceholderText="Full path to a text file"/>
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+         <TextBox x:Name="XzDict" Header="XZ dictionary size (optional)" PlaceholderText="e.g. 75% or 64K"/>
+         <TextBox Grid.Column="1" x:Name="XzFilters" Header="XZ BCJ filters (optional)" PlaceholderText="e.g. x86,arm"/>
+        </Grid>
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+         <NumberBox x:Name="GzipWindow" Header="GZIP window size (optional)" Minimum="8" Maximum="15" SpinButtonPlacementMode="Compact"/>
+         <ComboBox Grid.Column="1" x:Name="LzoAlgorithm" Header="LZO algorithm" HorizontalAlignment="Stretch"/>
+        </Grid>
+       </StackPanel>
+      </Expander>
+      <StackPanel Orientation="Horizontal" Spacing="8">
+       <Button x:Name="CreateButton" Click="CreateClicked" Content="Create image" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="CreateImage"/>
+       <Button Click="ResetClicked" Content="Restore defaults"/>
+      </StackPanel>
+      <TextBox x:Name="OperationLog" Header="Operation log" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="120" MaxHeight="220" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.AutomationId="OperationLog"/>
+     </StackPanel>
+    </ScrollViewer>
+
+    <Grid x:Name="MountPage" Visibility="Collapsed" RowDefinitions="Auto,Auto,*" RowSpacing="14">
+     <StackPanel Spacing="4">
+      <TextBlock Text="Mounted images" Style="{StaticResource SubtitleTextBlockStyle}"/>
+      <TextBlock Text="Mount images as read-only Windows volumes. Data blocks are read directly from the image." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+     </StackPanel>
+     <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+      <ComboBox x:Name="DriveBox" Width="150" AutomationProperties.AutomationId="MountDrive"/>
+      <Button Click="MountHereClicked" Content="Mount current image" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="MountCurrent"/>
+      <Button Click="ExplorerClicked" Content="Open in Explorer" AutomationProperties.AutomationId="OpenExplorer"/>
+      <Button Click="UnmountClicked" Content="Unmount" AutomationProperties.AutomationId="UnmountImage"/>
+     </StackPanel>
+     <ListView Grid.Row="2" x:Name="MountedList" SelectionMode="Single" AutomationProperties.AutomationId="MountedList">
+      <ListView.ItemTemplate>
+       <DataTemplate>
+        <Grid Padding="8" ColumnDefinitions="Auto,*" ColumnSpacing="16">
+         <FontIcon Glyph="&#xEDA2;" FontSize="28"/>
+         <StackPanel Grid.Column="1" Spacing="4">
+          <TextBlock Text="{Binding MountPoint}" FontWeight="SemiBold" FontSize="18"/>
+          <TextBlock Text="{Binding ImagePath}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+         </StackPanel>
+        </Grid>
+       </DataTemplate>
+      </ListView.ItemTemplate>
+     </ListView>
+    </Grid>
+
+    <ScrollViewer x:Name="ToolsPage" Visibility="Collapsed">
+     <StackPanel Spacing="16" MaxWidth="760">
+      <TextBlock Text="Tools &amp; about" Style="{StaticResource SubtitleTextBlockStyle}"/>
+      <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="10">
+        <TextBlock Text="Linux SquashFS command-line tools" FontWeight="SemiBold"/>
+        <TextBlock Text="The distribution includes the MSYS2 builds of mksquashfs, unsquashfs and sqfscat. Use the buttons to inspect their version information." TextWrapping="Wrap"/>
+        <StackPanel Orientation="Horizontal" Spacing="8">
+         <Button Click="MkVersionClicked" Content="mksquashfs -version"/>
+         <Button Click="UnVersionClicked" Content="unsquashfs -version"/>
+         <Button Click="ToolsFolderClicked" Content="Open tools folder"/>
+        </StackPanel>
+        <TextBox x:Name="ToolsLog" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap" MinHeight="110"/>
+       </StackPanel>
+      </Border>
+      <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="8">
+        <TextBlock Text="About WinSquashfs" FontWeight="SemiBold"/>
+        <TextBlock Text="WinUI 3 • WinFsp • libsquashfs" />
+        <TextBlock Text="Windows x64. Mounting and previewing use in-memory block decompression. Linux-specific file types appear in the browser; only regular files and directories are projected onto Windows drives." TextWrapping="Wrap"/>
+        <HyperlinkButton Content="Project on GitHub" NavigateUri="https://github.com/HSOS6Miyabi/WinSquashfs"/>
+       </StackPanel>
+      </Border>
+     </StackPanel>
+    </ScrollViewer>
+   </Grid>
+  </NavigationView>
+  <Grid Grid.Row="2" Padding="18,8" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+   <TextBlock x:Name="StatusText" Text="Ready" TextWrapping="Wrap" VerticalAlignment="Center" AutomationProperties.AutomationId="Status"/>
+   <ProgressRing Grid.Column="1" x:Name="BusyRing" Width="22" Height="22" IsActive="False"/>
+   <Button Grid.Column="2" x:Name="CancelButton" Content="Cancel" Click="CancelClicked" IsEnabled="False" AutomationProperties.AutomationId="CancelOperation"/>
+  </Grid>
+ </Grid>
+</Window>
