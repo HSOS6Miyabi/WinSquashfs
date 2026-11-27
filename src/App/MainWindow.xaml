@@ -290,7 +290,7 @@
          <Button Click="UnVersionClicked" Content="unsquashfs -version"/>
          <Button Click="ToolsFolderClicked" Content="{StaticResource L_Open_tools_folder}"/>
         </StackPanel>
-        <TextBox x:Name="ToolsLog" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap" MinHeight="110"/>
+        <TextBox x:Name="ToolsLog" AutomationProperties.AutomationId="ToolsLog" AcceptsReturn="True" IsReadOnly="True" TextWrapping="Wrap" MinHeight="110"/>
        </StackPanel>
       </Border>
       <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">

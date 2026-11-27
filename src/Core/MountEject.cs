@@ -30,7 +30,11 @@ public static class MountEject
             await pipe.FlushAsync(timeout.Token);
             byte[] response = new byte[1];
             int length = await pipe.ReadAsync(response, timeout.Token);
-            if (length != 1 || response[0] != 0)
+            if (length != 1)
+                throw new IOException(Localization.T("Unable to eject the SquashFS volume {0}.", drive));
+            await pipe.WriteAsync(new byte[] { 2 }, timeout.Token);
+            await pipe.FlushAsync(timeout.Token);
+            if (response[0] != 0)
                 throw new IOException(Localization.T("Unable to eject the SquashFS volume {0}.", drive));
         }
         catch (TimeoutException ex)
@@ -50,6 +54,7 @@ internal sealed class EjectListener : IDisposable
     private readonly CancellationTokenSource stopping = new();
     private readonly Action eject;
     private readonly Action<Exception?> completed;
+    private Task? listening;
 
     internal EjectListener(string drive, Action eject, Action<Exception?> completed)
     {
@@ -59,53 +64,62 @@ internal sealed class EjectListener : IDisposable
             PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
     }
 
-    internal void Start() => _ = ListenAsync(stopping.Token);
+    internal void Start() => listening = ListenAsync(stopping.Token);
 
     private async Task ListenAsync(CancellationToken token)
     {
+        bool requested = false;
+        Exception? error = null;
         try
         {
             while (!token.IsCancellationRequested)
             {
-                await pipe.WaitForConnectionAsync(token);
+                await pipe.WaitForConnectionAsync(token).ConfigureAwait(false);
                 try
                 {
                     using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
                     readTimeout.CancelAfter(TimeSpan.FromSeconds(5));
                     byte[] request = new byte[1];
-                    if (await pipe.ReadAsync(request, readTimeout.Token) != 1 || request[0] != 1)
+                    if (await pipe.ReadAsync(request, readTimeout.Token).ConfigureAwait(false) != 1 || request[0] != 1)
                         continue;
 
-                    Exception? error = null;
+                    requested = true;
                     try { eject(); }
                     catch (Exception ex) { error = ex; }
-                    try
-                    {
-                        await pipe.WriteAsync(new byte[] { error == null ? (byte)0 : (byte)1 });
-                        await pipe.FlushAsync();
-                    }
-                    finally { completed(error); }
-                    return;
+
+                    using var replyTimeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                    replyTimeout.CancelAfter(TimeSpan.FromSeconds(5));
+                    await pipe.WriteAsync(new byte[] { error == null ? (byte)0 : (byte)1 }, replyTimeout.Token).ConfigureAwait(false);
+                    await pipe.FlushAsync(replyTimeout.Token).ConfigureAwait(false);
+                    // The client confirms receipt before the mount process may exit.
+                    await pipe.ReadAsync(request, replyTimeout.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
                 catch (IOException) when (!token.IsCancellationRequested) { }
                 finally
                 {
-                    if (pipe.IsConnected) pipe.Disconnect();
+                    if (pipe.IsConnected)
+                    {
+                        try { pipe.Disconnect(); }
+                        catch (IOException) { }
+                    }
                 }
+                if (requested) return;
             }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
-        catch (IOException) when (token.IsCancellationRequested) { }
+        catch (IOException) { }
         finally
         {
             pipe.Dispose();
             stopping.Dispose();
+            if (requested) completed(error);
         }
     }
 
     public void Dispose()
     {
         try { stopping.Cancel(); } catch (ObjectDisposedException) { }
+        listening?.GetAwaiter().GetResult();
     }
 }

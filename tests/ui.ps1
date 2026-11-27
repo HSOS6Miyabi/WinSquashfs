@@ -125,6 +125,7 @@ try {
   Invoke-Control $window 'VerifyImage'
   $null=Wait-Control $window 'VerifyImage' $true
   Invoke-Control $window 'UpFolder'
+  $beforeDrives=@([IO.DriveInfo]::GetDrives()|ForEach-Object {$_.Name})
   Invoke-Control $window 'MountImage'
   $mounted=Wait-Control $window 'MountedList'
   $item=$null
@@ -136,12 +137,39 @@ try {
   if(!$item){throw 'Mount list is empty'}
   $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
   Save-WindowScreenshot $p '05-mounts'
+  $newDrives=@([IO.DriveInfo]::GetDrives()|Where-Object {$_.Name -notin $beforeDrives})
+  if($newDrives.Count -ne 1 -or [IO.File]::ReadAllText(($newDrives[0].Name+'nested\hello.txt')) -ne 'hello'){throw 'GUI mount did not expose expected data'}
   Invoke-Control $window 'UnmountImage'
   for($i=0;$i -lt 120;$i++){
     if(!$mounted.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)){break}
     Start-Sleep -Milliseconds 250
   }
   if($mounted.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)){throw 'Unmount failed'}
+  if([IO.Directory]::Exists($newDrives[0].Name)){throw 'Manual unmount did not release drive'}
+  Invoke-Control $window 'MountCurrent'
+  $item=$null
+  for($i=0;$i -lt 120 -and !$item;$i++){
+    $item=$mounted.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)
+    if(!$item){Start-Sleep -Milliseconds 250}
+  }
+  if(!$item){throw 'Second GUI mount did not appear'}
+  $newDrives=@([IO.DriveInfo]::GetDrives()|Where-Object {$_.Name -notin $beforeDrives})
+  if($newDrives.Count -ne 1){throw 'Second GUI mount did not allocate drive'}
+  $eject=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--eject',$newDrives[0].Name.TrimEnd('\')) -WorkingDirectory $AppDirectory -PassThru
+  try {
+    if(!$eject.WaitForExit(20000)){throw 'GUI eject command did not return'}
+    if($eject.ExitCode -ne 0){throw "GUI eject returned $($eject.ExitCode)"}
+  } finally {
+    if(!$eject.HasExited){$eject.Kill();$eject.WaitForExit()}
+    $eject.Dispose()
+  }
+  for($i=0;$i -lt 120;$i++){
+    if(!$mounted.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)){break}
+    Start-Sleep -Milliseconds 250
+  }
+  if($mounted.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$itemCondition)){throw 'External eject did not update GUI'}
+  if([IO.Directory]::Exists($newDrives[0].Name)){throw 'External eject did not release drive'}
+  Write-Host 'PASS GUI mount, read, manual unmount, external eject and synchronized mount list'
   Write-Host 'WinUI creation, navigation and mount controls passed.'
 
   # Exercise the actual background process from the GUI, then close the GUI.
@@ -187,6 +215,10 @@ try {
   $nav=Wait-Control $window 'NavTools' $true
   $pattern=$null
   if($nav.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)){$pattern.Select()}else{$nav.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
+  Invoke-Control $window 'CheckWinFsp'
+  $null=Wait-Control $window 'CheckWinFsp' $true
+  $log=(Wait-Control $window 'ToolsLog').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+  if($log -notmatch '2\.2\.26323|2\.[3-9]\.'){throw "WinFsp runtime diagnostic missing: $log"}
   Save-WindowScreenshot $p '07-tools'
   $p.CloseMainWindow()|Out-Null
   if(!$p.WaitForExit(10000)){throw 'GUI did not close with UNC access enabled'}
