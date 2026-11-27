@@ -102,7 +102,7 @@ try {
   Invoke-Control $window 'StartUnc'
   $agentStarted=$true
   $null=Wait-Control $window 'StopUnc' $true
-  $unc="\\sqfs\$alias\ui.squashfs"
+  $unc='\\sfs$\' + $alias + '\ui.squashfs'
   $uncActual=(Wait-Control $window 'UncImagePath').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
   if($uncActual -ne $unc){throw "Unexpected UNC path: $uncActual"}
   if([IO.File]::ReadAllText("$unc\nested\hello.txt") -ne 'hello'){throw 'GUI-launched UNC read failed'}

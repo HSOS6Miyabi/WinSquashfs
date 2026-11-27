@@ -11,8 +11,9 @@ namespace WinSquashfs.Core;
 
 public sealed record UncShare(string Name, string Root)
 {
-    public string Prefix => @"\sqfs\" + Name;
-    public string UncPath => @"\\sqfs\" + Name;
+    public const string ServerName = "sfs$";
+    public string Prefix => "\\" + ServerName + "\\" + Name;
+    public string UncPath => "\\" + Prefix;
 
     public UncShare Validate()
     {

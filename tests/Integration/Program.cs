@@ -109,7 +109,8 @@ try
     string shareName="ci-"+Guid.NewGuid().ToString("N")[..8];
     var share=new UncShare(shareName,imageDir);
     var originalDrives=DriveInfo.GetDrives().Select(d=>d.Name).OrderBy(d=>d).ToArray();
-    string prefix=share.UncPath;
+    string prefix=@"\\sfs$\"+shareName;
+    Require(share.UncPath==prefix,"Unexpected UNC namespace");
     using (var unc=new UncSession(new[]{share},idleSeconds:1,maxIdleImages:2))
     {
         var until=DateTime.UtcNow.AddSeconds(15);

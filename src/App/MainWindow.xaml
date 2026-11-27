@@ -225,7 +225,7 @@
         </Grid>
         <TextBox x:Name="UncAliasBox" Header="Share name" PlaceholderText="path" AutomationProperties.AutomationId="UncAlias"/>
         <CheckBox x:Name="UncDrivesBox" Content="Include local fixed and removable drives" AutomationProperties.AutomationId="UncDrives"/>
-        <TextBlock Text="For example, C:\images\demo.squashfs becomes \\sqfs\C\images\demo.squashfs. Only the current Windows account is granted access." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <TextBlock Text="For example, C:\images\demo.squashfs becomes \\sfs$\C\images\demo.squashfs. Only the current Windows account is granted access." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
          <NumberBox x:Name="UncIdleBox" Header="Idle timeout (seconds)" Minimum="0" Maximum="86400" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="UncIdle"/>
          <NumberBox Grid.Column="1" x:Name="UncLimitBox" Header="Maximum idle images" Minimum="0" Maximum="1024" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="UncLimit"/>

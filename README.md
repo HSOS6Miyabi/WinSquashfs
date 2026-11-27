@@ -29,12 +29,12 @@ Create image accepts a source directory and a new output path. Zstandard is the 
 Open **UNC access** in WinSquashfs and start the background application. The default configuration exposes the current user's profile as **path** and available local drives by their letter. For example:
 
     C:\images\linux.squashfs
-    \\sqfs\C\images\linux.squashfs
-    \\sqfs\C\images\linux.squashfs\usr\bin\example
+    \\sfs$\C\images\linux.squashfs
+    \\sfs$\C\images\linux.squashfs\usr\bin\example
 
-To use a custom root, set the local directory to C:\images and the share name to path, then open \\sqfs\path\linux.squashfs. The UNC paths are normal Windows paths; Explorer and other applications can read them directly. A single network filesystem per share dynamically opens images as directories. No drive letter is reserved. Ordinary host files are not exposed. The configured directory must be local and may not pass through a reparse point; reparse points encountered below it are skipped. Access is restricted to the Windows account running the background application. Run it in the ordinary interactive user session.
+To use a custom root, set the local directory to C:\images and the share name to path, then open \\sfs$\path\linux.squashfs. The sfs$ server component is a local virtual UNC namespace chosen to reduce conflicts with DNS hostnames. The UNC paths are normal Windows paths; Explorer and other applications can read them directly. A single network filesystem per share dynamically opens images as directories. No drive letter is reserved. Ordinary host files are not exposed. The configured directory must be local and may not pass through a reparse point; reparse points encountered below it are skipped. Access is restricted to the Windows account running the background application. Run it in the ordinary interactive user session.
 
-The background application remains available after the GUI closes. Start-at-login is optional. Idle images are closed after the configured time (default 60 seconds); the maximum number of idle images defaults to 8. Active handles retain their image. Changing settings restarts the background application if it is running; close open UNC files before stopping or applying settings. Restart UNC access to discover newly attached drives. Only one process can own a particular sqfs share name at a time.
+The background application remains available after the GUI closes. Start-at-login is optional. Idle images are closed after the configured time (default 60 seconds); the maximum number of idle images defaults to 8. Active handles retain their image. Changing settings restarts the background application if it is running; close open UNC files before stopping or applying settings. Restart UNC access to discover newly attached drives. Only one process can own a particular sfs$ share name at a time.
 
 The image browser can copy the current image's UNC path or open it in Explorer. Explorer's image context menu also offers Open via SquashFS UNC path. Windows 11 displays traditional shell verbs in Show more options.
 
