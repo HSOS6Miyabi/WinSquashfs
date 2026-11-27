@@ -98,12 +98,6 @@ public sealed partial class MainWindow : Window
         try
         {
             if (args.Length == 0) return;
-            if (args is ["--unc", var directImage])
-            {
-                Navigation.SelectedItem = UncNav;
-                await OpenDirectImageAsync(directImage);
-                return;
-            }
             if (args is ["--pack", var folder])
             { SourceBox.Text = Path.GetFullPath(folder); OutputBox.Text = Path.TrimEndingDirectorySeparator(SourceBox.Text) + ".squashfs"; Navigation.SelectedItem = PackNav; return; }
             string mode = args.Length == 1 ? "--open" : args[0];

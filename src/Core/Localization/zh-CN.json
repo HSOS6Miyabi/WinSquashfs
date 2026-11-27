@@ -231,5 +231,9 @@
   "The source filesystem did not provide a stable file identifier.": "源文件系统未提供稳定的文件标识符。",
   "Invalid network namespace.": "网络命名空间无效。",
   "The UNC share name is reserved for network sources.": "共享名称 UNC 保留用于访问网络源文件。",
-  "Network shares": "网络共享"
+  "Network shares": "网络共享",
+  "Cannot query source file identity.": "无法查询源文件身份。",
+  "Source is not a regular file.": "源文件不是普通文件。",
+  "A source read is already active.": "正在读取源文件。",
+  "Source handle is closed.": "源文件句柄已关闭。"
 }

@@ -166,6 +166,10 @@ jobs:
         run: |
           $language=if ('${{ matrix.scenario }}' -eq 'upgrade') {'zh-CN'} else {'en-US'}
           ./tests/ui.ps1 -AppDirectory "$env:ProgramFiles\WinSquashfs\app" -Language $language
+      - name: Verify installed open and edit associations with real Explorer and SMB
+        shell: powershell
+        timeout-minutes: 6
+        run: ./tests/association.ps1 -AppDirectory "$env:ProgramFiles\WinSquashfs\app"
       - name: Verify uninstallation
         shell: pwsh
         run: |

@@ -54,21 +54,37 @@ internal sealed class VolatileImageSource : IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetStandard(SafeFileHandle handle, int kind, out StandardInformation info, uint length);
 
-    private readonly record struct Stamp(uint Volume, ulong FileId, long Length, ulong Creation, ulong Write, long Change);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IdInformation
+    {
+        internal ulong Volume, Low, High;
+    }
+    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetId(SafeFileHandle handle, int kind, out IdInformation info, uint length);
+    [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security,
+        uint creation, uint flags, IntPtr template);
+
+    private readonly record struct Stamp(ulong Volume, ulong IdLow, ulong IdHigh, long Length, ulong Creation, ulong Write, long Change);
 
     private static ulong Join(uint high, uint low) => ((ulong)high << 32) | low;
 
     private static Stamp Snapshot(SafeFileHandle handle)
     {
         if (!GetFileInformationByHandle(handle, out var info))
-            throw new IOException("Cannot query source file identity.", new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
+            throw new IOException(Localization.T("Cannot query source file identity."), new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
         if ((info.Attributes & ((uint)FileAttributes.Directory | (uint)FileAttributes.ReparsePoint)) != 0)
-            throw new IOException("Source is not a regular file.");
+            throw new IOException(Localization.T("Source is not a regular file."));
         if (GetStandard(handle, 1, out var standard, (uint)Marshal.SizeOf<StandardInformation>()) &&
             (standard.DeletePending != 0 || standard.Directory != 0))
             throw new FileNotFoundException();
         long change = GetBasic(handle, 0, out var basic, (uint)Marshal.SizeOf<BasicInformation>()) ? basic.Change : 0;
-        return new Stamp(info.VolumeSerial, Join(info.IndexHigh, info.IndexLow), checked((long)Join(info.SizeHigh, info.SizeLow)),
+        var id = new IdInformation { Volume = info.VolumeSerial, Low = Join(info.IndexHigh, info.IndexLow) };
+        if (GetId(handle, 18, out var extended, (uint)Marshal.SizeOf<IdInformation>()) &&
+            (extended.Low != 0 || extended.High != 0))
+            id = extended;
+        return new Stamp(id.Volume, id.Low, id.High, checked((long)Join(info.SizeHigh, info.SizeLow)),
             Join(info.CreationHigh, info.CreationLow), Join(info.WriteHigh, info.WriteLow), change);
     }
 
@@ -77,6 +93,23 @@ internal sealed class VolatileImageSource : IDisposable
         if (!UncFileSystem.IsPlainPath(path)) throw new UnauthorizedAccessException(path);
         return File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete,
             FileOptions.Asynchronous | FileOptions.RandomAccess);
+    });
+
+    private SafeFileHandle OpenProbe() => identity.Run(() =>
+    {
+        if (!UncFileSystem.IsPlainPath(path)) throw new UnauthorizedAccessException(path);
+        string nativePath = path.StartsWith(@"\\?\", StringComparison.Ordinal) ? path :
+            path.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + path[2..] : @"\\?\" + path;
+        // Metadata-only access with all sharing flags does not introduce a
+        // conflicting data handle while another program edits the source.
+        var handle = CreateFile(nativePath, 0x80, 7, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            int error = Marshal.GetLastWin32Error();
+            handle.Dispose();
+            throw new IOException(path, new System.ComponentModel.Win32Exception(error));
+        }
+        return handle;
     });
 
     internal VolatileImageSource(string path, LocalReadIdentity identity)
@@ -104,7 +137,7 @@ internal sealed class VolatileImageSource : IDisposable
             else
             {
                 // No permanent source handle on filesystems without RH oplocks.
-                if (original.FileId == 0) throw new IOException(Localization.T("The source filesystem did not provide a stable file identifier."));
+                if (original.IdLow == 0 && original.IdHigh == 0) throw new IOException(Localization.T("The source filesystem did not provide a stable file identifier."));
             }
 
             try
@@ -156,7 +189,7 @@ internal sealed class VolatileImageSource : IDisposable
             lock (gate)
             {
                 EnsureValid();
-                if (active != null) throw new InvalidOperationException("A source read is already active.");
+                if (active != null) throw new InvalidOperationException(Localization.T("A source read is already active."));
                 active = retained ?? Open();
                 CheckLocked(active);
             }
@@ -171,7 +204,7 @@ internal sealed class VolatileImageSource : IDisposable
             lock (gate)
             {
                 EnsureValid();
-                if (active == null) throw new IOException("Source handle is closed.");
+                if (active == null) throw new IOException(Localization.T("Source handle is closed."));
                 CheckLocked(active);
             }
         }
@@ -220,7 +253,7 @@ internal sealed class VolatileImageSource : IDisposable
         {
             // Verify the path as well as the open file: deletion, ancestor
             // renames and replacement are detected even if a notification is lost.
-            using var handle = Open();
+            using var handle = OpenProbe();
             if (Snapshot(handle) != original) Invalidate();
         }
         catch (Exception) { Invalidate(); }
