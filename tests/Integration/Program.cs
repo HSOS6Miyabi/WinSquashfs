@@ -66,7 +66,13 @@ try
             drive=mount.MountPoint.TrimEnd('\\')+"\\";
             var deadline=DateTime.UtcNow.AddSeconds(15);
             while (!Directory.Exists(drive) && DateTime.UtcNow<deadline) await Task.Delay(100);
-            Require(Directory.Exists(drive),"Mount not visible");
+            Console.WriteLine($"Mounted {codec} at {drive}; visible volumes: {string.Join(", ", DriveInfo.GetDrives().Select(d => d.Name))}");
+            if (!Directory.Exists(drive))
+            {
+                try { Console.WriteLine($"Root attributes: {File.GetAttributes(drive)}"); }
+                catch (Exception ex) { Console.WriteLine(ex); }
+                throw new IOException($"Mounted root is not accessible: {drive}");
+            }
             Require(Directory.EnumerateFileSystemEntries(drive).Count()==5,"Mount enumeration mismatch");
             Require(File.ReadAllText(Path.Combine(drive,"nested","hello.txt"))=="Hello SquashFS","Mounted text read");
             using (var stream=new FileStream(Path.Combine(drive,"large.bin"),FileMode.Open,FileAccess.Read,FileShare.Read))

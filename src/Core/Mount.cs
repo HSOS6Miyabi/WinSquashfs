@@ -19,7 +19,7 @@ internal sealed class ReadOnlyFileSystem : FileSystemBase
     public ReadOnlyFileSystem(Archive archive)
     {
         this.archive = archive;
-        var sd = new RawSecurityDescriptor("O:SYG:SYD:(A;;GRGX;;;WD)");
+        var sd = new RawSecurityDescriptor("O:SYG:SYD:P(A;;0x1200A9;;;WD)");
         security = new byte[sd.BinaryLength];
         sd.GetBinaryForm(security, 0);
     }
