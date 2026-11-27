@@ -1,0 +1,95 @@
+name: Windows build and integration
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            squashfs-tools
+            curl
+            unzip
+      - name: Build native reader and collect Linux tool ports
+        shell: msys2 {0}
+        run: bash scripts/build-native.sh
+      - name: Install WinFsp SDK and driver
+        shell: pwsh
+        run: ./scripts/install-winfsp.ps1
+      - name: Publish self-contained applications
+        shell: pwsh
+        run: ./scripts/publish.ps1
+      - name: Run codec, filesystem and random-access integration tests
+        shell: pwsh
+        run: |
+          dotnet publish tests/Integration/Integration.csproj -c Release -r win-x64 --self-contained true -o artifacts/test
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item artifacts/native/* artifacts/test -Recurse -Force
+          & ./artifacts/test/Integration.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: WinUI end-to-end automation
+        shell: powershell
+        run: ./tests/ui.ps1 -AppDirectory (Resolve-Path artifacts/dist).Path
+      - name: Build NSIS installer
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $nsis=Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'NSIS\makensis.exe'
+          & $nsis installer/WinSquashfs.nsi
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify installation, registry and uninstallation
+        shell: pwsh
+        run: |
+          $p=Start-Process (Resolve-Path artifacts/WinSquashfs-Setup-x64.exe) -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode) { throw "Installer exit $($p.ExitCode)" }
+          $install=Join-Path $env:ProgramFiles 'WinSquashfs'
+          if (!(Test-Path "$install/app/WinSquashfs.exe")) { throw 'Missing GUI' }
+          if (!(Test-Path "$install/app/tools/unsquashfs.exe")) { throw 'Missing unsquashfs' }
+          if (!(Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image\shell\open\command')) { throw 'Missing file association' }
+          if (!(Test-Path 'HKLM:\Software\Classes\SystemFileAssociations\.squashfs\shell\WinSquashfs.Mount\command')) { throw 'Missing mount verb' }
+          if (!(Test-Path 'HKLM:\Software\Classes\Directory\shell\WinSquashfs.Pack\command')) { throw 'Missing pack verb' }
+          $p=Start-Process "$install/Uninstall.exe" -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode) { throw "Uninstaller exit $($p.ExitCode)" }
+          if (Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image') { throw 'Association not removed' }
+      - name: Upload installer and portable distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: WinSquashfs-windows-x64
+          path: |
+            artifacts/WinSquashfs-Setup-x64.exe
+            artifacts/dist/
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinSquashfs-windows-x64
+          path: output
+      - name: Package and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd output/dist
+          zip -qr ../WinSquashfs-portable-x64.zip .
+          cd ../..
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes output/WinSquashfs-Setup-x64.exe output/WinSquashfs-portable-x64.zip
