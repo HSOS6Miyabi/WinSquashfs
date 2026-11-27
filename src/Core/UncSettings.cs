@@ -26,7 +26,8 @@ public sealed record UncSettings(string Root, string Alias = "path", bool Includ
         if (IncludeDrives)
         {
             foreach (var drive in DriveInfo.GetDrives())
-                if (drive.DriveType is DriveType.Fixed or DriveType.Removable && drive.IsReady)
+                if (drive.DriveType is DriveType.Fixed or DriveType.Removable && drive.IsReady &&
+                    !string.Equals(drive.DriveFormat, "SquashFS", StringComparison.OrdinalIgnoreCase))
                 {
                     var name = drive.Name[..1].ToUpperInvariant();
                     if (result.Any(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)))

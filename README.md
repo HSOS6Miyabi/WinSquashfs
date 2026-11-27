@@ -5,6 +5,8 @@ A WinUI 3 desktop application for SquashFS images on Windows x64. Browse image c
 ## Features
 
 - In-process archive browser with directory navigation, filename filtering, file metadata, text and hexadecimal previews.
+- Direct UNC access without assigning drive letters: configured directory aliases and local drives, image caching and login startup.
+- Recent images, drag-and-drop opening, image readability verification, and selected file or directory extraction.
 - WinFsp read-only drive mounting with automatic or explicit drive-letter selection and multiple concurrent mounts.
 - Direct random reads from compressed images through libsquashfs. Data and fragment blocks are decompressed in memory. No temporary extraction directory is created by browsing or mounting.
 - SquashFS 4.0 reading: gzip, XZ, LZO, LZ4, Zstandard and legacy LZMA where supported by the bundled decoder.
@@ -22,6 +24,20 @@ Open an image from the browser or Explorer. Select files for previews or extract
 
 Create image accepts a source directory and a new output path. Zstandard is the default. Advanced parameters are optional. Files with Windows-incompatible names receive deterministic Windows-safe names; the browser preserves the original names for display. Linux symbolic links, sockets and devices are listed as metadata; they are omitted from the mounted filesystem and Windows-safe extraction. The original unsquashfs executable is available for Linux-oriented extraction behavior.
 
+## Direct UNC access
+
+Open **UNC access** in WinSquashfs and start the background application. The default configuration exposes the current user's profile as **path** and available local drives by their letter. For example:
+
+    C:\images\linux.squashfs
+    \\sqfs\C\images\linux.squashfs
+    \\sqfs\C\images\linux.squashfs\usr\bin\example
+
+To use a custom root, set the local directory to C:\images and the share name to path, then open \\sqfs\path\linux.squashfs. The UNC paths are normal Windows paths; Explorer and other applications can read them directly. A single network filesystem per share dynamically opens images as directories. No drive letter is reserved. Ordinary host files are not exposed. The configured directory must be local and may not pass through a reparse point; reparse points encountered below it are skipped. Access is restricted to the Windows account running the background application. Run it in the ordinary interactive user session.
+
+The background application remains available after the GUI closes. Start-at-login is optional. Idle images are closed after the configured time (default 60 seconds); the maximum number of idle images defaults to 8. Active handles retain their image. Changing settings restarts the background application if it is running; close open UNC files before stopping or applying settings. Restart UNC access to discover newly attached drives. Only one process can own a particular sqfs share name at a time.
+
+The image browser can copy the current image's UNC path or open it in Explorer. Explorer's image context menu also offers Open via SquashFS UNC path. Windows 11 displays traditional shell verbs in Show more options.
+
 ## Command line
 
     winsqfs info image.squashfs
@@ -29,10 +45,16 @@ Create image accepts a source directory and a new output path. Zstandard is the 
     winsqfs list image.squashfs /directory
     winsqfs read image.squashfs /file.bin 65536 4096
     winsqfs mount image.squashfs X:
+    winsqfs verify image.squashfs
+    winsqfs serve path C:\images 60
+    winsqfs unc-start
+    winsqfs unc-status
+    winsqfs unc-path C:\images\linux.squashfs
+    winsqfs unc-stop
     winsqfs pack C:\source C:\output.squashfs zstd
     winsqfs unpack image.squashfs C:\new-directory
 
-The read command writes hexadecimal bytes. Ctrl+C stops a command-line mount. Native tools are located in the tools subdirectory.
+The read command writes hexadecimal bytes. The verify command reads each distinct regular-file inode without extracting data. Ctrl+C stops a command-line mount or foreground UNC share. Native tools are located in the tools subdirectory.
 
 ## Build
 

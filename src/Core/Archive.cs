@@ -89,6 +89,8 @@ public static class WindowsNames
     }
 }
 
+public sealed record ArchiveVerification(long Files, ulong Bytes);
+
 public sealed class Archive : IDisposable
 {
     private readonly ImageHandle handle;
@@ -179,6 +181,75 @@ public sealed class Archive : IDisposable
             }
         }
         catch { output.Dispose(); File.Delete(path); throw; }
+    }
+
+    public ArchiveVerification Verify(Action<long, ulong>? progress = null, CancellationToken token = default)
+    {
+        var pending = new Stack<Entry>();
+        pending.Push(Root);
+        var buffer = new byte[1024 * 1024];
+        long files = 0; ulong bytes = 0;
+        var inodes = new HashSet<uint>();
+        while (pending.TryPop(out var item))
+        {
+            token.ThrowIfCancellationRequested();
+            if (item.IsDirectory)
+            {
+                foreach (var child in item.Children) pending.Push(child);
+                continue;
+            }
+            if (!item.IsFile || !inodes.Add(item.Inode)) continue;
+            for (ulong offset = 0; offset < item.Size;)
+            {
+                token.ThrowIfCancellationRequested();
+                int read;
+                try { read = Read(item, offset, buffer); }
+                catch (IOException ex) { throw new IOException($"Unable to read {item.ArchivePath} at offset {offset}.", ex); }
+                if (read == 0) throw new EndOfStreamException(item.ArchivePath);
+                offset += (uint)read;
+                bytes = checked(bytes + (uint)read);
+            }
+            files++;
+            if (files % 32 == 0) progress?.Invoke(files, bytes);
+        }
+        progress?.Invoke(files, bytes);
+        return new ArchiveVerification(files, bytes);
+    }
+
+    public void ExportEntry(Entry entry, string path, CancellationToken token = default)
+    {
+        if (entry.IsFile) { ExportFile(entry, path, token); return; }
+        if (!entry.IsDirectory) throw new IOException("Select a file or directory.");
+        if (File.Exists(path) || Directory.Exists(path)) throw new IOException("Destination already exists.");
+        string staging = path + "." + Guid.NewGuid().ToString("N") + ".partial";
+        try
+        {
+            Directory.CreateDirectory(staging);
+            var pending = new Stack<(Entry Entry, string Path)>();
+            pending.Push((entry, staging));
+            while (pending.TryPop(out var item))
+            {
+                token.ThrowIfCancellationRequested();
+                foreach (var child in item.Entry.Children)
+                {
+                    token.ThrowIfCancellationRequested();
+                    string destination = System.IO.Path.Combine(item.Path, child.WindowsName);
+                    if (child.IsDirectory)
+                    {
+                        Directory.CreateDirectory(destination);
+                        pending.Push((child,destination));
+                    }
+                    else if (child.IsFile)
+                    {
+                        ExportFile(child, destination, token);
+                        File.SetLastWriteTimeUtc(destination, child.Modified.UtcDateTime);
+                    }
+                }
+            }
+            token.ThrowIfCancellationRequested();
+            Directory.Move(staging, path);
+        }
+        finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
     }
 
     public void Dispose()

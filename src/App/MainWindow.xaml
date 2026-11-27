@@ -24,18 +24,24 @@
     <NavigationViewItem x:Name="BrowseNav" Content="Browse image" Icon="Folder" Tag="browse" AutomationProperties.AutomationId="NavBrowse"/>
     <NavigationViewItem x:Name="PackNav" Content="Create image" Icon="Add" Tag="pack" AutomationProperties.AutomationId="NavPack"/>
     <NavigationViewItem x:Name="MountNav" Content="Mounted images" Icon="Folder" Tag="mount" AutomationProperties.AutomationId="NavMount"/>
+    <NavigationViewItem x:Name="UncNav" Content="UNC access" Icon="Link" Tag="unc" AutomationProperties.AutomationId="NavUnc"/>
     <NavigationViewItem x:Name="ToolsNav" Content="Tools &amp; about" Icon="Setting" Tag="tools" AutomationProperties.AutomationId="NavTools"/>
    </NavigationView.MenuItems>
    <Grid Padding="20,8,20,12">
-    <Grid x:Name="BrowsePage" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="12">
+    <Grid x:Name="BrowsePage" RowDefinitions="Auto,Auto,Auto,*" RowSpacing="12" AllowDrop="True" DragOver="ImageDragOver" Drop="ImageDropped">
      <Grid ColumnDefinitions="*,Auto">
       <StackPanel Spacing="3">
        <TextBlock Text="Image browser" Style="{StaticResource SubtitleTextBlockStyle}"/>
        <TextBlock x:Name="ImageSummary" Text="Open a SquashFS image to explore its contents." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="ImageSummary"/>
       </StackPanel>
-      <Button Grid.Column="1" x:Name="OpenButton" Click="OpenClicked" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="OpenImage">
-       <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="OpenFile"/><TextBlock Text="Open image"/></StackPanel>
-      </Button>
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+       <Button x:Name="RecentButton" Content="Recent" AutomationProperties.AutomationId="RecentImages">
+        <Button.Flyout><MenuFlyout x:Name="RecentMenu"/></Button.Flyout>
+       </Button>
+       <Button x:Name="OpenButton" Click="OpenClicked" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="OpenImage">
+        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="OpenFile"/><TextBlock Text="Open image"/></StackPanel>
+       </Button>
+      </StackPanel>
      </Grid>
      <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
       <Button x:Name="UpButton" Click="UpClicked" ToolTipService.ToolTip="Parent directory" AutomationProperties.AutomationId="UpFolder"><SymbolIcon Symbol="Up"/></Button>
@@ -47,6 +53,7 @@
       <Button x:Name="ExtractButton" Click="ExtractSelectedClicked" Content="Extract selected" AutomationProperties.AutomationId="ExtractSelected"/>
       <Button x:Name="ExtractAllButton" Click="ExtractAllClicked" Content="Extract all" AutomationProperties.AutomationId="ExtractAll"/>
       <Button x:Name="MountButton" Click="MountClicked" Content="Mount image" AutomationProperties.AutomationId="MountImage"/>
+      <Button x:Name="VerifyButton" Click="VerifyClicked" Content="Verify" ToolTipService.ToolTip="Read every file and verify image readability" AutomationProperties.AutomationId="VerifyImage"/>
      </StackPanel>
      <Grid Grid.Row="3" ColumnDefinitions="3*,2*" ColumnSpacing="12">
       <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
@@ -186,6 +193,60 @@
       </ListView.ItemTemplate>
      </ListView>
     </Grid>
+
+    <ScrollViewer x:Name="UncPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+     <StackPanel Spacing="16" Padding="0,0,4,10" MaxWidth="900" HorizontalAlignment="Stretch">
+      <StackPanel Spacing="4">
+       <TextBlock Text="Direct UNC access" Style="{StaticResource SubtitleTextBlockStyle}"/>
+       <TextBlock Text="Open any image in a configured directory using its UNC path. No drive letter or extracted copy is created." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+      </StackPanel>
+      <Border Padding="16" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="10">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+         <StackPanel Spacing="4">
+          <TextBlock Text="Background process" FontWeight="SemiBold"/>
+          <TextBlock x:Name="UncStatus" Text="Stopped" Foreground="{ThemeResource TextFillColorSecondaryBrush}" AutomationProperties.AutomationId="UncStatus"/>
+         </StackPanel>
+         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button x:Name="StartUncButton" Content="Start" Click="StartUncClicked" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="StartUnc"/>
+          <Button x:Name="StopUncButton" Content="Stop" Click="StopUncClicked" AutomationProperties.AutomationId="StopUnc"/>
+         </StackPanel>
+        </Grid>
+        <TextBlock Text="When running, the UNC entry points stay available after closing WinSquashfs. Images open on demand and idle images are released." TextWrapping="Wrap"/>
+        <TextBlock x:Name="UncShares" TextWrapping="Wrap" FontFamily="Consolas" AutomationProperties.AutomationId="UncShares"/>
+       </StackPanel>
+      </Border>
+      <Border Padding="16" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="12">
+        <TextBlock Text="Share configuration" FontWeight="SemiBold"/>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+         <TextBox x:Name="UncRootBox" Header="Local directory" AutomationProperties.AutomationId="UncRoot"/>
+         <Button Grid.Column="1" Content="Browse…" VerticalAlignment="Bottom" Click="UncRootClicked"/>
+        </Grid>
+        <TextBox x:Name="UncAliasBox" Header="Share name" PlaceholderText="path" AutomationProperties.AutomationId="UncAlias"/>
+        <CheckBox x:Name="UncDrivesBox" Content="Include local fixed and removable drives" AutomationProperties.AutomationId="UncDrives"/>
+        <TextBlock Text="For example, C:\images\demo.squashfs becomes \\sqfs\C\images\demo.squashfs. Only the current Windows account is granted access." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+         <NumberBox x:Name="UncIdleBox" Header="Idle timeout (seconds)" Minimum="0" Maximum="86400" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="UncIdle"/>
+         <NumberBox Grid.Column="1" x:Name="UncLimitBox" Header="Maximum idle images" Minimum="0" Maximum="1024" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="UncLimit"/>
+        </Grid>
+        <TextBlock Text="Set either value to zero to release an image as soon as no open handle remains. Active handles retain their image." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <CheckBox x:Name="UncLoginBox" Content="Start direct UNC access when I sign in" AutomationProperties.AutomationId="UncLogin"/>
+        <Button x:Name="UncApplyButton" Content="Save and apply" Click="UncApplyClicked" AutomationProperties.AutomationId="ApplyUnc"/>
+       </StackPanel>
+      </Border>
+      <Border Padding="16" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="10">
+        <TextBlock Text="Current image" FontWeight="SemiBold"/>
+        <TextBox x:Name="UncImagePathBox" Header="UNC path" IsReadOnly="True" AutomationProperties.AutomationId="UncImagePath"/>
+        <StackPanel Orientation="Horizontal" Spacing="8">
+         <Button x:Name="CopyUncButton" Content="Copy path" Click="CopyUncClicked" AutomationProperties.AutomationId="CopyUnc"/>
+         <Button x:Name="OpenUncButton" Content="Open in Explorer" Click="OpenUncClicked" AutomationProperties.AutomationId="OpenUnc"/>
+        </StackPanel>
+       </StackPanel>
+      </Border>
+     </StackPanel>
+    </ScrollViewer>
 
     <ScrollViewer x:Name="ToolsPage" Visibility="Collapsed">
      <StackPanel Spacing="16" MaxWidth="760">

@@ -100,6 +100,66 @@ try
         Require(File.ReadAllBytes(Path.Combine(upstream,"large.bin")).SequenceEqual(data),"Upstream extraction mismatch");
         Console.WriteLine($"PASS {codec}");
     }
+    // Mount one UNC namespace containing multiple images and directories. No drive is allocated.
+    var imageDir=Path.Combine(root,"unc-source");
+    Directory.CreateDirectory(Path.Combine(imageDir,"subdir"));
+    File.Copy(Path.Combine(root,"gzip.squashfs"),Path.Combine(imageDir,"subdir","first.squashfs"));
+    File.Copy(Path.Combine(root,"zstd.squashfs"),Path.Combine(imageDir,"second.sqfs"));
+    File.WriteAllText(Path.Combine(imageDir,"not-an-image.txt"),"not exposed");
+    string shareName="ci-"+Guid.NewGuid().ToString("N")[..8];
+    var share=new UncShare(shareName,imageDir);
+    var originalDrives=DriveInfo.GetDrives().Select(d=>d.Name).OrderBy(d=>d).ToArray();
+    string prefix=share.UncPath;
+    using (var unc=new UncSession(new[]{share},idleSeconds:1,maxIdleImages:2))
+    {
+        var until=DateTime.UtcNow.AddSeconds(15);
+        while(!Directory.Exists(prefix) && DateTime.UtcNow<until) await Task.Delay(100);
+        Require(Directory.Exists(prefix), "UNC share did not become available");
+        Require(unc.CachedImages==0,"Images opened before use");
+        Require(Directory.EnumerateDirectories(prefix).Count()==2,"UNC root enumeration");
+        Require(unc.CachedImages==0,"Directory listing opened image data");
+        Require(!File.Exists(Path.Combine(prefix,"not-an-image.txt")),"Ordinary host file exposed");
+        string one=Path.Combine(prefix,"subdir","first.squashfs");
+        string two=Path.Combine(prefix,"second.sqfs");
+        Require(Directory.Exists(one),"UNC image root missing");
+        Require(File.ReadAllText(Path.Combine(two,"nested","hello.txt"))=="Hello SquashFS","Second UNC image read");
+        using (var stream=new FileStream(Path.Combine(one,"large.bin"),FileMode.Open,FileAccess.Read,FileShare.Read))
+        {
+            Require(unc.ActiveImages>=1,"UNC image reference missing");
+            foreach(int pos in new[]{data.Length-13,131071,0,262144,1048576})
+            {
+                stream.Seek(pos,SeekOrigin.Begin);
+                var got=new byte[Math.Min(17001,data.Length-pos)];
+                stream.ReadExactly(got);
+                Require(got.SequenceEqual(data.AsSpan(pos,got.Length).ToArray()),"UNC random read mismatch");
+            }
+            await Task.Delay(2500);
+            Require(unc.ActiveImages>=1 && unc.CachedImages>=1,"Active UNC image evicted");
+            stream.Seek(131072,SeekOrigin.Begin);
+            Require(stream.ReadByte()==data[131072],"UNC handle invalid after idle expiry");
+        }
+        until=DateTime.UtcNow.AddSeconds(10);
+        while(unc.CachedImages!=0 && DateTime.UtcNow<until) await Task.Delay(100);
+        Require(unc.CachedImages==0,"Idle UNC image was not released");
+        Require(File.ReadAllBytes(Path.Combine(two,"tiny")).SequenceEqual(tiny),"UNC image not reopened");
+        Require(DriveInfo.GetDrives().Select(d=>d.Name).OrderBy(d=>d).SequenceEqual(originalDrives),"UNC allocated a drive letter");
+        bool blocked=false;
+        try { File.WriteAllText(Path.Combine(one,"new.txt"),"deny"); }
+        catch(IOException) { blocked=true; }
+        catch(UnauthorizedAccessException) { blocked=true; }
+        Require(blocked,"UNC permitted writes");
+    }
+    Require(!Directory.Exists(prefix),"UNC namespace remains mounted");
+    using(var archive=new Archive(Path.Combine(root,"zstd.squashfs")))
+    {
+        var report=archive.Verify();
+        Require(report.Files==5 && report.Bytes>=(ulong)data.Length,"Verification did not read all files");
+        string folder=Path.Combine(root,"selected-folder");
+        archive.ExportEntry(archive.Find("nested")!,folder);
+        Require(File.ReadAllText(Path.Combine(folder,"hello.txt"))=="Hello SquashFS","Selected folder export failed");
+    }
+    Console.WriteLine("PASS drive-free UNC namespace, on-demand cache, image verification and folder extraction");
+
     var bad=Path.Combine(root,"bad.squashfs");
     File.WriteAllBytes(bad,new byte[96]);
     bool rejected=false;

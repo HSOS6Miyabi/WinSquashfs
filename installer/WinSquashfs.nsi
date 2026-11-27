@@ -39,6 +39,8 @@ FunctionEnd
   WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Mount\command" "" '"$INSTDIR\app\WinSquashfs.exe" --mount "%1"'
   WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Extract" "" "Extract with WinSquashfs"
   WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Extract\command" "" '"$INSTDIR\app\WinSquashfs.exe" --extract "%1"'
+  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Unc" "" "Open via SquashFS UNC path"
+  WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Unc\command" "" '"$INSTDIR\app\WinSquashfs.exe" --unc "%1"'
 !macroend
 !macro UnregisterExtension EXT
   ReadRegStr $0 HKLM "Software\Classes\${EXT}" ""
@@ -49,6 +51,7 @@ FunctionEnd
   DeleteRegKey HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Browse"
   DeleteRegKey HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Mount"
   DeleteRegKey HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Extract"
+  DeleteRegKey HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinSquashfs.Unc"
 !macroend
 
 Section "WinFsp runtime"
@@ -74,6 +77,8 @@ Section "WinFsp runtime"
 SectionEnd
 
 Section "WinSquashfs"
+  IfFileExists "$INSTDIR\app\WinSquashfs.Unc.exe" 0 +2
+    ExecWait '"$INSTDIR\app\WinSquashfs.Unc.exe" --stop'
   SetRegView 64
   SetShellVarContext all
   SetOutPath "$INSTDIR\app"
@@ -105,6 +110,12 @@ Section "WinSquashfs"
 SectionEnd
 
 Section "Uninstall"
+  IfFileExists "$INSTDIR\app\WinSquashfs.Unc.exe" 0 +2
+    ExecWait '"$INSTDIR\app\WinSquashfs.Unc.exe" --stop'
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "WinSquashfsUNC"
+  ${If} $0 == '"$INSTDIR\app\WinSquashfs.Unc.exe"'
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "WinSquashfsUNC"
+  ${EndIf}
   SetRegView 64
   SetShellVarContext all
   !insertmacro UnregisterExtension ".squashfs"

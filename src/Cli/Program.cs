@@ -37,6 +37,13 @@ try
                 quit.Wait();
             }
             break;
+        case ["verify", var image]:
+            using (var archive = new Archive(image))
+            {
+                var report = archive.Verify();
+                Console.WriteLine($"Verified {report.Files} files, {report.Bytes} bytes.");
+            }
+            break;
         case ["serve", var alias, var root, ..] when args.Length is 3 or 4:
             using (var session = new UncSession(new[] { new UncShare(alias, root) }, args.Length == 4 ? int.Parse(args[3]) : 60))
             {
@@ -66,7 +73,7 @@ try
             await SquashTools.UnpackAsync(image, output, Console.WriteLine);
             break;
         default:
-            Console.Error.WriteLine("winsqfs info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|pack|unpack ...");
+            Console.Error.WriteLine("winsqfs info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...");
             return 2;
     }
     return 0;

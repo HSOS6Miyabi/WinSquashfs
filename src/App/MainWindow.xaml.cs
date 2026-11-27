@@ -42,6 +42,8 @@ public sealed partial class MainWindow : Window
         LzoAlgorithm.ItemsSource = new[] { "Default", "lzo1x_1", "lzo1x_1_11", "lzo1x_1_12", "lzo1x_1_15", "lzo1x_999" };
         CodecBox.SelectionChanged += (_,_) => UpdateCodec();
         ready = true;
+        LoadUncSettings();
+        RefreshRecent();
         Reset();
         RefreshDrives();
         Navigation.SelectedItem = BrowseNav;
@@ -68,6 +70,12 @@ public sealed partial class MainWindow : Window
         try
         {
             if (args.Length == 0) return;
+            if (args is ["--unc", var directImage])
+            {
+                Navigation.SelectedItem = UncNav;
+                await OpenDirectImageAsync(directImage);
+                return;
+            }
             if (args is ["--pack", var folder])
             { SourceBox.Text = Path.GetFullPath(folder); OutputBox.Text = Path.TrimEndingDirectorySeparator(SourceBox.Text) + ".squashfs"; Navigation.SelectedItem = PackNav; return; }
             string mode = args.Length == 1 ? "--open" : args[0];
@@ -89,6 +97,8 @@ public sealed partial class MainWindow : Window
         PackPage.Visibility = (string)item.Tag == "pack" ? Visibility.Visible : Visibility.Collapsed;
         MountPage.Visibility = (string)item.Tag == "mount" ? Visibility.Visible : Visibility.Collapsed;
         ToolsPage.Visibility = (string)item.Tag == "tools" ? Visibility.Visible : Visibility.Collapsed;
+        UncPage.Visibility = (string)item.Tag == "unc" ? Visibility.Visible : Visibility.Collapsed;
+        if ((string)item.Tag == "unc") RefreshUncStatus();
         if ((string)item.Tag == "mount") RefreshDrives();
     }
 
@@ -112,7 +122,8 @@ public sealed partial class MainWindow : Window
         if (operation != null) return false;
         using var cts = new CancellationTokenSource();
         operation = cts; BusyRing.IsActive = true; CancelButton.IsEnabled = true;
-        OpenButton.IsEnabled = CreateButton.IsEnabled = MountButton.IsEnabled = ExtractButton.IsEnabled = ExtractAllButton.IsEnabled = false;
+        OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = MountButton.IsEnabled = ExtractButton.IsEnabled = ExtractAllButton.IsEnabled = VerifyButton.IsEnabled = false;
+        StartUncButton.IsEnabled = StopUncButton.IsEnabled = UncApplyButton.IsEnabled = CopyUncButton.IsEnabled = OpenUncButton.IsEnabled = false;
         StatusText.Text = title;
         try { await action(cts.Token); StatusText.Text = "Completed"; return true; }
         catch (OperationCanceledException) { StatusText.Text = "Cancelled"; return false; }
@@ -120,8 +131,9 @@ public sealed partial class MainWindow : Window
         finally
         {
             operation = null; BusyRing.IsActive = false; CancelButton.IsEnabled = false;
-            OpenButton.IsEnabled = CreateButton.IsEnabled = true;
+            OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = true;
             UpdateButtons();
+            RefreshUncStatus();
         }
     }
 
@@ -160,6 +172,8 @@ public sealed partial class MainWindow : Window
             archive?.Dispose();
             archive = next;
             current = next.Root;
+            RecentImages.Add(next.Path);
+            RefreshRecent();
             ImageSummary.Text = $"{Path.GetFileName(next.Path)}  ·  {next.Codec.ToUpperInvariant()}  ·  {FormatSize(next.ImageSize)}  ·  {FormatSize(next.BlockSize)} blocks";
             SearchBox.Text = "";
             Navigation.SelectedItem = BrowseNav;
@@ -190,7 +204,8 @@ public sealed partial class MainWindow : Window
         UpButton.IsEnabled = current?.Parent != null;
         EnterButton.IsEnabled = selected?.IsDirectory == true;
         MountButton.IsEnabled = ExtractAllButton.IsEnabled = archive != null && idle;
-        ExtractButton.IsEnabled = selected?.IsFile == true && idle;
+        ExtractButton.IsEnabled = selected != null && (selected.IsFile || selected.IsDirectory) && idle;
+        VerifyButton.IsEnabled = archive != null && idle;
     }
 
     private void Go(Entry? entry)
@@ -251,12 +266,12 @@ public sealed partial class MainWindow : Window
     {
         var owner = archive;
         var entry = (Entries.SelectedItem as BrowserRow)?.Entry;
-        if (owner == null || entry?.IsFile != true || operation != null) return;
+        if (owner == null || entry == null || (!entry.IsFile && !entry.IsDirectory) || operation != null) return;
         try
         {
             var folder = await PickFolderAsync();
             if (folder == null) return;
-            await RunAsync("Extracting selected file…", token => Task.Run(() => owner.ExportFile(entry, Path.Combine(folder,entry.WindowsName), token),token));
+            await RunAsync("Extracting selected entry…", token => Task.Run(() => owner.ExportEntry(entry, Path.Combine(folder,entry.WindowsName), token),token));
         }
         catch (Exception ex) { await ShowErrorAsync(ex); }
     }
