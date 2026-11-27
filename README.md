@@ -28,7 +28,7 @@ The installer supports English and Simplified Chinese and registers Explorer men
 
 ## Usage
 
-Open an image from the browser or Explorer. Select files for previews or extraction, double-click a folder to navigate, and choose Mount image to expose it as a read-only drive. Mounted images remain active while the application instance is open. Unmount them from the Mounted images page.
+Open an image from the browser or Explorer. Select files for previews or extraction, double-click a folder to navigate, and choose Mount image to expose it as a read-only drive. Mounted images remain active while the application instance is open. Unmount them from the Mounted images page or use **Eject (WinSquashfs)** in the drive's Explorer context menu (Show more options on Windows 11). The installed shell command is scoped to SquashFS volumes. `winsqfs eject X:` also works with portable installations.
 
 Create image accepts a source directory and a new output path. Zstandard is the default. Advanced parameters are optional. Files with Windows-incompatible names receive deterministic Windows-safe names; the browser preserves the original names for display. Linux symbolic links, sockets and devices are listed as metadata; they are omitted from the mounted filesystem and Windows-safe extraction. The original unsquashfs executable is available for Linux-oriented extraction behavior.
 
@@ -55,6 +55,7 @@ The image browser can copy the current image's UNC path or open it in Explorer. 
     winsqfs list image.squashfs /directory
     winsqfs read image.squashfs /file.bin 65536 4096
     winsqfs mount image.squashfs X:
+    winsqfs eject X:
     winsqfs verify image.squashfs
     winsqfs serve path C:\images 60
     winsqfs unc-start

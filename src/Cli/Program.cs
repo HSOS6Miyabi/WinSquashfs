@@ -47,10 +47,15 @@ try
             using (var mount = new MountedImage(image, args.Length == 3 ? args[2] : null))
             {
                 Console.WriteLine(mount.MountPoint);
-                using var quit = new ManualResetEventSlim();
-                Console.CancelKeyPress += (_, e) => { e.Cancel = true; quit.Set(); };
-                quit.Wait();
+                var quit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; quit.TrySetResult(); };
+                Console.CancelKeyPress += handler;
+                try { await await Task.WhenAny(quit.Task, mount.Completion); }
+                finally { Console.CancelKeyPress -= handler; }
             }
+            break;
+        case ["eject", var drive]:
+            await MountEject.RequestAsync(drive);
             break;
         case ["verify", var image]:
             using (var archive = new Archive(image))
@@ -88,7 +93,7 @@ try
             await SquashTools.UnpackAsync(image, output, Console.WriteLine);
             break;
         default:
-            Console.Error.WriteLine(Localization.T("Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."));
+            Console.Error.WriteLine(Localization.T("Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."));
             return 2;
     }
     return 0;

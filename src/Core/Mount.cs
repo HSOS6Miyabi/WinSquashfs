@@ -141,9 +141,13 @@ public sealed class MountedImage : IDisposable
 {
     private readonly Archive archive;
     private readonly FileSystemHost host;
+    private readonly object sync = new();
+    private readonly TaskCompletionSource completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly EjectListener listener;
     private bool disposed;
     public string MountPoint { get; }
     public string ImagePath => archive.Path;
+    public Task Completion => completion.Task;
 
     public MountedImage(string path, string? drive = null)
     {
@@ -159,13 +163,40 @@ public sealed class MountedImage : IDisposable
             if (result < 0) throw new IOException(Localization.T("WinFsp mount failed (NTSTATUS 0x{0:X8}).", result));
             MountPoint = h.MountPoint();
             host = h;
+            listener = new EjectListener(MountPoint, ReleaseVolume, Finish);
+            listener.Start();
         }
         catch { h?.Dispose(); archive.Dispose(); throw; }
     }
+
+    private void ReleaseVolume()
+    {
+        lock (sync)
+        {
+            if (disposed) return;
+            disposed = true;
+            try { host.Dispose(); } finally { archive.Dispose(); }
+        }
+    }
+
+    private void Finish(Exception? error)
+    {
+        if (error == null) completion.TrySetResult();
+        else completion.TrySetException(error);
+    }
+
     public void Dispose()
     {
-        if (disposed) return;
-        disposed = true;
-        try { host.Dispose(); } finally { archive.Dispose(); }
+        listener.Dispose();
+        try
+        {
+            ReleaseVolume();
+            Finish(null);
+        }
+        catch (Exception ex)
+        {
+            Finish(ex);
+            throw;
+        }
     }
 }

@@ -216,11 +216,15 @@
   "The application will close the current window and reopen. Unsaved input will be lost.": "程序将关闭并重新打开当前窗口，尚未保存的输入将丢失。",
   "Unmount all images before restarting. Your language preference has been saved.": "重新启动前请卸载所有镜像。语言设置已保存。",
   "Language setting is invalid.": "语言设置无效。",
-  "Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...": "用法：winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...",
   "WinFsp could not initialize. Install or update WinFsp to {0} or later in the same major version using the WinSquashfs installer or prerequisites\\WinFsp.msi, then restart the application.\n\nDetails: {1}": "WinFsp 初始化失败。请使用 WinSquashfs 安装程序或 prerequisites\\WinFsp.msi，将 WinFsp 安装或更新至 {0} 或同一主版本的更新版本，然后重新启动程序。\n\n详细信息：{1}",
   "WinFsp runtime {0}\n{1}": "WinFsp 运行时 {0}\n{1}",
   "Check WinFsp runtime": "检查 WinFsp 运行时",
   "WinFsp runtime": "WinFsp 运行时",
   "Checking WinFsp runtime…": "正在检查 WinFsp 运行时…",
-  "Check the installed driver library before mounting or using UNC access.": "检查已安装的驱动程序库，以便使用挂载和 UNC 访问功能。"
+  "Check the installed driver library before mounting or using UNC access.": "检查已安装的驱动程序库，以便使用挂载和 UNC 访问功能。",
+  "Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...": "用法：winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...",
+  "Unable to eject the SquashFS volume {0}.": "无法弹出 SquashFS 卷 {0}。",
+  "No active WinSquashfs mount was found at {0}.": "未找到位于 {0} 的 WinSquashfs 挂载卷。",
+  "Eject operation timed out for {0}.": "弹出 {0} 的操作超时。",
+  "Ejected {0}": "已弹出 {0}"
 }

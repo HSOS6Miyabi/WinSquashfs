@@ -493,15 +493,32 @@ public sealed partial class MainWindow : Window
             if (token.IsCancellationRequested) { mounted.Dispose(); token.ThrowIfCancellationRequested(); }
             mountedPoint = mounted.MountPoint;
             mounts.Add(mounted);
+            _ = ObserveMountAsync(mounted);
             Navigation.SelectedItem = MountNav;
             MountedList.SelectedItem = mounted;
             RefreshDrives();
         })) StatusText.Text = Localization.T("Mounted {0}", mountedPoint);
     }
+    private async Task ObserveMountAsync(MountedImage item)
+    {
+        Exception? error = null;
+        try { await item.Completion; }
+        catch (Exception ex) { error = ex; }
+        if (Root.XamlRoot == null || closing) return;
+        if (mounts.Remove(item))
+        {
+            RefreshDrives();
+            UpdateMountButtons();
+            if (operation == null)
+                StatusText.Text = Localization.T("Ejected {0}", item.MountPoint);
+        }
+        if (error != null) await ShowErrorAsync(error);
+    }
+
     private async void UnmountClicked(object sender, RoutedEventArgs e)
     {
         if (MountedList.SelectedItem is not MountedImage item || operation != null) return;
-        await RunAsync(Localization.T("Unmounting volume…"), async _ => { await Task.Run(item.Dispose); mounts.Remove(item); RefreshDrives(); });
+        await RunAsync(Localization.T("Unmounting volume…"), async _ => { await Task.Run(item.Dispose); mounts.Remove(item); RefreshDrives(); UpdateMountButtons(); });
     }
     private async void ExplorerClicked(object sender, RoutedEventArgs e)
     {

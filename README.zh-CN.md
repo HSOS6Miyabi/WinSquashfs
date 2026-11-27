@@ -20,6 +20,10 @@ WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI
 
 界面默认跟随 Windows 显示语言，可在“工具与关于 → 界面语言”选择简体中文或英文，保存后重新启动程序。安装程序支持简体中文和英文，右键菜单使用安装时选择的语言。
 
+## 弹出挂载卷
+
+可在资源管理器中右键点击 SquashFS 盘符，选择“弹出（WinSquashfs）”。Windows 11 可通过“显示更多选项”找到该命令。也可在挂载管理页面卸载，或执行 `winsqfs eject X:`。
+
 ## UNC 访问
 
 在“UNC 访问”页面启动后台进程。启用本地磁盘映射后，可以直接通过以下路径访问镜像中的文件：
@@ -40,6 +44,7 @@ WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI
     winsqfs --lang zh-CN list image.squashfs
     winsqfs --lang zh-CN verify image.squashfs
     winsqfs mount image.squashfs X:
+    winsqfs eject X:
     winsqfs serve path C:\images 60
     winsqfs unc-start
     winsqfs unc-status
