@@ -32,10 +32,7 @@ public partial class App : Application
         try
         {
             Localization.Initialize();
-            try { Windows.Globalization.ApplicationLanguages.PrimaryLanguageOverride = Localization.Language; }
-            catch (Exception) { }
             InitializeComponent();
-            LocalizationResources.Install(Resources);
         }
         catch (Exception e) { RecordException(e); throw; }
     }
@@ -44,6 +41,7 @@ public partial class App : Application
     {
         try
         {
+            LocalizationResources.Install(Resources);
             window = new MainWindow();
             window.Activate();
             await window.ApplyCommandLineAsync(Environment.GetCommandLineArgs().Skip(1).ToArray());
