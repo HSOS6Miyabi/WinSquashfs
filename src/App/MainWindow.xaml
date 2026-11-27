@@ -5,19 +5,17 @@
  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
  mc:Ignorable="d" Title="WinSquashfs">
  <Grid x:Name="Root" RowDefinitions="Auto,*,Auto">
-  <Grid Padding="20,10" ColumnDefinitions="*,Auto">
-   <StackPanel Spacing="2">
-    <TextBlock Text="WinSquashfs" Style="{StaticResource TitleTextBlockStyle}"/>
-    <TextBlock Text="SquashFS image workspace" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+  <Grid Padding="20,8" ColumnDefinitions="*,Auto">
+   <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+    <TextBlock Text="WinSquashfs" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
+    <TextBlock Text="Image workspace" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
    </StackPanel>
-   <Border Grid.Column="1" CornerRadius="8" Padding="12,8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-     <FontIcon Glyph="&#xE72E;" FontSize="16"/>
-     <TextBlock Text="Read-only images" VerticalAlignment="Center"/>
-    </StackPanel>
-   </Border>
+   <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+    <FontIcon Glyph="&#xE72E;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+    <TextBlock Text="Read-only volumes" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+   </StackPanel>
   </Grid>
-  <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" OpenPaneLength="200" CompactModeThresholdWidth="640" ExpandedModeThresholdWidth="1120"
+  <NavigationView x:Name="Navigation" Grid.Row="1" PaneDisplayMode="Auto" OpenPaneLength="200" CompactModeThresholdWidth="640" ExpandedModeThresholdWidth="980"
     IsBackButtonVisible="Collapsed" IsSettingsVisible="False" IsPaneToggleButtonVisible="True"
     SelectionChanged="NavigationChanged">
    <NavigationView.MenuItems>
@@ -94,14 +92,15 @@
      </Grid>
     </Grid>
 
-    <ScrollViewer x:Name="PackPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
-     <StackPanel Spacing="16" Padding="0,0,4,10" MaxWidth="900" HorizontalAlignment="Stretch">
+    <Grid x:Name="PackPage" Visibility="Collapsed" RowDefinitions="*,Auto" RowSpacing="10" MaxWidth="900" HorizontalAlignment="Stretch">
+     <ScrollViewer x:Name="PackScroll" VerticalScrollBarVisibility="Visible" AutomationProperties.AutomationId="PackScroll">
+     <StackPanel Spacing="8" Padding="0,0,8,10">
       <StackPanel Spacing="3">
        <TextBlock Text="Create a SquashFS image" Style="{StaticResource SubtitleTextBlockStyle}"/>
        <TextBlock Text="Choose a source folder and compression settings. The image is written to a new file." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
       </StackPanel>
-      <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-       <StackPanel Spacing="12">
+      <Border CornerRadius="8" Padding="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="8">
         <TextBlock Text="Source and destination" FontWeight="SemiBold"/>
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
          <TextBox x:Name="SourceBox" Header="Source directory" AutomationProperties.AutomationId="PackSource"/>
@@ -113,8 +112,8 @@
         </Grid>
        </StackPanel>
       </Border>
-      <Border CornerRadius="8" Padding="16" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-       <StackPanel Spacing="12">
+      <Border CornerRadius="8" Padding="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="8">
         <TextBlock Text="Compression" FontWeight="SemiBold"/>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
          <ComboBox x:Name="CodecBox" Header="Algorithm" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="CompressionCodec"/>
@@ -122,15 +121,15 @@
         </Grid>
         <TextBlock x:Name="CodecHelp" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <NumberBox x:Name="LevelBox" Header="Compression level (optional)" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="CompressionLevel"/>
+         <NumberBox x:Name="LevelBox" PlaceholderText="Default" Header="Compression level (optional)" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="CompressionLevel"/>
          <NumberBox Grid.Column="1" x:Name="ThreadsBox" Header="Processors (0 = automatic)" Value="0" Minimum="0" Maximum="1024" SpinButtonPlacementMode="Compact" AutomationProperties.AutomationId="ProcessorCount"/>
         </Grid>
        </StackPanel>
       </Border>
       <Expander Header="Advanced parameters" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False" AutomationProperties.AutomationId="AdvancedParameters">
-       <StackPanel Spacing="12" Padding="0,6,0,6">
+       <StackPanel Spacing="8" Padding="0,6,0,6">
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <NumberBox x:Name="MemoryBox" Header="Memory limit (MiB, optional)" Minimum="64" Maximum="1048576" SpinButtonPlacementMode="Compact"/>
+         <NumberBox x:Name="MemoryBox" PlaceholderText="Automatic" Header="Memory limit (MiB, optional)" Minimum="64" Maximum="1048576" SpinButtonPlacementMode="Compact"/>
          <TextBox Grid.Column="1" x:Name="TimestampBox" Header="Reproducible timestamp (Unix seconds)" PlaceholderText="Optional"/>
         </Grid>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
@@ -157,18 +156,26 @@
          <TextBox Grid.Column="1" x:Name="XzFilters" Header="XZ BCJ filters (optional)" PlaceholderText="e.g. x86,arm"/>
         </Grid>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <NumberBox x:Name="GzipWindow" Header="GZIP window size (optional)" Minimum="8" Maximum="15" SpinButtonPlacementMode="Compact"/>
+         <NumberBox x:Name="GzipWindow" PlaceholderText="Default" Header="GZIP window size (optional)" Minimum="8" Maximum="15" SpinButtonPlacementMode="Compact"/>
          <ComboBox Grid.Column="1" x:Name="LzoAlgorithm" Header="LZO algorithm" HorizontalAlignment="Stretch"/>
         </Grid>
        </StackPanel>
       </Expander>
-      <StackPanel Orientation="Horizontal" Spacing="8">
-       <Button x:Name="CreateButton" Click="CreateClicked" Content="Create image" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="CreateImage"/>
-       <Button Click="ResetClicked" Content="Restore defaults"/>
-      </StackPanel>
-      <TextBox x:Name="OperationLog" Header="Operation log" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="120" MaxHeight="220" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.AutomationId="OperationLog"/>
+      <Expander x:Name="LogExpander" Header="Operation log" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+       <TextBox x:Name="OperationLog" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="100" MaxHeight="220" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.AutomationId="OperationLog"/>
+      </Expander>
      </StackPanel>
-    </ScrollViewer>
+     </ScrollViewer>
+     <Border Grid.Row="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" Padding="10,8">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+       <TextBlock Text="Creates a new image without overwriting an existing file." TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+        <Button x:Name="ResetPackButton" Click="ResetClicked" Content="Restore defaults"/>
+        <Button x:Name="CreateButton" Click="CreateClicked" Content="Create image" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="CreateImage"/>
+       </StackPanel>
+      </Grid>
+     </Border>
+    </Grid>
 
     <Grid x:Name="MountPage" Visibility="Collapsed" RowDefinitions="Auto,Auto,*" RowSpacing="14">
      <StackPanel Spacing="4">
@@ -177,18 +184,18 @@
      </StackPanel>
      <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
       <ComboBox x:Name="DriveBox" Width="150" AutomationProperties.AutomationId="MountDrive"/>
-      <Button Click="MountHereClicked" Content="Mount current image" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="MountCurrent"/>
-      <Button Click="ExplorerClicked" Content="Open in Explorer" AutomationProperties.AutomationId="OpenExplorer"/>
-      <Button Click="UnmountClicked" Content="Unmount" AutomationProperties.AutomationId="UnmountImage"/>
+      <Button x:Name="MountHereButton" Click="MountHereClicked" Content="Mount current image" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="MountCurrent"/>
+      <Button x:Name="ExplorerButton" Click="ExplorerClicked" Content="Open in Explorer" AutomationProperties.AutomationId="OpenExplorer"/>
+      <Button x:Name="UnmountButton" Click="UnmountClicked" Content="Unmount" AutomationProperties.AutomationId="UnmountImage"/>
      </StackPanel>
-     <ListView Grid.Row="2" x:Name="MountedList" SelectionMode="Single" AutomationProperties.AutomationId="MountedList">
+     <ListView Grid.Row="2" x:Name="MountedList" SelectionMode="Single" SelectionChanged="MountSelectionChanged" AutomationProperties.AutomationId="MountedList">
       <ListView.ItemTemplate>
        <DataTemplate>
         <Grid Padding="8" ColumnDefinitions="Auto,*" ColumnSpacing="16">
          <FontIcon Glyph="&#xEDA2;" FontSize="28"/>
          <StackPanel Grid.Column="1" Spacing="4">
           <TextBlock Text="{Binding MountPoint}" FontWeight="SemiBold" FontSize="18"/>
-          <TextBlock Text="{Binding ImagePath}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+          <TextBlock Text="{Binding ImagePath}" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding ImagePath}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
          </StackPanel>
         </Grid>
        </DataTemplate>
@@ -196,13 +203,14 @@
      </ListView>
     </Grid>
 
-    <ScrollViewer x:Name="UncPage" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
-     <StackPanel Spacing="16" Padding="0,0,4,10" MaxWidth="900" HorizontalAlignment="Stretch">
+    <Grid x:Name="UncPage" Visibility="Collapsed" RowDefinitions="*,Auto" RowSpacing="10" MaxWidth="900" HorizontalAlignment="Stretch">
+     <ScrollViewer x:Name="UncScroll" VerticalScrollBarVisibility="Visible" AutomationProperties.AutomationId="UncScroll">
+     <StackPanel Spacing="10" Padding="0,0,8,10">
       <StackPanel Spacing="4">
        <TextBlock Text="Direct UNC access" Style="{StaticResource SubtitleTextBlockStyle}"/>
        <TextBlock Text="Open any image in a configured directory using its UNC path. No drive letter or extracted copy is created." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
       </StackPanel>
-      <Border Padding="16" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+      <Border Padding="12" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="10">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
          <StackPanel Spacing="4">
@@ -214,18 +222,28 @@
           <Button x:Name="StopUncButton" Content="Stop" Click="StopUncClicked" AutomationProperties.AutomationId="StopUnc"/>
          </StackPanel>
         </Grid>
-        <TextBlock Text="When running, the UNC entry points stay available after closing WinSquashfs. Images open on demand and idle images are released." TextWrapping="Wrap"/>
-        <TextBlock x:Name="UncShares" TextWrapping="Wrap" FontFamily="Consolas" AutomationProperties.AutomationId="UncShares"/>
+        <TextBlock Text="Access remains available after closing this window. Images open on demand." TextWrapping="Wrap"/>
+        <ScrollViewer MaxHeight="76" VerticalScrollBarVisibility="Auto"><TextBlock x:Name="UncShares" TextWrapping="Wrap" FontFamily="Consolas" AutomationProperties.AutomationId="UncShares"/></ScrollViewer>
        </StackPanel>
       </Border>
-      <Border Padding="16" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-       <StackPanel Spacing="12">
+      <Border Padding="12" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="10">
+        <TextBlock Text="Current image UNC path" FontWeight="SemiBold"/>
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+         <TextBox x:Name="UncImagePathBox" PlaceholderText="Open an image to see its UNC path" IsReadOnly="True" AutomationProperties.AutomationId="UncImagePath"/>
+         <Button Grid.Column="1" x:Name="CopyUncButton" Content="Copy" Click="CopyUncClicked" AutomationProperties.AutomationId="CopyUnc"/>
+         <Button Grid.Column="2" x:Name="OpenUncButton" Content="Open in Explorer" Click="OpenUncClicked" AutomationProperties.AutomationId="OpenUnc"/>
+        </Grid>
+       </StackPanel>
+      </Border>
+      <Border Padding="12" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+       <StackPanel Spacing="8">
         <TextBlock Text="Share configuration" FontWeight="SemiBold"/>
-        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+        <Grid ColumnDefinitions="*,Auto,150" ColumnSpacing="8">
          <TextBox x:Name="UncRootBox" Header="Local directory" AutomationProperties.AutomationId="UncRoot"/>
          <Button Grid.Column="1" Content="Browse…" VerticalAlignment="Bottom" Click="UncRootClicked"/>
+         <TextBox Grid.Column="2" x:Name="UncAliasBox" Header="Share name" PlaceholderText="path" AutomationProperties.AutomationId="UncAlias"/>
         </Grid>
-        <TextBox x:Name="UncAliasBox" Header="Share name" PlaceholderText="path" AutomationProperties.AutomationId="UncAlias"/>
         <CheckBox x:Name="UncDrivesBox" Content="Include local fixed and removable drives" AutomationProperties.AutomationId="UncDrives"/>
         <TextBlock Text="For example, C:\images\demo.squashfs becomes \\sfs$\C\images\demo.squashfs. Only the current Windows account is granted access." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
@@ -234,21 +252,17 @@
         </Grid>
         <TextBlock Text="Set either value to zero to release an image as soon as no open handle remains. Active handles retain their image." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         <CheckBox x:Name="UncLoginBox" Content="Start direct UNC access when I sign in" AutomationProperties.AutomationId="UncLogin"/>
-        <Button x:Name="UncApplyButton" Content="Save and apply" Click="UncApplyClicked" AutomationProperties.AutomationId="ApplyUnc"/>
-       </StackPanel>
-      </Border>
-      <Border Padding="16" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-       <StackPanel Spacing="10">
-        <TextBlock Text="Current image" FontWeight="SemiBold"/>
-        <TextBox x:Name="UncImagePathBox" Header="UNC path" IsReadOnly="True" AutomationProperties.AutomationId="UncImagePath"/>
-        <StackPanel Orientation="Horizontal" Spacing="8">
-         <Button x:Name="CopyUncButton" Content="Copy path" Click="CopyUncClicked" AutomationProperties.AutomationId="CopyUnc"/>
-         <Button x:Name="OpenUncButton" Content="Open in Explorer" Click="OpenUncClicked" AutomationProperties.AutomationId="OpenUnc"/>
-        </StackPanel>
        </StackPanel>
       </Border>
      </StackPanel>
-    </ScrollViewer>
+     </ScrollViewer>
+     <Border Grid.Row="1" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" Padding="10,8">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+       <TextBlock Text="Applying changes restarts a running background process." TextWrapping="Wrap" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+       <Button Grid.Column="1" x:Name="UncApplyButton" Content="Save and apply" Click="UncApplyClicked" AutomationProperties.AutomationId="ApplyUnc"/>
+      </Grid>
+     </Border>
+    </Grid>
 
     <ScrollViewer x:Name="ToolsPage" Visibility="Collapsed">
      <StackPanel Spacing="16" MaxWidth="760">

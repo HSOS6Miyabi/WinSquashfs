@@ -155,6 +155,8 @@ public sealed partial class MainWindow : Window
         operation = cts; BusyRing.IsActive = true; CancelButton.IsEnabled = true;
         OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = MountButton.IsEnabled = ExtractButton.IsEnabled = ExtractAllButton.IsEnabled = VerifyButton.IsEnabled = CloseImageButton.IsEnabled = false;
         StartUncButton.IsEnabled = StopUncButton.IsEnabled = UncApplyButton.IsEnabled = CopyUncButton.IsEnabled = OpenUncButton.IsEnabled = false;
+        ResetPackButton.IsEnabled = false;
+        UpdateMountButtons();
         StatusText.Text = title;
         try { await action(cts.Token); StatusText.Text = "Completed"; return true; }
         catch (OperationCanceledException) { StatusText.Text = "Cancelled"; return false; }
@@ -162,7 +164,7 @@ public sealed partial class MainWindow : Window
         finally
         {
             operation = null; BusyRing.IsActive = false; CancelButton.IsEnabled = false;
-            OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = true;
+            OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = ResetPackButton.IsEnabled = true;
             UpdateButtons();
             if (UncPage.Visibility == Visibility.Visible) RefreshUncStatus();
             if (closing) DispatcherQueue.TryEnqueue(() => Close());
@@ -242,6 +244,7 @@ public sealed partial class MainWindow : Window
         MountButton.IsEnabled = ExtractAllButton.IsEnabled = archive != null && idle;
         ExtractButton.IsEnabled = selected != null && (selected.IsFile || selected.IsDirectory) && idle;
         VerifyButton.IsEnabled = archive != null && idle;
+        UpdateMountButtons();
     }
 
     private void CloseImageClicked(object sender, RoutedEventArgs e)
@@ -257,6 +260,17 @@ public sealed partial class MainWindow : Window
         RefreshEntries();
         StatusText.Text = "Image closed";
     }
+
+    private void UpdateMountButtons()
+    {
+        if (!ready) return;
+        bool idle = operation == null;
+        MountHereButton.IsEnabled = archive != null && idle;
+        ExplorerButton.IsEnabled = UnmountButton.IsEnabled = MountedList.SelectedItem is MountedImage && idle;
+        MountEmpty.Visibility = mounts.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void MountSelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateMountButtons();
 
     private void Go(Entry? entry)
     {
@@ -370,7 +384,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { await ShowErrorAsync(ex); }
     }
 
-    private void ResetClicked(object sender, RoutedEventArgs e) => Reset();
+    private void ResetClicked(object sender, RoutedEventArgs e) { if (operation == null) Reset(); }
     private void Reset()
     {
         CodecBox.SelectedIndex = 0; BlockBox.SelectedIndex = 5;
@@ -438,6 +452,7 @@ public sealed partial class MainWindow : Window
                 XzDictionary: XzDict.Text.Trim(), XzFilters: XzFilters.Text.Trim(), GzipWindow: OptionalInt(GzipWindow),
                 LzoAlgorithm: LzoAlgorithm.SelectedIndex <= 0 ? null : (string)LzoAlgorithm.SelectedItem);
             OperationLog.Text = "";
+            LogExpander.IsExpanded = true;
             if (await RunAsync("Creating SquashFS image…", token => SquashTools.PackAsync(source,output,options, line => AppendLog(OperationLog,line), token)))
                 StatusText.Text = "Created " + output;
         }
