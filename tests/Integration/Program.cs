@@ -161,6 +161,53 @@ try
     }
     Console.WriteLine("PASS drive-free UNC namespace, on-demand cache, image verification and folder extraction");
 
+    // A valid-looking inode that claims a short uncompressed block must be rejected.
+    var corruptSource=Path.Combine(root,"corrupt-source");
+    Directory.CreateDirectory(corruptSource);
+    File.WriteAllBytes(Path.Combine(corruptSource,"block.bin"),Enumerable.Repeat((byte)0x5A,4096).ToArray());
+    string damaged=Path.Combine(root,"short-block.squashfs");
+    await SquashTools.PackAsync(corruptSource,damaged,new PackOptions(Codec:"gzip",BlockSize:4096,
+        NoFragments:true,NoCompression:true,NoInodeCompression:true),null);
+    byte[] raw=File.ReadAllBytes(damaged);
+    int inodeStart=checked((int)System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(raw.AsSpan(64,8)));
+    int directoryStart=checked((int)System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(raw.AsSpan(72,8)));
+    int patched=0;
+    for(int i=inodeStart+2;i+4<=directoryStart;i++)
+    {
+        if(System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(raw.AsSpan(i,4))==0x01001000u)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(raw.AsSpan(i,4),0x01000FFFu);
+            patched++;
+        }
+    }
+    Require(patched==1,"Could not construct short-block regression image");
+    File.WriteAllBytes(damaged,raw);
+    bool corruptRejected=false;
+    try { using var image=new Archive(damaged); image.Verify(); }
+    catch(IOException) { corruptRejected=true; }
+    Require(corruptRejected,"Short data block was accepted");
+
+    // Empty-file ownership and cancellation must be checked before creating files.
+    using(var first=new Archive(Path.Combine(root,"gzip.squashfs")))
+    using(var second=new Archive(Path.Combine(root,"zstd.squashfs")))
+    {
+        string foreign=Path.Combine(root,"foreign");
+        bool foreignRejected=false;
+        try { first.ExportFile(second.Find("zero")!,foreign); }
+        catch(ArgumentException) { foreignRejected=true; }
+        Require(foreignRejected && !File.Exists(foreign),"Foreign empty file was exported");
+        using var cancelled=new CancellationTokenSource();
+        cancelled.Cancel();
+        bool canceled=false;
+        try { first.ExportFile(first.Find("zero")!,foreign,cancelled.Token); }
+        catch(OperationCanceledException) { canceled=true; }
+        Require(canceled && !File.Exists(foreign),"Canceled empty file was created");
+        string longFolder=Path.Combine(root,new string('a',230));
+        first.ExportEntry(first.Find("nested")!,longFolder);
+        Require(File.Exists(Path.Combine(longFolder,"hello.txt")),"Long directory extraction failed");
+    }
+    Console.WriteLine("PASS corrupt block rejection, cancellation, ownership and long-name extraction");
+
     var bad=Path.Combine(root,"bad.squashfs");
     File.WriteAllBytes(bad,new byte[96]);
     bool rejected=false;

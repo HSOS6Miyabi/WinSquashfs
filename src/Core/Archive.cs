@@ -44,14 +44,22 @@ public sealed class Entry
     public bool IsDirectory => Type is 1 or 8;
     public bool IsFile => Type is 2 or 9;
     public string Kind => IsDirectory ? "Folder" : IsFile ? "File" : Type is 3 or 10 ? "Symbolic link" : "Special file";
-    public string ArchivePath => Parent is null ? "/" : Parent.ArchivePath.TrimEnd('/') + "/" + Name;
-    public string WindowsPath => Parent is null ? "\\" : Parent.WindowsPath.TrimEnd('\\') + "\\" + WindowsName;
+    public string ArchivePath => BuildPath('/', false);
+    public string WindowsPath => BuildPath('\\', true);
+    private string BuildPath(char separator, bool windows)
+    {
+        var parts = new Stack<string>();
+        for (Entry? node = this; node?.Parent != null; node = node.Parent)
+            parts.Push(windows ? node.WindowsName : node.Name);
+        return separator + string.Join(separator, parts);
+    }
     internal Dictionary<string, Entry> ChildMap { get; } = new(StringComparer.OrdinalIgnoreCase);
     internal List<Entry> ChildList { get; } = new();
-    public IReadOnlyList<Entry> Children => ChildList;
+    public IReadOnlyList<Entry> Children { get; }
     internal Entry(IntPtr p, Entry? parent)
     {
         Pointer = p; Parent = parent;
+        Children = ChildList.AsReadOnly();
         Name = parent is null ? "" : Marshal.PtrToStringUTF8(Native.ws_name(p)) ?? throw new IOException("Invalid file name.");
         WindowsName = Name;
         Type = Native.ws_type(p); Inode = Native.ws_inode(p); Size = Native.ws_size(p);
@@ -165,8 +173,21 @@ public sealed class Archive : IDisposable
         fixed (byte* p = buffer) return Read(entry, offset, (IntPtr)p, (uint)buffer.Length);
     }
 
+    private void ValidateEntry(Entry entry)
+    {
+        lock (gate)
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            var owner = entry;
+            while (owner.Parent != null) owner = owner.Parent;
+            if (!ReferenceEquals(owner, Root)) throw new ArgumentException("Entry belongs to another image.");
+        }
+    }
+
     public void ExportFile(Entry entry, string path, CancellationToken token = default)
     {
+        ValidateEntry(entry);
+        token.ThrowIfCancellationRequested();
         if (!entry.IsFile) throw new IOException("Select a regular file.");
         using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         var buffer = new byte[1024 * 1024];
@@ -179,12 +200,17 @@ public sealed class Archive : IDisposable
                 if (count == 0) throw new EndOfStreamException();
                 output.Write(buffer, 0, count); offset += (uint)count;
             }
+            token.ThrowIfCancellationRequested();
+            output.Flush();
+            File.SetLastWriteTimeUtc(output.SafeFileHandle, entry.Modified.UtcDateTime);
         }
         catch { output.Dispose(); File.Delete(path); throw; }
     }
 
     public ArchiveVerification Verify(Action<long, ulong>? progress = null, CancellationToken token = default)
     {
+        ValidateEntry(Root);
+        token.ThrowIfCancellationRequested();
         var pending = new Stack<Entry>();
         pending.Push(Root);
         var buffer = new byte[1024 * 1024];
@@ -218,21 +244,23 @@ public sealed class Archive : IDisposable
 
     public void ExportEntry(Entry entry, string path, CancellationToken token = default)
     {
-        var owner = entry;
-        while (owner.Parent != null) owner = owner.Parent;
-        if (!ReferenceEquals(owner, Root)) throw new ArgumentException("Entry belongs to another image.");
+        ValidateEntry(entry);
+        token.ThrowIfCancellationRequested();
         if (entry.IsFile) { ExportFile(entry, path, token); return; }
         if (!entry.IsDirectory) throw new IOException("Select a file or directory.");
         if (File.Exists(path) || Directory.Exists(path)) throw new IOException("Destination already exists.");
-        string staging = path + "." + Guid.NewGuid().ToString("N") + ".partial";
+        path = System.IO.Path.GetFullPath(path);
+        string staging = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path)!, ".winsqfs-" + Guid.NewGuid().ToString("N") + ".partial");
         try
         {
             Directory.CreateDirectory(staging);
             var pending = new Stack<(Entry Entry, string Path)>();
+            var directories = new List<(Entry Entry, string Path)>();
             pending.Push((entry, staging));
             while (pending.TryPop(out var item))
             {
                 token.ThrowIfCancellationRequested();
+                directories.Add(item);
                 foreach (var child in item.Entry.Children)
                 {
                     token.ThrowIfCancellationRequested();
@@ -245,10 +273,11 @@ public sealed class Archive : IDisposable
                     else if (child.IsFile)
                     {
                         ExportFile(child, destination, token);
-                        File.SetLastWriteTimeUtc(destination, child.Modified.UtcDateTime);
                     }
                 }
             }
+            for (int i = directories.Count - 1; i >= 0; i--)
+                Directory.SetLastWriteTimeUtc(directories[i].Path, directories[i].Entry.Modified.UtcDateTime);
             token.ThrowIfCancellationRequested();
             Directory.Move(staging, path);
         }

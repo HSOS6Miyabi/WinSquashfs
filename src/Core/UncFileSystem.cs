@@ -89,8 +89,19 @@ internal sealed class UncFileSystem : FileSystemBase
 
     private Node? Resolve(string name) => readIdentity.Run(() => ResolveCore(name));
 
+    private static bool IsPlainPath(string path)
+    {
+        for (string? p = path; p != null; p = Path.GetDirectoryName(p))
+        {
+            var attr = File.GetAttributes(p);
+            if ((attr & FileAttributes.ReparsePoint) != 0) return false;
+        }
+        return true;
+    }
+
     private Node? ResolveCore(string name)
     {
+        if (!IsPlainPath(share.Root)) return null;
         var parts = name.Split('\\', StringSplitOptions.RemoveEmptyEntries);
         if (parts.Any(p => !SafeComponent(p))) return null;
         string physical = share.Root;
@@ -220,6 +231,7 @@ internal sealed class UncFileSystem : FileSystemBase
 
     private IEnumerable<Row> ListCore(Node dir)
     {
+        if (dir.Entry == null && !IsPlainPath(dir.PhysicalPath)) throw new UnauthorizedAccessException("Directory is a reparse point.");
         if (dir.Name != "\\")
         {
             yield return new Row(".", Info(dir));
@@ -291,6 +303,7 @@ public sealed class UncSession : IDisposable
     private readonly ImageCache cache;
     private readonly LocalReadIdentity readIdentity;
     private readonly List<FileSystemHost> hosts = new();
+    private int disposed;
     public IReadOnlyList<UncShare> Shares { get; }
     public int CachedImages => cache.Count;
     public int ActiveImages => cache.ActiveCount;
@@ -317,9 +330,16 @@ public sealed class UncSession : IDisposable
     }
     public void Dispose()
     {
-        foreach (var host in hosts) host.Dispose();
-        hosts.Clear();
-        cache.Dispose();
-        readIdentity.Dispose();
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        try
+        {
+            foreach (var host in hosts) host.Dispose();
+        }
+        finally
+        {
+            hosts.Clear();
+            cache.Dispose();
+            readIdentity.Dispose();
+        }
     }
 }

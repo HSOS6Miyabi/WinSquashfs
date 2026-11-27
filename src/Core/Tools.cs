@@ -99,7 +99,7 @@ public static class SquashTools
         string relative = Path.GetRelativePath(source, output);
         if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new IOException("Output must be outside the source directory.");
-        string temporary = output + "." + Guid.NewGuid().ToString("N") + ".partial";
+        string temporary = Path.Combine(Path.GetDirectoryName(output)!, ".winsqfs-" + Guid.NewGuid().ToString("N") + ".partial");
         try
         {
             var args = new[] { ToolPath(source), ToolPath(temporary) }.Concat(options.Arguments());
@@ -116,30 +116,7 @@ public static class SquashTools
         destination = Path.GetFullPath(destination);
         if (File.Exists(destination) || Directory.Exists(destination)) throw new IOException("Choose a new destination directory.");
         using var archive = await Task.Run(() => new Archive(image), token);
-        string staging = destination + "." + Guid.NewGuid().ToString("N") + ".partial";
-        try
-        {
-            Directory.CreateDirectory(staging);
-            await Task.Run(() =>
-            {
-                var dirs = new Stack<(Entry Entry, string Path)>();
-                dirs.Push((archive.Root, staging));
-                while (dirs.TryPop(out var item))
-                {
-                    token.ThrowIfCancellationRequested();
-                    foreach (var entry in item.Entry.Children)
-                    {
-                        token.ThrowIfCancellationRequested();
-                        string target = Path.Combine(item.Path, entry.WindowsName);
-                        if (entry.IsDirectory) { Directory.CreateDirectory(target); dirs.Push((entry,target)); }
-                        else if (entry.IsFile) { archive.ExportFile(entry, target, token); File.SetLastWriteTimeUtc(target, entry.Modified.UtcDateTime); }
-                        else log?.Invoke("Skipped " + entry.ArchivePath + " (" + entry.Kind + ")");
-                    }
-                }
-            }, token);
-            token.ThrowIfCancellationRequested();
-            Directory.Move(staging, destination);
-        }
-        finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+        await Task.Run(() => archive.ExportEntry(archive.Root, destination, token), token);
+        log?.Invoke("Extracted " + destination);
     }
 }

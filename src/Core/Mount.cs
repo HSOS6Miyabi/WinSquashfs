@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 using System.Security.AccessControl;
+using System.Security.Principal;
 using Fsp;
 using FileInfo = Fsp.Interop.FileInfo;
 using VolumeInfo = Fsp.Interop.VolumeInfo;
@@ -19,7 +20,9 @@ internal sealed class ReadOnlyFileSystem : FileSystemBase
     public ReadOnlyFileSystem(Archive archive)
     {
         this.archive = archive;
-        var sd = new RawSecurityDescriptor("O:SYG:SYD:P(A;;0x1200A9;;;WD)");
+        using var identity = WindowsIdentity.GetCurrent();
+        string sid = identity.User?.Value ?? throw new UnauthorizedAccessException("Cannot identify current Windows account.");
+        var sd = new RawSecurityDescriptor($"O:{sid}G:{sid}D:P(A;;0x1200A9;;;{sid})");
         security = new byte[sd.BinaryLength];
         sd.GetBinaryForm(security, 0);
     }
@@ -39,7 +42,7 @@ internal sealed class ReadOnlyFileSystem : FileSystemBase
         var h = (FileSystemHost)host;
         h.SectorSize = 4096; h.SectorsPerAllocationUnit = 1; h.MaxComponentLength = 255;
         h.FileInfoTimeout = 1000; h.CaseSensitiveSearch = false; h.CasePreservedNames = true;
-        h.UnicodeOnDisk = true; h.PersistentAcls = true; h.FileSystemName = "SquashFS";
+        h.UnicodeOnDisk = true; h.PersistentAcls = true; h.FileSystemName = "SquashFS"; h.ReadOnlyVolume = true;
         h.VolumeCreationTime = (ulong)archive.Root.Modified.UtcDateTime.ToFileTimeUtc();
         h.VolumeSerialNumber = unchecked((uint)archive.ImageSize ^ archive.Root.Inode);
         return STATUS_SUCCESS;
