@@ -6,8 +6,9 @@ $ErrorActionPreference='Stop'
 $AppDirectory=(Resolve-Path $AppDirectory).Path
 $cli=Join-Path $AppDirectory 'winsqfs.exe'
 [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
-function Invoke-Cli {
-    $arguments=@($args)
+function Invoke-CliExpect {
+    $expected=[int]$args[0]
+    $arguments=@($args | Select-Object -Skip 1)
     $si=[Diagnostics.ProcessStartInfo]::new($cli)
     $si.UseShellExecute=$false
     $si.CreateNoWindow=$true
@@ -26,11 +27,12 @@ function Invoke-Cli {
         }
         $result=$stdout.WaitAsync([TimeSpan]::FromSeconds(10)).GetAwaiter().GetResult()
         $errorText=$stderr.WaitAsync([TimeSpan]::FromSeconds(10)).GetAwaiter().GetResult()
-        if($p.ExitCode -ne 0){throw "CLI exit $($p.ExitCode): $($arguments -join ' '): $errorText"}
+        if($p.ExitCode -ne $expected){throw "Expected CLI exit $expected, got $($p.ExitCode): $($arguments -join ' '): $errorText"}
         $result -split '\r?\n' | Where-Object {$_ -ne ''}
     }
     finally {$p.Dispose()}
 }
+function Invoke-Cli { Invoke-CliExpect 0 @args }
 foreach($exe in @('WinSquashfs.exe','winsqfs.exe','WinSquashfs.Unc.exe')){
     $file=Join-Path $AppDirectory $exe
     if(!(Test-Path $file)){throw "Missing $file"}
@@ -61,10 +63,8 @@ try {
     $destination=Join-Path $root '提取文件'
     Invoke-Cli unpack $image $destination|Out-Null
     if([Convert]::ToHexString([IO.File]::ReadAllBytes((Join-Path $destination '测试.txt'))) -ne '0001027FFF'){throw 'CLI extraction mismatch'}
-    & $cli list $image '\' 'extra' 2>$null | Out-Null
-    if($LASTEXITCODE -ne 2){throw 'Invalid list arguments accepted'}
-    & $cli pack $source (Join-Path $root 'extra.squashfs') zstd 'extra' 2>$null | Out-Null
-    if($LASTEXITCODE -ne 2){throw 'Invalid pack arguments accepted'}
+    Invoke-CliExpect 2 list $image '\' 'extra' | Out-Null
+    Invoke-CliExpect 2 pack $source (Join-Path $root 'extra.squashfs') zstd 'extra' | Out-Null
 
     # Run the same background process under each language and control it from the other.
     $alias='dist-'+[guid]::NewGuid().ToString('N').Substring(0,8)
