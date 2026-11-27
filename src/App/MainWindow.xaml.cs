@@ -137,21 +137,12 @@ public sealed partial class MainWindow : Window
         return (await picker.PickSingleFolderAsync())?.Path;
     }
 
-    private async Task<string?> SaveImageAsync()
-    {
-        var picker = new FileSavePicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary,
-            SuggestedFileName = string.IsNullOrWhiteSpace(SourceBox.Text) ? "image" : Path.GetFileName(Path.TrimEndingDirectorySeparator(SourceBox.Text)) };
-        picker.FileTypeChoices.Add("SquashFS image", new[] { ".squashfs", ".sqfs" });
-        InitPicker(picker);
-        return (await picker.PickSaveFileAsync())?.Path;
-    }
-
     private async void OpenClicked(object sender, RoutedEventArgs e)
     {
         try
         {
             var picker = new FileOpenPicker { SuggestedStartLocation = PickerLocationId.DocumentsLibrary };
-            foreach (var ext in new[] { ".squashfs", ".sqfs", ".sfs", "*" }) picker.FileTypeFilter.Add(ext);
+            picker.FileTypeFilter.Add("*");
             InitPicker(picker);
             var file = await picker.PickSingleFileAsync();
             if (file != null) await LoadAsync(file.Path);
@@ -300,7 +291,13 @@ public sealed partial class MainWindow : Window
     }
     private async void OutputClicked(object sender, RoutedEventArgs e)
     {
-        try { string? path = await SaveImageAsync(); if (path != null) OutputBox.Text = path; }
+        try
+        {
+            string? folder = await PickFolderAsync();
+            if (folder == null) return;
+            string name = string.IsNullOrWhiteSpace(OutputBox.Text) ? "image.squashfs" : Path.GetFileName(OutputBox.Text);
+            OutputBox.Text = Path.Combine(folder,name);
+        }
         catch (Exception ex) { await ShowErrorAsync(ex); }
     }
 

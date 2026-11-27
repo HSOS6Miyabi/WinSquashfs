@@ -23,7 +23,7 @@
    <NavigationView.MenuItems>
     <NavigationViewItem x:Name="BrowseNav" Content="Browse image" Icon="Folder" Tag="browse" AutomationProperties.AutomationId="NavBrowse"/>
     <NavigationViewItem x:Name="PackNav" Content="Create image" Icon="Add" Tag="pack" AutomationProperties.AutomationId="NavPack"/>
-    <NavigationViewItem x:Name="MountNav" Content="Mounted images" Icon="MapDrive" Tag="mount" AutomationProperties.AutomationId="NavMount"/>
+    <NavigationViewItem x:Name="MountNav" Content="Mounted images" Icon="Folder" Tag="mount" AutomationProperties.AutomationId="NavMount"/>
     <NavigationViewItem x:Name="ToolsNav" Content="Tools &amp; about" Icon="Setting" Tag="tools" AutomationProperties.AutomationId="NavTools"/>
    </NavigationView.MenuItems>
    <Grid Padding="20,8,20,12">
@@ -100,7 +100,7 @@
         </Grid>
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
          <TextBox x:Name="OutputBox" Header="Output image" AutomationProperties.AutomationId="PackOutput"/>
-         <Button Grid.Column="1" Content="Save as…" Click="OutputClicked" VerticalAlignment="Bottom"/>
+         <Button Grid.Column="1" Content="Choose folder…" Click="OutputClicked" VerticalAlignment="Bottom"/>
         </Grid>
        </StackPanel>
       </Border>
