@@ -22,10 +22,17 @@ volatile LONG locks = 0;
 
 bool Chinese()
 {
-    DWORD language = 0, size = sizeof(language);
-    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WinSquashfs", L"InstallerLanguage",
-        RRF_RT_REG_DWORD | RRF_SUBKEY_WOW6464KEY, nullptr, &language, &size) == ERROR_SUCCESS)
-        return language == 2052;
+    DWORD language = 0, size = sizeof(language), type = 0;
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WinSquashfs", 0,
+        KEY_QUERY_VALUE | KEY_WOW64_64KEY, &key) == ERROR_SUCCESS)
+    {
+        LONG result = RegQueryValueExW(key, L"InstallerLanguage", nullptr, &type,
+            reinterpret_cast<BYTE *>(&language), &size);
+        RegCloseKey(key);
+        if (result == ERROR_SUCCESS && type == REG_DWORD && size == sizeof(language))
+            return language == 2052;
+    }
     LANGID lang = GetUserDefaultUILanguage();
     return lang == 2052 || lang == 4100;
 }
