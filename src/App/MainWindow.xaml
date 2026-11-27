@@ -201,6 +201,7 @@
        </DataTemplate>
       </ListView.ItemTemplate>
      </ListView>
+     <TextBlock Grid.Row="2" x:Name="MountEmpty" Text="No mounted images. Open an image to mount it." TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" IsHitTestVisible="False"/>
     </Grid>
 
     <Grid x:Name="UncPage" Visibility="Collapsed" RowDefinitions="*,Auto" RowSpacing="10" MaxWidth="900" HorizontalAlignment="Stretch">
