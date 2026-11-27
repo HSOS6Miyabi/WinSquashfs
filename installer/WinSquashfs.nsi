@@ -40,7 +40,21 @@ LangString DriverError ${LANG_SIMPCHINESE} "WinFsp 安装失败（退出代码�
 
 Function .onInit
   SetRegView 64
-  !insertmacro MUI_LANGDLL_DISPLAY
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/LANG=" $R1
+  ${IfNot} ${Errors}
+    ${If} $R1 == "2052"
+      StrCpy $LANGUAGE 2052
+    ${ElseIf} $R1 == "1033"
+      StrCpy $LANGUAGE 1033
+    ${Else}
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+  ${Else}
+    !insertmacro MUI_LANGDLL_DISPLAY
+  ${EndIf}
   ReadRegStr $0 HKLM "Software\WinSquashfs" "InstallDir"
   ${If} $0 != ""
     StrCpy $INSTDIR $0
@@ -133,7 +147,12 @@ SectionEnd
 
 Function un.onInit
   SetRegView 64
-  ReadRegDWORD $LANGUAGE HKLM "Software\WinSquashfs" "InstallerLanguage"
+  ReadRegDWORD $0 HKLM "Software\WinSquashfs" "InstallerLanguage"
+  ${If} $0 == 2052
+    StrCpy $LANGUAGE 2052
+  ${Else}
+    StrCpy $LANGUAGE 1033
+  ${EndIf}
 FunctionEnd
 
 Section "Uninstall"

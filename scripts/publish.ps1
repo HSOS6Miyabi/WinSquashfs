@@ -13,5 +13,5 @@ dotnet publish src/UncAgent/UncAgent.csproj -c Release -r win-x64 --self-contain
 if ($LASTEXITCODE) { throw 'UNC background application publish failed' }
 Copy-Item "$agent\WinSquashfs.Unc.exe","$agent\WinSquashfs.Unc.dll","$agent\WinSquashfs.Unc.deps.json","$agent\WinSquashfs.Unc.runtimeconfig.json" -Destination $dist -Force
 Copy-Item 'artifacts\native\*' $dist -Recurse -Force
-Copy-Item README.md,LICENSE,THIRD-PARTY.md -Destination $dist
+Copy-Item README.md,README.zh-CN.md,LICENSE,THIRD-PARTY.md -Destination $dist
 if (!(Test-Path "$dist\winsqfs-native.dll")) { throw 'Missing native reader' }

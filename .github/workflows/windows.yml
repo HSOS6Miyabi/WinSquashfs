@@ -41,9 +41,20 @@ jobs:
           Copy-Item artifacts/native/* artifacts/test -Recurse -Force
           & ./artifacts/test/Integration.exe
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: WinUI end-to-end automation
+      - name: English WinUI end-to-end automation
         shell: powershell
-        run: ./tests/ui.ps1 -AppDirectory (Resolve-Path artifacts/dist).Path
+        run: ./tests/ui.ps1 -AppDirectory (Resolve-Path artifacts/dist).Path -Language en-US
+      - name: Simplified Chinese WinUI end-to-end automation
+        shell: powershell
+        run: ./tests/ui.ps1 -AppDirectory (Resolve-Path artifacts/dist).Path -Language zh-CN
+      - name: Localized command-line output
+        shell: pwsh
+        run: |
+          $cli=Resolve-Path artifacts/dist/winsqfs.exe
+          $english=& $cli --lang en-US unc-status
+          if ($LASTEXITCODE -or $english -ne 'Stopped') { throw "Unexpected English CLI output: $english" }
+          $chinese=& $cli --lang zh-CN unc-status
+          if ($LASTEXITCODE -or $chinese -ne '已停止') { throw "Unexpected Chinese CLI output: $chinese" }
       - name: Upload UI screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -75,6 +86,14 @@ jobs:
           $p=Start-Process "$install/Uninstall.exe" -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode) { throw "Uninstaller exit $($p.ExitCode)" }
           if (Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image') { throw 'Association not removed' }
+          $p=Start-Process (Resolve-Path artifacts/WinSquashfs-Setup-x64.exe) -ArgumentList @('/S','/LANG=2052') -Wait -PassThru
+          if ($p.ExitCode) { throw "Chinese installer exit $($p.ExitCode)" }
+          $key=Get-Item 'HKLM:\Software\Classes\SystemFileAssociations\.squashfs\shell\WinSquashfs.Browse'
+          if ($key.GetValue('') -ne '使用 WinSquashfs 浏览') { throw 'Chinese Explorer verb was not registered' }
+          $language=(Get-ItemProperty 'HKLM:\Software\WinSquashfs').InstallerLanguage
+          if ($language -ne 2052) { throw 'Chinese installer language was not saved' }
+          $p=Start-Process "$install/Uninstall.exe" -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -or (Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image')) { throw 'Chinese uninstallation failed' }
       - name: Upload installer and portable distribution
         uses: actions/upload-artifact@v4
         with:

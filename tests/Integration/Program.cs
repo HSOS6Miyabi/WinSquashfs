@@ -223,6 +223,23 @@ try
     try { _=new PackOptions(NoFragments:true,AlwaysFragments:true).Arguments(); }
     catch (ArgumentException) { invalid=true; }
     Require(invalid,"Conflicting flags accepted");
+    var zh=System.Globalization.CultureInfo.GetCultureInfo("zh-CN");
+    var en=System.Globalization.CultureInfo.GetCultureInfo("en-US");
+    var tw=System.Globalization.CultureInfo.GetCultureInfo("zh-TW");
+    Require(Localization.Resolve("system",zh)=="zh-CN","Simplified Chinese system language resolution");
+    Require(Localization.Resolve("system",en)=="en-US","English system language resolution");
+    Require(Localization.Resolve("system",tw)=="en-US","Unsupported locale fallback");
+    Require(Localization.Resolve("en-US",zh)=="en-US","Explicit language preference");
+    Localization.Initialize("zh-CN");
+    Require(Localization.T("Folder")=="文件夹","Chinese embedded resource missing");
+    Require(Localization.T("Verified {0} files, {1} bytes.",2,64)=="已校验 2 个文件，共 64 字节。","Localized format");
+    bool localizedError=false;
+    try { _=new PackOptions(BlockSize:123).Arguments(); }
+    catch(ArgumentException ex) { localizedError=ex.Message.Contains("数据块大小"); }
+    Require(localizedError,"Chinese validation error missing");
+    Localization.Initialize("en-US");
+    Require(Localization.T("Folder")=="Folder","English resource fallback");
+    Console.WriteLine("PASS localization, language resolution and translated validation");
     Console.WriteLine("All Windows integration tests passed.");
 }
 finally { Directory.Delete(root,true); }

@@ -17,6 +17,7 @@ $script:ScreenshotDir=Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts\sc
 New-Item -ItemType Directory -Force $script:ScreenshotDir | Out-Null
 
 function Save-WindowScreenshot($process,[string]$name,[int]$width=1200,[int]$height=780) {
+    if($script:ScreenshotPrefix){$name=$script:ScreenshotPrefix+$name}
     $process.Refresh()
     $h=$process.MainWindowHandle
     if($h -eq [IntPtr]::Zero){throw "Window handle is missing: $name"}

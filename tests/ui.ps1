@@ -1,7 +1,10 @@
-param([Parameter(Mandatory=$true)][string]$AppDirectory)
+﻿param([Parameter(Mandatory=$true)][string]$AppDirectory, [ValidateSet("en-US","zh-CN")][string]$Language="en-US")
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 . (Join-Path $PSScriptRoot 'screenshots.ps1')
+$script:ScreenshotDir=Join-Path $script:ScreenshotDir $Language
+New-Item -ItemType Directory -Force $script:ScreenshotDir | Out-Null
+$script:ScreenshotPrefix=$Language + '-'
 function Find-Control($parent,[string]$id) {
   $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty,$id)
   $parent.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
@@ -21,6 +24,11 @@ function Invoke-Control($parent,[string]$id) {
 function Set-Value($parent,[string]$id,[string]$value) {
   $element=Wait-Control $parent $id $true
   $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($value)
+}
+function Assert-Name($window,[string]$id,[string]$english,[string]$chinese) {
+  $element=Wait-Control $window $id
+  $expected=if($Language -eq 'zh-CN'){$chinese}else{$english}
+  if($element.Current.Name -ne $expected){throw "Unexpected label for $id ($Language): '$($element.Current.Name)', expected '$expected'"}
 }
 function Assert-Visible($window,[string]$id) {
   $control=Wait-Control $window $id
@@ -61,13 +69,19 @@ $uncSettings=Join-Path $env:LOCALAPPDATA 'WinSquashfs\unc.json'
 $backup=$null
 if(Test-Path $uncSettings){$backup=[IO.File]::ReadAllBytes($uncSettings)}
 $agentStarted=$false
+$languageFile=Join-Path $env:LOCALAPPDATA 'WinSquashfs\language.txt'
+$languageBackup=$null
+if(Test-Path $languageFile){$languageBackup=[IO.File]::ReadAllBytes($languageFile)}
 try {
+  New-Item -ItemType Directory -Force (Split-Path -Parent $languageFile)|Out-Null
+  [IO.File]::WriteAllText($languageFile,$Language)
   $p=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--pack',('"'+"$root\src"+'"')) -WorkingDirectory $AppDirectory -PassThru
   $window=Get-AppWindow $p 'PackSource'
   Set-Value $window 'PackSource' "$root\src"
   Set-Value $window 'PackOutput' $img
   Save-WindowScreenshot $p '01-pack'
   Assert-Visible $window 'CreateImage'
+  Assert-Name $window 'CreateImage' 'Create image' '创建镜像'
   $adv=Wait-Control $window 'AdvancedParameters'
   $exp=$null
   if($adv.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$exp)){
@@ -90,6 +104,8 @@ try {
   $p=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--open',('"' + $img + '"')) -WorkingDirectory $AppDirectory -PassThru
   $window=Get-AppWindow $p 'FileList'
   $null=Wait-Control $window 'MountImage' $true
+  Assert-Name $window 'MountImage' 'Mount image' '挂载镜像'
+  Assert-Name $window 'ExtractAll' 'Extract all' '全部提取'
   Save-WindowScreenshot $p '03-browser'
   $list=Wait-Control $window 'FileList'
   $itemCondition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ListItem)
@@ -151,6 +167,8 @@ try {
   Assert-Visible $window 'CopyUnc'
   Assert-Visible $window 'OpenUnc'
   Assert-Visible $window 'ApplyUnc'
+  Assert-Name $window 'ApplyUnc' 'Save and apply' '保存并应用'
+  Assert-Name $window 'StopUnc' 'Stop' '停止'
   Scroll-Page $window 'UncScroll' 100
   Save-WindowScreenshot $p '06b-unc-settings'
   Assert-Visible $window 'ApplyUnc'
@@ -190,6 +208,44 @@ try {
   $f.Dispose()
   Save-WindowScreenshot $p '08-empty-browser'
   Write-Host 'Closing an image releases its file handle.'
+  # Change the language through the real UI and defer the restart. Check persistence.
+  $nav=Wait-Control $window 'NavTools' $true
+  $pattern=$null
+  if($nav.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)){$pattern.Select()}else{$nav.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}
+  Assert-Name $window 'SaveLanguage' 'Save language' '保存语言设置'
+  $combo=Wait-Control $window 'InterfaceLanguage' $true
+  $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+  $next=if($Language -eq 'zh-CN'){'en-US'}else{'zh-CN'}
+  $label=if($next -eq 'zh-CN'){'简体中文'}else{'English'}
+  $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$label)
+  $choice=$null
+  for($i=0;$i -lt 40 -and !$choice;$i++){
+    $choice=$combo.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
+    if(!$choice){$choice=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)}
+    if(!$choice){Start-Sleep -Milliseconds 100}
+  }
+  if(!$choice){throw "Language choice not found: $label"}
+  $choice.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+  Invoke-Control $window 'SaveLanguage'
+  $later=if($Language -eq 'zh-CN'){'稍后'}else{'Later'}
+  $laterCondition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$later)
+  $button=$null
+  for($i=0;$i -lt 40 -and !$button;$i++){
+    $button=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$laterCondition)
+    if(!$button){Start-Sleep -Milliseconds 100}
+  }
+  if(!$button){throw 'Language restart dialog did not appear'}
+  $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+  if([IO.File]::ReadAllText($languageFile).Trim() -ne $next){throw 'Language preference was not saved'}
+  $p.CloseMainWindow()|Out-Null
+  if(!$p.WaitForExit(10000)){throw 'GUI did not close after saving language'}
+  $p=Start-Process "$AppDirectory\WinSquashfs.exe" -WorkingDirectory $AppDirectory -PassThru
+  $window=Get-AppWindow $p 'OpenImage'
+  $expected=if($next -eq 'zh-CN'){'打开镜像'}else{'Open image'}
+  $actual=(Wait-Control $window 'OpenImage').Current.Name
+  if($actual -ne $expected){throw "Language preference not applied: $actual, expected $expected"}
+  Write-Host "PASS language preference $Language -> $next after restart"
+  Write-Host "PASS localized WinUI $Language"
 } catch {
   if(Test-Path $env:WINSQUASHFS_DIAGNOSTICS){Get-Content $env:WINSQUASHFS_DIAGNOSTICS | Write-Host}
   $uncLog=Join-Path $env:LOCALAPPDATA 'WinSquashfs\unc.log'
@@ -202,5 +258,7 @@ try {
   if($agentStarted){Start-Process "$AppDirectory\WinSquashfs.Unc.exe" -ArgumentList '--stop' -Wait}
   if($backup -ne $null){[IO.File]::WriteAllBytes($uncSettings,$backup)}
   elseif(Test-Path $uncSettings){Remove-Item $uncSettings -Force}
+  if($null -ne $languageBackup){[IO.File]::WriteAllBytes($languageFile,$languageBackup)}
+  elseif(Test-Path $languageFile){Remove-Item $languageFile -Force}
   Remove-Item $root -Recurse -Force
 }

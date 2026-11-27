@@ -1,5 +1,7 @@
 # WinSquashfs
 
+[简体中文](README.zh-CN.md) | English
+
 A WinUI 3 desktop application for SquashFS images on Windows x64. Browse image contents, preview files, build new images, extract files or mount a read-only drive using WinFsp.
 
 ## Features
@@ -17,6 +19,12 @@ A WinUI 3 desktop application for SquashFS images on Windows x64. Browse image c
 ## Installation
 
 Download the x64 installer from [Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) or the Windows build artifact from [Actions](https://github.com/HSOS6Miyabi/WinSquashfs/actions). The installer includes the WinFsp runtime and a self-contained Windows App SDK/.NET application. Windows 10 version 1809 or newer is required. A portable distribution requires WinFsp to be installed separately for mounting.
+
+## Language
+
+WinSquashfs supports English and Simplified Chinese. The interface follows the Windows display language by default. Select a language in **Tools & about → Interface language**, save it, and restart the application. The UNC background process is independent of the main window.
+
+The installer supports English and Simplified Chinese and registers Explorer menu labels in the selected installer language. The CLI uses English by default to preserve script compatibility; use `winsqfs --lang zh-CN` or `winsqfs --lang system` to change the language for a command. Output from the upstream squashfs-tools binaries is preserved as originally emitted.
 
 ## Usage
 
