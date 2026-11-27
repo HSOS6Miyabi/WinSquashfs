@@ -37,7 +37,7 @@
        <Button x:Name="RecentButton" Content="{StaticResource L_Recent}" AutomationProperties.AutomationId="RecentImages">
         <Button.Flyout><MenuFlyout x:Name="RecentMenu"/></Button.Flyout>
        </Button>
-       <Button x:Name="OpenButton" Click="OpenClicked" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="OpenImage">
+       <Button x:Name="OpenButton" Click="OpenClicked" Style="{StaticResource AccentButtonStyle}" AutomationProperties.AutomationId="OpenImage" AutomationProperties.Name="{StaticResource L_Open_image}">
         <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="OpenFile"/><TextBlock Text="{StaticResource L_Open_image}"/></StackPanel>
        </Button>
       </StackPanel>
