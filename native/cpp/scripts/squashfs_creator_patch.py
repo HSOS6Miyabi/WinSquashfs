@@ -96,7 +96,7 @@ rewrite("lib/common/writer/finish.c", [
 # A SquashFS compressed block must be smaller than its uncompressed payload.
 # LZ4 may expand short metadata such as the single-entry UID/GID table.
 rewrite("lib/sqfs/meta_writer.c", [
-    ("\\tif (ret > 0) {", "\\tif (ret > 0 && (size_t)ret < m->offset) {"),
+    ("\tif (ret > 0) {", "\tif (ret > 0 && (size_t)ret < m->offset) {"),
 ])
 rewrite("include/sqfs/compressor.h", [
     ("#define SQFS_ZSTD_MIN_LEVEL (1)", "#define SQFS_ZSTD_MIN_LEVEL (-131072)"),
