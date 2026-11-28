@@ -16,6 +16,7 @@
 #include <array>
 #include <bit>
 #include <chrono>
+#include <charconv>
 #include <fstream>
 #include <map>
 #include <random>
@@ -172,7 +173,22 @@ Args native_squash_arguments(const CreationOptions& settings){
     if(settings.gzip_window)option("window="+std::to_string(*settings.gzip_window));
     if(!settings.lzo_algorithm.empty())option("algorithm="+settings.lzo_algorithm);
     if(settings.lz4_high_compression)option("hc");
-    if(!settings.xz_dictionary.empty())option("dictsize="+settings.xz_dictionary);
+    if(!settings.xz_dictionary.empty()){
+        auto dictionary=settings.xz_dictionary;
+        if(dictionary.ends_with('%')){
+            const auto end=dictionary.data()+dictionary.size()-1;
+            double percent=0;
+            const auto parsed=std::from_chars(dictionary.data(),end,percent);
+            require(parsed.ec==std::errc{}&&parsed.ptr==end&&percent>0&&percent<=100,
+                    "invalid XZ dictionary percentage");
+            const auto bytes=static_cast<std::uint32_t>(settings.block_size*percent/100.0);
+            require(bytes>=8192&&bytes<=settings.block_size&&
+                    (std::has_single_bit(bytes)||(bytes%3u==0&&std::has_single_bit(bytes/3u))),
+                    "XZ dictionary must be a power of two or three times a power of two");
+            dictionary=std::to_string(bytes);
+        }
+        option("dictsize="+dictionary);
+    }
     if(!settings.xz_filters.empty())option(settings.xz_filters);
     if(settings.codec=="xz"&&settings.preset>=CompressionPreset::maximum){option("level=9");option("extreme");}
     if(!codec_options.empty())add(args,"-X",codec_options);

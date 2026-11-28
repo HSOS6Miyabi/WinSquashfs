@@ -39,7 +39,16 @@ fs::path output;std::vector<char> content(8193,'a');std::array<char,1028> header
         _setmode(_fileno(stdin),_O_BINARY);
 #endif
         output=args.back();
-        if(tool=="archivefs-tar2sqfs")std::copy_n("hsqs",4,header.begin());
+        if(tool=="archivefs-tar2sqfs"){
+            std::copy_n("hsqs",4,header.begin());
+            auto options=std::find(args.begin(),args.end(),fs::path("-X"));
+            if(options!=args.end()&&options+1!=args.end()){
+                const auto value=(options+1)->string();
+                if(value.find("dictsize=")!=std::string::npos&&value.find('%')!=std::string::npos)
+                    throw std::runtime_error("dictionary percentages must be converted to bytes");
+                std::cout<<"codec-options="<<value<<'\n';
+            }
+        }
         else{header[1024]=static_cast<char>(0xe2);header[1025]=static_cast<char>(0xe1);header[1026]=static_cast<char>(0xf5);header[1027]=static_cast<char>(0xe0);}
         auto a=archive_read_new();if(!a)throw std::bad_alloc();struct Guard{struct archive* a;~Guard(){archive_read_free(a);}}guard{a};
         archive_read_support_format_tar(a);archive_read_support_filter_none(a);

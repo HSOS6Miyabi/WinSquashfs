@@ -20,7 +20,11 @@ for binary in root.rglob("*"):
         (offset,) = struct.unpack("<I", stream.read(4))
         stream.seek(offset)
         assert stream.read(4) == b"PE\0\0", binary
-        assert struct.unpack("<H", stream.read(2))[0] == machine, binary
+        actual, = struct.unpack("<H", stream.read(2))
+        # ARM64X DLLs can also be loaded by native ARM64 processes.
+        compatible = actual == machine or (arch == "arm64" and binary.suffix.lower() == ".dll"
+                                           and actual == 0xA64E)
+        assert compatible, (binary, f"machine=0x{actual:04x}", f"expected=0x{machine:04x}")
 cli = root / "archivefs.exe"
 
 def run(*args, **kwargs):

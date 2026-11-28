@@ -3,6 +3,7 @@
 #include "archive_tree.hpp"
 #include <archive.h>
 #include <archive_entry.h>
+#include <array>
 #include <chrono>
 #include <clocale>
 #include <fstream>
@@ -59,6 +60,17 @@ int main(int argc,char** argv){try{
         source->read_exact(1028,std::as_writable_bytes(std::span(actual)));
         require(actual==bytes,"native SquashFS TAR transport");
     }
+    for(const auto& [percentage,expected]:std::array<std::pair<const char*,const char*>,3>{{{"100%","1048576"},{"75%","786432"},{"37.5%","393216"}}}){
+        auto settings=CreationOptions::for_preset(ArchiveFormat::squashfs,CompressionPreset::maximum);
+        settings.xz_dictionary=percentage;
+        std::string log;
+        creator.create({input,folder},temp.p/(std::string("dict-")+percentage+".image"),settings,
+            [&](std::string_view line){log+=line;});
+        require(log.find(std::string("dictsize=")+expected)!=std::string::npos,"native XZ dictionary byte count");
+    }
+    auto invalid_dictionary=CreationOptions::for_preset(ArchiveFormat::squashfs,CompressionPreset::maximum);
+    invalid_dictionary.xz_dictionary="101%";
+    throws([&]{creator.create({input,folder},temp.p/"invalid-dictionary.image",invalid_dictionary);});
     std::set<std::string> logs;run_process(tool,{fs::path("echo").native()},[&](std::string_view l){logs.emplace(l);},{},[&](const auto& write){write(bytes.data(),bytes.size());});require(logs.contains("input=8193")&&logs.contains("done"),"pipe transport");throws([&]{run_process(tool,{fs::path("fail").native()});});
     // The child closes its input before consuming a large write. This must
     // return an exception, without SIGPIPE killing the parent.

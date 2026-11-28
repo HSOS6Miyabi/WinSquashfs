@@ -98,6 +98,9 @@ rewrite("lib/common/writer/finish.c", [
 rewrite("lib/sqfs/meta_writer.c", [
     ("\tif (ret > 0) {", "\tif (ret > 0 && (size_t)ret < m->offset) {"),
 ])
+rewrite("lib/common/parse_size.c", [
+    ("\t\tacc /= 100;\n\t\tbreak;", "\t\tacc /= 100;\n\t\t++in;\n\t\tbreak;"),
+])
 rewrite("include/sqfs/compressor.h", [
     ("#define SQFS_ZSTD_MIN_LEVEL (1)", "#define SQFS_ZSTD_MIN_LEVEL (-131072)"),
 ])

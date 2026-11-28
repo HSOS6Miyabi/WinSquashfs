@@ -5,6 +5,8 @@ on:
     paths:
       - 'scripts/build-alternate-readers.sh'
       - 'native/cpp/scripts/build.ps1'
+      - 'native/cpp/image_creation.cpp'
+      - 'native/cpp/projection.cpp'
       - 'native/cpp/scripts/native_readers_test.py'
       - 'native/cpp/scripts/squashfs_creator_patch.py'
       - '.github/workflows/windows-native-decoders.yml'
@@ -131,8 +133,23 @@ jobs:
           Copy-Item "$prefix/licenses/dwarfs.txt" "$out/licenses"
           $crt=Get-ChildItem (Join-Path $env:VCToolsRedistDir $arch) -Directory | Where-Object Name -Match '^Microsoft\.VC[0-9]+\.CRT$' | Select-Object -First 1
           if(!$crt){throw "Missing runtime for $arch"}
-          Copy-Item "$($crt.FullName)/*.dll" $out
-          Copy-Item "$($crt.FullName)/*.dll" "$out/tools"
+          $machine=@{x86=0x014c;arm64=0xaa64}[$arch]
+          Get-ChildItem $crt.FullName -Filter '*.dll' | ForEach-Object {
+            $stream=[IO.File]::OpenRead($_.FullName)
+            try {
+              $reader=[IO.BinaryReader]::new($stream)
+              if($reader.ReadUInt16() -ne 0x5a4d){throw "Invalid PE file: $($_.Name)"}
+              $stream.Position=60
+              $stream.Position=$reader.ReadUInt32()
+              if($reader.ReadUInt32() -ne 0x4550){throw "Invalid PE signature: $($_.Name)"}
+              $actual=$reader.ReadUInt16()
+            } finally {$stream.Dispose()}
+            Write-Host ("Redistributable {0}: machine 0x{1:x4}" -f $_.Name,$actual)
+            if($actual -eq $machine -or ($arch -eq 'arm64' -and $actual -eq 0xa64e)){
+              Copy-Item $_.FullName $out
+              Copy-Item $_.FullName "$out/tools"
+            }
+          }
           New-Item -ItemType Directory -Force "$out/licenses/vcpkg" | Out-Null
           Get-ChildItem "$ports/$triplet/share" -Directory | ForEach-Object {
             $license=Join-Path $_.FullName 'copyright'
