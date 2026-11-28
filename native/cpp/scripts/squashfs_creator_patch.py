@@ -93,6 +93,11 @@ rewrite("lib/common/writer/finish.c", [
      "\tif (cfg->archivefs_no_tail_pack)\n\t\tsqfs->super.flags &= ~SQFS_FLAG_ALWAYS_FRAGMENTS;\n\n"
      "\tif (cfg->exportable) {"),
 ])
+# A SquashFS compressed block must be smaller than its uncompressed payload.
+# LZ4 may expand short metadata such as the single-entry UID/GID table.
+rewrite("lib/sqfs/meta_writer.c", [
+    ("\\tif (ret > 0) {", "\\tif (ret > 0 && (size_t)ret < m->offset) {"),
+])
 rewrite("include/sqfs/compressor.h", [
     ("#define SQFS_ZSTD_MIN_LEVEL (1)", "#define SQFS_ZSTD_MIN_LEVEL (-131072)"),
 ])
@@ -111,7 +116,6 @@ with path.open("a", encoding="utf-8", newline="\n") as out:
     out.write(r'''
 #ifdef _WIN32
 #include <windows.h>
-#include <wchar.h>
 int wmain(int argc, wchar_t **wargv)
 {
     char **argv = calloc((size_t)argc + 1, sizeof(*argv));
