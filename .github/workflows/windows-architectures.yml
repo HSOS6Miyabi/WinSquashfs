@@ -53,7 +53,7 @@ jobs:
           $ports=Join-Path $PWD '.deps/vcpkg-installed'
           & "$vcpkg/vcpkg.exe" install 'libarchive[core]' nlohmann-json --classic "--triplet=$triplet" "--x-install-root=$ports"
           if($LASTEXITCODE){exit $LASTEXITCODE}
-          cmake -S native/cpp -B build/architecture -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$triplet" "-DVCPKG_INSTALLED_DIR=$ports" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DARCHIVEFS_WITH_DWARFS=OFF -DBUILD_TESTING=ON -DVCPKG_MANIFEST_MODE=OFF
+          cmake -S native/cpp -B build/architecture -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$triplet" "-DVCPKG_INSTALLED_DIR=$ports" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DARCHIVEFS_WITH_DWARFS=OFF -DARCHIVEFS_BUILD_SHELL=ON -DBUILD_TESTING=ON -DVCPKG_MANIFEST_MODE=OFF
           if($LASTEXITCODE){exit $LASTEXITCODE}
           cmake --build build/architecture --parallel 2
           if($LASTEXITCODE){exit $LASTEXITCODE}
@@ -70,10 +70,15 @@ jobs:
         shell: pwsh
         run: |
           $expected=[Convert]::ToUInt16('${{ matrix.pe }}',16)
-          foreach($file in @('build/architecture/archivefs-read.exe','build/architecture/archivefs_core.dll','build/architecture/WinArchiveFSPro.Unc.exe','artifacts/architecture-ui/WinArchiveFSPro.exe')){
+          foreach($file in @('build/architecture/archivefs-read.exe','build/architecture/archivefs_core.dll','build/architecture/WinArchiveFSPro.Unc.exe','build/architecture/winsqfs-shell.dll','build/architecture/pack-shell.exe','artifacts/architecture-ui/WinArchiveFSPro.exe')){
             $bytes=[IO.File]::ReadAllBytes((Resolve-Path $file).Path)
             $offset=[BitConverter]::ToInt32($bytes,60)
             if([BitConverter]::ToUInt16($bytes,$offset+4) -ne $expected){throw "Incorrect PE architecture: $file"}
+          }
+          $exports=(& dumpbin /nologo /exports build/architecture/winsqfs-shell.dll | Out-String)
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          foreach($name in @('DllCanUnloadNow','DllGetClassObject')){
+            if($exports -notmatch "(?m)^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+$name(?:\s|$)"){throw "Missing COM export: $name"}
           }
           & build/architecture/archivefs-read.exe doctor
           if($LASTEXITCODE){exit $LASTEXITCODE}
