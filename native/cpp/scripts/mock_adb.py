@@ -81,7 +81,7 @@ class Handler(socketserver.BaseRequestHandler):
         request = service(conn)
         server.commands.append(request)
         if request == "host:devices-l":
-            data = f"{SERIAL}\tdevice product:fixture model:{MODEL} transport_id:1\n".encode() if server.attached else b""
+            data = f"{SERIAL:<22} device product:fixture model:{MODEL} transport_id:1\n".encode() if server.attached else b""
             message(conn, data)
             return
         if request == f"host-serial:{SERIAL}:features":

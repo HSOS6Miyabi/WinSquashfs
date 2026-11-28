@@ -10,7 +10,7 @@ import time
 EXE = sys.argv[1]
 NAME = "中文 '文件\n😀.bin"
 META = b"81a4 4294967552 1700000000 1 99 1700000001"
-DEVICES = b"serial-1\tdevice product:p model:Phone transport_id:1\nserial-2\toffline transport_id:2\n"
+DEVICES = b"serial-1        device product:p model:Phone transport_id:1\nserial-2\toffline transport_id:2\n"
 
 def exact(conn, n):
     b = bytearray()

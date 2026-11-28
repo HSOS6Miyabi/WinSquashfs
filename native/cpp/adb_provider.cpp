@@ -203,8 +203,10 @@ public:
         std::vector<RemoteDevice> result;
         for(auto line:fields(data,'\n')){
             if(line.empty())continue;
-            auto split=line.find('\t');if(split==line.npos)protocol("Invalid ADB device list");
-            auto id=line.substr(0,split);auto rest=line.substr(split+1);auto end=rest.find_first_of(" \r");auto state=rest.substr(0,end);
+            auto split=line.find_first_of(" \t");if(split==line.npos)protocol("Invalid ADB device list");
+            auto id=line.substr(0,split);auto rest=line.substr(split+1);
+            auto first=rest.find_first_not_of(" \t\r");if(first==rest.npos)protocol("Invalid ADB device state");
+            rest.remove_prefix(first);auto end=rest.find_first_of(" \t\r");auto state=rest.substr(0,end);
             if(id.empty()||state.empty()||id.find_first_of("\r\n")!=id.npos||id.find('\0')!=id.npos)protocol("Invalid ADB device record");
             std::string name(id);
             auto model=rest.find(" model:");if(model!=rest.npos){auto value=rest.substr(model+7);auto stop=value.find_first_of(" \r");value=value.substr(0,stop);if(!value.empty())name=std::string(value)+" ("+std::string(id)+")";}
