@@ -2,6 +2,7 @@
 #pragma once
 #include "archive_tree.hpp"
 #include "device_provider.hpp"
+#include "open_progress.hpp"
 #include <chrono>
 #include <functional>
 #include <limits>
@@ -32,16 +33,16 @@ public:
         std::shared_ptr<State> state_;std::shared_ptr<Entry> entry_;std::shared_ptr<ArchiveTree> tree_;
     };
     struct Settings {std::chrono::milliseconds idle_time{60000};std::size_t idle_images=8;};
-    ImagePool(ArchiveOpener opener,Settings settings,ArchiveSourceOpener source_opener={});
+    ImagePool(ArchiveOpener opener,Settings settings,ArchiveSourceOpener source_opener={},OpenProgressSink progress={});
     ~ImagePool();
     ImagePool(const ImagePool&)=delete;
     ImagePool& operator=(const ImagePool&)=delete;
     std::shared_ptr<Lease> acquire(const std::filesystem::path& path);
-    std::shared_ptr<Lease> acquire_source(std::u16string key,std::shared_ptr<const RandomAccessSource> source);
+    std::shared_ptr<Lease> acquire_source(std::u16string key,std::shared_ptr<const RandomAccessSource> source,std::u16string display={});
     std::size_t size()const;
     void sweep();
 private:
-    std::shared_ptr<Lease> acquire_key(std::u16string key,const std::function<std::shared_ptr<ArchiveTree>()>& open);
+    std::shared_ptr<Lease> acquire_key(std::u16string key,std::u16string display,const std::function<std::shared_ptr<ArchiveTree>(std::shared_ptr<OpenProgress>)>& open);
     std::shared_ptr<State> state_;
     std::jthread worker_;
 };

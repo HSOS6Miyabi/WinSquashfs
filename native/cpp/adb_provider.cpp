@@ -60,7 +60,7 @@ public:
             auto end=Clock::now()+o.connect_timeout;
             if(::connect(socket_,reinterpret_cast<sockaddr*>(&address),sizeof(address))!=0){
                 if(!pending(socket_error()))unavailable(o.port);
-                wait(true,end);
+                try{wait(true,end);}catch(const DeviceFailure& e){if(e.code()==DeviceError::timeout)unavailable(o.port);throw;}
                 int error=0;
 #ifdef _WIN32
                 int length=sizeof(error);auto status=getsockopt(socket_,SOL_SOCKET,SO_ERROR,reinterpret_cast<char*>(&error),&length);

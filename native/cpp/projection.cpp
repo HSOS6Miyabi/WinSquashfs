@@ -55,8 +55,8 @@ std::vector<fs::path> extract_batch(const std::vector<fs::path>& sources,const f
 }
 struct ImagePool::Entry {std::u16string key;std::shared_future<std::shared_ptr<ArchiveTree>> future;std::size_t active=0;Clock::time_point idle=Clock::time_point::max();};
 struct ImagePool::State {
-    State(ArchiveOpener fn,Settings cfg,ArchiveSourceOpener source):opener(std::move(fn)),source_opener(std::move(source)),settings(cfg){}
-    ArchiveOpener opener;ArchiveSourceOpener source_opener;Settings settings;mutable std::mutex mutex;std::condition_variable_any wake;std::uint64_t revision=0;std::map<std::u16string,std::shared_ptr<Entry>,WindowsNameLess> images;
+    State(ArchiveOpener fn,Settings cfg,ArchiveSourceOpener source,OpenProgressSink progress):opener(std::move(fn)),source_opener(std::move(source)),settings(cfg),progress_sink(std::move(progress)){}
+    ArchiveOpener opener;ArchiveSourceOpener source_opener;Settings settings;OpenProgressSink progress_sink;mutable std::mutex mutex;std::condition_variable_any wake;std::uint64_t revision=0;std::map<std::u16string,std::shared_ptr<Entry>,WindowsNameLess> images;
     void changed(){++revision;wake.notify_all();}
     Clock::time_point deadline() const {
         auto next=Clock::time_point::max();
@@ -87,7 +87,7 @@ struct ImagePool::State {
     }
 };
 ImagePool::Lease::~Lease(){state_->release(entry_);}
-ImagePool::ImagePool(ArchiveOpener opener,Settings settings,ArchiveSourceOpener source_opener):state_(std::make_shared<State>(std::move(opener),settings,std::move(source_opener))){
+ImagePool::ImagePool(ArchiveOpener opener,Settings settings,ArchiveSourceOpener source_opener,OpenProgressSink progress):state_(std::make_shared<State>(std::move(opener),settings,std::move(source_opener),std::move(progress))){
     if(!state_->opener||settings.idle_time.count()<0||settings.idle_time>std::chrono::hours(24)||settings.idle_images>1024)throw std::invalid_argument("invalid image cache configuration");
     worker_=std::jthread([state=state_](std::stop_token stop){
         std::unique_lock lock(state->mutex);
@@ -114,17 +114,34 @@ std::size_t ImagePool::size()const{std::lock_guard lock(state_->mutex);return st
 void ImagePool::sweep(){state_->sweep();}
 std::shared_ptr<ImagePool::Lease> ImagePool::acquire(const fs::path& path){
     auto absolute=fs::absolute(path).lexically_normal();
-    return acquire_key(absolute.u16string(),[&]{return state_->opener(absolute,SourcePolicy::transient_handle);});
+    return acquire_key(absolute.u16string(),absolute.u16string(),[&](std::shared_ptr<OpenProgress> progress){
+        if(progress&&state_->source_opener){
+            auto source=open_file_source(absolute,SourcePolicy::transient_handle);
+            return state_->source_opener(std::make_shared<ProgressSource>(std::move(source),std::move(progress)));
+        }
+        return state_->opener(absolute,SourcePolicy::transient_handle);
+    });
 }
-std::shared_ptr<ImagePool::Lease> ImagePool::acquire_source(std::u16string key,std::shared_ptr<const RandomAccessSource> source){
+std::shared_ptr<ImagePool::Lease> ImagePool::acquire_source(std::u16string key,std::shared_ptr<const RandomAccessSource> source,std::u16string display){
     if(!state_->source_opener||!source)throw std::invalid_argument("nested source opening is unavailable");
-    return acquire_key(u"@"+key,[&]{return state_->source_opener(source);});
+    return acquire_key(u"@"+key,std::move(display),[&](std::shared_ptr<OpenProgress> progress){
+        if(progress)return state_->source_opener(std::make_shared<ProgressSource>(source,std::move(progress)));
+        return state_->source_opener(source);
+    });
 }
-std::shared_ptr<ImagePool::Lease> ImagePool::acquire_key(std::u16string key,const std::function<std::shared_ptr<ArchiveTree>()>& open){
+std::shared_ptr<ImagePool::Lease> ImagePool::acquire_key(std::u16string key,std::u16string display,const std::function<std::shared_ptr<ArchiveTree>(std::shared_ptr<OpenProgress>)>& open){
     for(int attempt=0;attempt<2;++attempt){std::shared_ptr<Entry> entry;std::shared_ptr<std::promise<std::shared_ptr<ArchiveTree>>> promise;
         {std::lock_guard lock(state_->mutex);auto it=state_->images.find(key);if(it!=state_->images.end())entry=it->second;else{promise=std::make_shared<std::promise<std::shared_ptr<ArchiveTree>>>();entry=std::make_shared<Entry>();entry->key=key;entry->future=promise->get_future().share();state_->images.emplace(key,entry);state_->changed();}++entry->active;}
         try{
-            if(promise){try{promise->set_value(open());}catch(...){promise->set_exception(std::current_exception());}}
+            if(promise){
+                std::shared_ptr<OpenProgress> progress;
+                if(state_->progress_sink&&!display.empty())try{
+                    progress=std::make_shared<OpenProgress>(display);state_->progress_sink(progress);
+                }catch(...){}
+                struct Finish{std::shared_ptr<OpenProgress> value;~Finish(){if(value)value->done.store(true,std::memory_order_release);}} finish{progress};
+                try{auto opened=open(progress);if(!opened)throw std::runtime_error("archive opener returned no image");opened->validate_path();promise->set_value(std::move(opened));}
+                catch(...){promise->set_exception(std::current_exception());}
+            }
             auto tree=entry->future.get();if(!tree)throw std::runtime_error("archive opener returned no image");tree->validate_path();return std::shared_ptr<Lease>(new Lease(state_,entry,std::move(tree)));
         }catch(...){if(std::getenv("ARCHIVEFS_TRACE")){try{throw;}catch(const std::exception& e){std::fprintf(stderr,"Image acquisition failed: %s\n",e.what());}catch(...){}}state_->release(entry);{std::lock_guard lock(state_->mutex);state_->erase_if_current(entry);}if(promise||attempt)throw;}
     }throw std::runtime_error("cannot acquire image");
@@ -232,18 +249,16 @@ ProjectedNodePtr project_archive(const std::shared_ptr<ImagePool>& pool,std::sha
     for(std::size_t i=0;i<parts.size();++i){
         if(node->info.kind!=FileKind::directory)return {};
         auto found=tree->children(node);
-        auto it=std::lower_bound(found.begin(),found.end(),parts[i],[](auto const& n,std::u16string_view name){return WindowsNameLess{}(n->windows_name,name);});
-        // Directory order is archive-defined; use a name lookup if needed.
-        if(it==found.end()||!equal((*it)->windows_name,parts[i]))it=std::find_if(found.begin(),found.end(),[&](auto const& n){return equal(n->windows_name,parts[i]);});
+        auto it=std::find_if(found.begin(),found.end(),[&](auto const& n){return equal(n->windows_name,parts[i]);});
         if(it==found.end()||!supported(*it))return {};
         node=*it;path=child_path(path,node->windows_name);
-        if(node->info.kind==FileKind::regular&&is_image_extension(node->windows_name)){
+        if(node->info.kind==FileKind::regular&&(is_image_extension(node->windows_name)||i+1<parts.size())){
+            if(depth>=32)throw std::runtime_error("nested image depth exceeds 32");
             auto source=std::make_shared<NestedSource>(tree,node);
-            if(detect_format(*source)==ArchiveFormat::unknown){if(i+1<parts.size())return {};continue;}
-            if(++depth>32)throw std::runtime_error("nested image depth exceeds 32");
             auto key=u"nested:"+to_utf16(std::to_string(reinterpret_cast<std::uintptr_t>(tree.get())))+u":"+tree->path_of(node);
-            lease=pool->acquire_source(std::move(key),source);
-            tree=lease->tree();node=tree->root();
+            try{lease=pool->acquire_source(std::move(key),source,path);}
+            catch(const UnknownArchiveFormat&){if(i+1<parts.size())return {};continue;}
+            ++depth;tree=lease->tree();node=tree->root();
         }
     }
     auto name=path.substr(path.find_last_of(u'\\')+1);

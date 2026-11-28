@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "projection.hpp"
+#include "decoder_backend.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -154,14 +155,16 @@ public:
             auto it=std::find_if(objects->begin(),objects->end(),[&](auto const& o){return eq(o.name,parts[i]);});
             if(it==objects->end())return {};
             node=object_node(node,*it,true);
-            if(node->source&&is_image_extension(node->name)){
-                if(detect_format(*node->source)!=ArchiveFormat::unknown){
+            if(node->source&&(is_image_extension(node->name)||i+1<parts.size())){
+                {
                     // The key is losslessly encoded to avoid case-insensitive map collisions.
                     auto raw=key_for(node->device_id,node->object_id);
                     std::u16string key=id_+u":";
                     constexpr char16_t hex[]=u"0123456789ABCDEF";
                     for(unsigned char c:raw){key+=hex[c>>4];key+=hex[c&15];}
-                    auto lease=pool_->acquire_source(std::move(key),node->source);
+                    std::shared_ptr<ImagePool::Lease> lease;
+                    try{lease=pool_->acquire_source(std::move(key),node->source,id_+node->path);}
+                    catch(const UnknownArchiveFormat&){if(i+1<parts.size())return {};continue;}
                     std::u16string remainder;
                     for(std::size_t j=i+1;j<parts.size();++j)remainder=append(remainder,parts[j]);
                     return project_archive(pool_,std::move(lease),{},node->path,remainder);

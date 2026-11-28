@@ -3,8 +3,10 @@
 #include "archive_reader.hpp"
 #include <filesystem>
 #include <memory>
+#include <stdexcept>
 
 namespace archivefs {
+class UnknownArchiveFormat final:public std::runtime_error {public:UnknownArchiveFormat():std::runtime_error("unsupported archive format"){} };
 
 // Load a format decoder from the application directory. The format ABI is
 // synchronous: read callbacks are invoked on the calling thread.
