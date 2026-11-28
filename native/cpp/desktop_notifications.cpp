@@ -14,6 +14,7 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <stdexcept>
 #include <vector>
 
 namespace archivefs {
@@ -101,12 +102,16 @@ struct DesktopNotifications::State {
     };
     std::filesystem::path directory;
     bool chinese;
+    DesktopNotificationObserver observer;
+    void report(DesktopNotificationEvent event,const OpenProgress* progress=nullptr) noexcept {
+        if(observer)try{observer(event,progress);}catch(...){}
+    }
     std::mutex mutex;
     std::condition_variable_any wake;
     std::vector<std::shared_ptr<OpenProgress>> pending;
     std::map<std::u16string,std::u16string> errors;
     std::jthread thread;
-    State(std::filesystem::path dir,bool zh):directory(std::move(dir)),chinese(zh){
+    State(std::filesystem::path dir,bool zh,DesktopNotificationObserver callback):directory(std::move(dir)),chinese(zh),observer(std::move(callback)){
         thread=std::jthread([this](std::stop_token stop){run(stop);});
     }
     ~State(){thread.request_stop();wake.notify_all();if(thread.joinable())thread.join();}
@@ -123,7 +128,8 @@ struct DesktopNotifications::State {
                 if(j.shown)try{
                     notifier.Hide(j.toast);
                     ToastNotificationManager::History().Remove(winrt::hstring(j.tag),group,app_id);
-                }catch(...){}
+                    report(DesktopNotificationEvent::removed,j.progress.get());
+                }catch(...){report(DesktopNotificationEvent::failed,j.progress.get());}
             };
             while(!stop.stop_requested()){
                 std::vector<std::shared_ptr<OpenProgress>> next;
@@ -160,23 +166,31 @@ struct DesktopNotifications::State {
                             auto offset=j.progress->offset.load(std::memory_order_relaxed);
                             if(!j.shown){
                                 j.toast=progress_toast(*j.progress,chinese,j.tag);notifier.Show(j.toast);j.shown=true;
+                                report(DesktopNotificationEvent::shown,j.progress.get());
                             }else if(size!=j.previous_size||offset!=j.previous_offset){
                                 auto data=progress_data(*j.progress,chinese,++j.sequence);
-                                notifier.Update(data,winrt::hstring(j.tag),group);
+                                auto result=notifier.Update(data,winrt::hstring(j.tag),group);
+                                if(result==NotificationUpdateResult::NotificationNotFound){
+                                    it=jobs.erase(it);continue;
+                                }
+                                if(result!=NotificationUpdateResult::Succeeded)
+                                    throw std::runtime_error("Cannot update archive progress notification");
+                                report(DesktopNotificationEvent::updated,j.progress.get());
                             }
                             j.previous_size=size;j.previous_offset=offset;
-                        }catch(...){remove(j);it=jobs.erase(it);continue;}
+                        }catch(...){report(DesktopNotificationEvent::failed,j.progress.get());remove(j);it=jobs.erase(it);continue;}
                     }
                     ++it;
                 }
             }
             for(auto& j:jobs)remove(j);
         }catch(...){
+            report(DesktopNotificationEvent::failed);
             // Notifications must never prevent the filesystem agent from operating.
         }
     }
 };
-DesktopNotifications::DesktopNotifications(std::filesystem::path directory,bool chinese):state_(std::make_unique<State>(std::move(directory),chinese)){}
+DesktopNotifications::DesktopNotifications(std::filesystem::path directory,bool chinese,DesktopNotificationObserver observer):state_(std::make_unique<State>(std::move(directory),chinese,std::move(observer))){}
 DesktopNotifications::~DesktopNotifications()=default;
 void DesktopNotifications::opening(std::shared_ptr<OpenProgress> progress){
     std::lock_guard lock(state_->mutex);

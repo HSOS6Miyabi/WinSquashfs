@@ -71,3 +71,12 @@ The UNC agent exposes exact registered prefixes such as `\\sfs$\C`, `\\sfs$\UNC`
 ### Symbolic links and special objects
 
 `archivefs readlink IMAGE ENTRY` prints the stored link target. Mounted and UNC archives resolve relative and absolute POSIX symbolic links inside their own image, using exact original filename bytes. Dangling links, cycles, paths escaping the image, and non-file special objects remain visible but cannot be opened for data access. They are not exposed as host devices or Windows reparse points. Extraction copies regular files and directories.
+
+
+### Physical Windows and Android validation
+
+Run the `Physical Windows device and desktop integration` workflow on an interactive, dedicated x64 Windows test computer with the `archivefs-hardware` runner label, installed WinFsp, Windows SDK, vcpkg, and Visual Studio C++ tools. Supply a successful native integration run ID for the checked-out commit. Desktop tests require Windows 10 build 17763 or newer (before Windows 11), enabled notifications, and at least two monitors configured at distinct DPI values. The native test checks Windows notification creation, accepted progress updates, and removal using notification history; WinUI interaction tests check the actual monitor and DPI after moving the window.
+
+For MTP/PTP, preload a nonempty test file onto the physical device, connect and unlock the device, and authorize access. Supply its path relative to This PC, its corresponding path relative to the `mtp` UNC share, size, and SHA-256. The test copies the same file through Explorer's shell namespace and through the UNC projection in both orders, validates both copies, and verifies parallel random reads. Measurements are saved as JSON. No files are written to the device. Use a dedicated account with the archive agent initially stopped. The script restores its original settings. To cover MTP and PTP, run with a device in each mode. These tests are deliberately separate from hosted CI because virtual runners do not provide these physical devices or display configurations.
+
+The physical Android workflow accepts a designated device serial and validates authorized root access with Magisk or KernelSU. See `.github/workflows/android-hardware.yml`.

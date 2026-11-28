@@ -1,5 +1,5 @@
 ﻿# SPDX-License-Identifier: GPL-3.0-only
-param([Parameter(Mandatory=$true)][string]$AppDirectory,[ValidateSet('en-US','zh-CN')][string]$Language='en-US')
+param([Parameter(Mandatory=$true)][string]$AppDirectory,[ValidateSet('en-US','zh-CN')][string]$Language='en-US',[switch]$RequireMixedDpi)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 . (Join-Path $PSScriptRoot '../../../tests/screenshots.ps1')
@@ -101,16 +101,25 @@ try{
   }
   Save-WindowScreenshot $p 'browser-restored'
   $screenIndex=0
+  $observedDpi=@()
+  $observedDisplays=@()
   foreach($screen in [System.Windows.Forms.Screen]::AllScreens){
-    if(!$screen.Primary){
       Save-WindowScreenshot $p "browser-display-$screenIndex" 1200 780 $screen
       Assert-WindowDpiAwareness $p
+      $p.Refresh()
+      $actualScreen=[System.Windows.Forms.Screen]::FromHandle($p.MainWindowHandle)
+      if($actualScreen.DeviceName -ne $screen.DeviceName){throw "Window did not move to $($screen.DeviceName)"}
+      $observedDpi+= [WindowCapture]::GetDpiForWindow($p.MainWindowHandle)
+      $observedDisplays+= $actualScreen.DeviceName
       foreach($id in @('MountImage','ExtractSelected','ExtractAll')){
         if((Control $w $id).Current.IsOffscreen){throw "Monitor transition hid $id"}
       }
-    }
     $screenIndex++
   }
+  if($RequireMixedDpi -and (@($observedDisplays | Sort-Object -Unique).Count -lt 2 -or @($observedDpi | Sort-Object -Unique).Count -lt 2)){
+    throw 'Mixed-DPI validation requires two distinct monitors with different scaling factors'
+  }
+  Write-Host "PASS monitor transitions: $($observedDisplays -join ', '); DPI: $($observedDpi -join ', ')"
   Save-WindowScreenshot $p 'browser-primary'
   $before=@([IO.DriveInfo]::GetDrives().Name)
   Invoke-Control $w 'MountImage'

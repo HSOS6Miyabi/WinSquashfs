@@ -6,9 +6,11 @@
 #include <string>
 
 namespace archivefs {
+enum class DesktopNotificationEvent { shown, updated, removed, failed };
+using DesktopNotificationObserver=std::function<void(DesktopNotificationEvent,const OpenProgress*)>;
 class DesktopNotifications {
 public:
-    DesktopNotifications(std::filesystem::path application_directory,bool chinese);
+    DesktopNotifications(std::filesystem::path application_directory,bool chinese,DesktopNotificationObserver observer={});
     ~DesktopNotifications();
     DesktopNotifications(const DesktopNotifications&)=delete;
     DesktopNotifications& operator=(const DesktopNotifications&)=delete;

@@ -9,13 +9,13 @@ public static class WindowCapture {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out Rect r);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] public static extern IntPtr GetWindowDpiAwarenessContext(IntPtr h);
     [DllImport("user32.dll")] public static extern bool AreDpiAwarenessContextsEqual(IntPtr first, IntPtr second);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
 }
 '@
-[WindowCapture]::SetProcessDPIAware() | Out-Null
+if([WindowCapture]::SetThreadDpiAwarenessContext([IntPtr](-4)) -eq [IntPtr]::Zero){throw 'Cannot set per-monitor DPI awareness for screenshot capture'}
 $script:ScreenshotDir=Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts\screenshots'
 New-Item -ItemType Directory -Force $script:ScreenshotDir | Out-Null
 

@@ -1,0 +1,114 @@
+name: Physical Windows device and desktop integration
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful x64 native integration run ID for this commit
+        required: true
+        type: string
+      mode:
+        description: Physical tests to execute
+        type: choice
+        options: [desktop, mtp, both]
+        default: desktop
+      shell_path:
+        description: Portable device file path relative to This PC (MTP/PTP tests)
+        type: string
+      projected_path:
+        description: File path relative to the mtp share (MTP/PTP tests)
+        type: string
+      size:
+        description: Preloaded test file size in bytes
+        type: string
+      sha256:
+        description: Preloaded test file SHA-256
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: archivefs-physical-windows
+  cancel-in-progress: false
+jobs:
+  physical:
+    runs-on: [self-hosted, Windows, X64, archivefs-hardware]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify desktop and tested distribution
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          TEST_MODE: ${{ inputs.mode }}
+        run: |
+          if($env:RUN_ID -notmatch '^\d+$'){throw 'Invalid run ID'}
+          $run=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:RUN_ID" | ConvertFrom-Json
+          if($LASTEXITCODE -or $run.head_sha -ne $env:GITHUB_SHA -or $run.conclusion -ne 'success' -or $run.path -ne '.github/workflows/windows-native.yml'){throw 'A successful native integration run for this exact commit is required'}
+          if((Get-Process -Id $PID).SessionId -eq 0 -or ![Environment]::UserInteractive){throw 'Launch the runner interactively from a dedicated desktop account'}
+          if($env:TEST_MODE -in @('desktop','both')){
+            $os=Get-CimInstance Win32_OperatingSystem
+            if([int]$os.BuildNumber -lt 17763 -or [int]$os.BuildNumber -ge 22000 -or $os.ProductType -ne 1){throw 'Desktop validation requires Windows 10 1809 or later'}
+          }
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: artifacts/hardware-build
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate portable distribution
+        shell: pwsh
+        run: |
+          $props=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup
+          ./tests/distribution.ps1 -AppDirectory artifacts/hardware-build/dist -Version $props.Version
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: inputs.mode != 'mtp'
+      - name: Compile native notification integration test
+        if: inputs.mode != 'mtp'
+        shell: pwsh
+        run: |
+          $vcpkg=$env:VCPKG_INSTALLATION_ROOT
+          if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
+          if(!$vcpkg){throw 'Install vcpkg and the Windows SDK on the physical runner'}
+          $ports=Join-Path $PWD '.deps/hardware-ports'
+          & "$vcpkg/vcpkg.exe" install 'libarchive[core,bzip2,lz4,lzma,zstd]' nlohmann-json --classic --recurse --triplet=x64-windows-static-md "--x-install-root=$ports"
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          cmake -S native/cpp -B build/hardware -G Ninja -DCMAKE_BUILD_TYPE=Release -DARCHIVEFS_WITH_DWARFS=OFF "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md "-DVCPKG_INSTALLED_DIR=$ports" -DVCPKG_MANIFEST_MODE=OFF
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          cmake --build build/hardware --target desktop_notifications_live_tests --parallel 2
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+      - name: Test Windows 10 notifications
+        if: inputs.mode != 'mtp'
+        shell: pwsh
+        run: |
+          & build/hardware/desktop_notifications_live_tests.exe artifacts/hardware-build/dist
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+      - name: Test WinUI across mixed-DPI displays
+        if: inputs.mode != 'mtp'
+        shell: powershell
+        run: |
+          ./native/cpp/scripts/windows_ui.ps1 -AppDirectory artifacts/hardware-build/dist -Language en-US -RequireMixedDpi
+          ./native/cpp/scripts/windows_ui.ps1 -AppDirectory artifacts/hardware-build/dist -Language zh-CN -RequireMixedDpi
+      - uses: actions/setup-python@v5
+        if: inputs.mode != 'desktop'
+        with:
+          python-version: '3.12'
+      - name: Compare physical device transfers and random reads
+        if: inputs.mode != 'desktop'
+        shell: pwsh
+        env:
+          SHELL_PATH: ${{ inputs.shell_path }}
+          PROJECTED_PATH: ${{ inputs.projected_path }}
+          FIXTURE_SIZE: ${{ inputs.size }}
+          FIXTURE_SHA256: ${{ inputs.sha256 }}
+        run: |
+          python -u native/cpp/scripts/windows_mtp_live.py --app-directory artifacts/hardware-build/dist --shell-path "$env:SHELL_PATH" --projected-path "$env:PROJECTED_PATH" --size "$env:FIXTURE_SIZE" --sha256 "$env:FIXTURE_SHA256" --output artifacts/physical/mtp.json
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WinArchiveFSPro-physical-test-results
+          path: |
+            artifacts/physical/
+            artifacts/screenshots/
+          if-no-files-found: warn
