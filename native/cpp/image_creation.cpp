@@ -20,6 +20,7 @@
 #include <map>
 #include <random>
 #include <set>
+#include <thread>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -124,12 +125,74 @@ std::vector<fs::path::string_type> CreationOptions::arguments()const{
     }else throw std::invalid_argument("unknown archive format");
     return a;
 }
-void write_tar(const std::vector<fs::path>& sources,const std::function<void(const void*,std::size_t)>& write,std::stop_token stop){
+namespace {
+using Exclusions=std::set<std::u16string,WindowsNameLess>;
+Exclusions load_exclusions(const std::optional<fs::path>& path){
+    Exclusions result;
+    if(!path)return result;
+    std::ifstream input(*path,std::ios::binary);
+    if(!input)throw std::runtime_error("cannot open exclusion file");
+    std::string line;bool first=true;
+    while(std::getline(input,line)){
+        if(first&&line.starts_with("\xef\xbb\xbf"))line.erase(0,3);
+        first=false;
+        if(!line.empty()&&line.back()=='\r')line.pop_back();
+        if(line.empty())continue;
+        require(line.size()<=32768,"exclusion path too long");
+        std::replace(line.begin(),line.end(),'\\','/');
+        auto entry=fs::path(to_utf16(line)).lexically_normal();
+        require(!entry.is_absolute()&&!entry.has_root_name()&&!entry.empty()&&entry!=fs::path("."),"exclusion must be a relative archive path");
+        for(const auto& component:entry)require(component!=fs::path(".."),"exclusion cannot escape archive root");
+        result.insert(entry.generic_u16string());
+        require(result.size()<=65536,"too many excluded paths");
+    }
+    if(!input.eof())throw std::runtime_error("cannot read exclusion file");
+    return result;
+}
+Args native_squash_arguments(const CreationOptions& settings){
+    // Use the existing option validator before translating to the native tool.
+    (void)settings.arguments();
+    Args args;add(args,"-q");add(args,"-s");add(args,"-c",settings.codec);add_num(args,"-b",settings.block_size);
+    flag(args,!settings.no_exports,"-e");
+    flag(args,settings.no_xattrs,"-x");
+    flag(args,!settings.always_fragments,"-T");
+    // Keep per-file and fragment compression independent.
+    unsigned flags=0x40;
+    if(settings.no_data_compression)flags|=0x01;
+    if(settings.no_fragments)flags|=0x04;
+    if(settings.no_duplicates)flags|=0x08;
+    if(settings.no_sparse)flags|=0x10;
+    if(settings.no_fragment_compression)flags|=0x80;
+    add_num(args,"--archivefs-block-flags",flags);
+    flag(args,settings.no_inode_compression,"--archivefs-no-inode-compression");
+    if(settings.timestamp){add(args,"-k");add(args,"-d","mtime="+std::to_string(*settings.timestamp));}
+    std::string codec_options;
+    auto option=[&](std::string value){if(!codec_options.empty())codec_options+=',';codec_options+=std::move(value);};
+    if(settings.level)option("level="+std::to_string(*settings.level));
+    if(settings.gzip_window)option("window="+std::to_string(*settings.gzip_window));
+    if(!settings.lzo_algorithm.empty())option("algorithm="+settings.lzo_algorithm);
+    if(settings.lz4_high_compression)option("hc");
+    if(!settings.xz_dictionary.empty())option("dictsize="+settings.xz_dictionary);
+    if(!settings.xz_filters.empty())option(settings.xz_filters);
+    if(settings.codec=="xz"&&settings.preset>=CompressionPreset::maximum){option("level=9");option("extreme");}
+    if(!codec_options.empty())add(args,"-X",codec_options);
+    unsigned workers=settings.workers?settings.workers:std::clamp(std::thread::hardware_concurrency(),1u,sizeof(void*)==4?4u:16u);
+    std::uint64_t backlog=std::max<std::uint64_t>(16,10ULL*workers);
+    if(settings.memory_mib){
+        const auto blocks=(static_cast<std::uint64_t>(*settings.memory_mib)<<20)/(4ULL*settings.block_size);
+        backlog=std::min(backlog,std::max<std::uint64_t>(4,blocks));
+        workers=std::min(workers,static_cast<unsigned>(std::max<std::uint64_t>(1,backlog/2)));
+    }
+    add_num(args,"-j",workers);add_num(args,"-Q",backlog);
+    return args;
+}
+void write_tar_impl(const std::vector<fs::path>& sources,const std::function<void(const void*,std::size_t)>& write,std::stop_token stop,
+                    bool keep_directory,const Exclusions& exclusions){
     auto items=normalize(sources);TarWriter tar(write);tar.check(archive_write_set_format_pax_restricted(tar.value));tar.check(archive_write_set_bytes_per_block(tar.value,65536));tar.check(archive_write_set_bytes_in_last_block(tar.value,512));tar.check(archive_write_open(tar.value,&tar,nullptr,TarWriter::output,nullptr));
     std::vector<std::pair<fs::path,fs::path>> pending;
-    if(items.size()==1&&fs::is_directory(fs::symlink_status(items.front())))for(auto& child:sorted_children(items.front()))pending.emplace_back(child,child.filename());else for(auto& item:items)pending.emplace_back(item,base_name(item));std::reverse(pending.begin(),pending.end());std::vector<char> buffer(1u<<20);
+    if(!keep_directory&&items.size()==1&&fs::is_directory(fs::symlink_status(items.front())))for(auto& child:sorted_children(items.front()))pending.emplace_back(child,child.filename());else for(auto& item:items)pending.emplace_back(item,base_name(item));std::reverse(pending.begin(),pending.end());std::vector<char> buffer(1u<<20);
     while(!pending.empty()){
-        cancelled(stop);auto [source,name]=std::move(pending.back());pending.pop_back();auto status=fs::symlink_status(source);TarEntry entry;auto name_utf8=to_utf8(name.generic_u16string());archive_entry_set_pathname_utf8(entry.value,name_utf8.c_str());archive_entry_set_uid(entry.value,0);archive_entry_set_gid(entry.value,0);archive_entry_set_perm(entry.value,fs::is_directory(status)?0755:0644);archive_entry_set_size(entry.value,0);
+        cancelled(stop);auto [source,name]=std::move(pending.back());pending.pop_back();if(exclusions.contains(name.generic_u16string()))continue;auto status=fs::symlink_status(source);TarEntry entry;auto name_utf8=to_utf8(name.generic_u16string());archive_entry_set_pathname_utf8(entry.value,name_utf8.c_str());archive_entry_set_uid(entry.value,0);archive_entry_set_gid(entry.value,0);archive_entry_set_perm(entry.value,fs::is_directory(status)?0755:0644);archive_entry_set_size(entry.value,0);
         if(fs::is_symlink(status)){archive_entry_set_filetype(entry.value,AE_IFLNK);auto link=to_utf8(fs::read_symlink(source).generic_u16string());archive_entry_set_symlink_utf8(entry.value,link.c_str());archive_entry_set_perm(entry.value,0777);tar.check(archive_write_header(tar.value,entry.value));}
         else if(fs::is_directory(status)){archive_entry_set_filetype(entry.value,AE_IFDIR);set_tar_time(entry.value,source);tar.check(archive_write_header(tar.value,entry.value));auto children=sorted_children(source);for(auto it=children.rbegin();it!=children.rend();++it)pending.emplace_back(*it,name/it->filename());}
         else if(fs::is_regular_file(status)){auto file=open_file_source(source);auto size=file->size();require(size<=static_cast<std::uint64_t>(INT64_MAX),"file too large for TAR");archive_entry_set_filetype(entry.value,AE_IFREG);archive_entry_set_size(entry.value,static_cast<la_int64_t>(size));set_tar_time(entry.value,source);tar.check(archive_write_header(tar.value,entry.value));auto session=file->begin_read();for(std::uint64_t pos=0;pos<size;){cancelled(stop);auto count=static_cast<std::size_t>(std::min<std::uint64_t>(buffer.size(),size-pos));session->read_exact(pos,std::as_writable_bytes(std::span(buffer.data(),count)));auto n=archive_write_data(tar.value,buffer.data(),count);if(n<0)tar.check(static_cast<int>(n));if(static_cast<std::size_t>(n)!=count)throw std::runtime_error("short TAR write");pos+=count;}session->finish();}
@@ -137,6 +200,10 @@ void write_tar(const std::vector<fs::path>& sources,const std::function<void(con
         tar.check(archive_write_finish_entry(tar.value));
     }
     cancelled(stop);tar.check(archive_write_close(tar.value));
+}
+}
+void write_tar(const std::vector<fs::path>& sources,const std::function<void(const void*,std::size_t)>& write,std::stop_token stop){
+    write_tar_impl(sources,write,stop,false,{});
 }
 std::vector<fs::path> plan_batch_outputs(const std::vector<fs::path>& sources,const fs::path& directory,std::u16string_view suffix){
     require(!sources.empty(),"no source files selected");
@@ -175,7 +242,20 @@ std::vector<fs::path> ImageCreator::create_batch(const std::vector<fs::path>& so
 }
 void ImageCreator::create(const std::vector<fs::path>& sources,const fs::path& destination,CreationOptions options,LogSink log,std::stop_token stop)const{
     auto items=normalize(sources);auto output=fs::absolute(destination).lexically_normal();require(!fs::exists(fs::symlink_status(output)),"output already exists");require(fs::is_directory(output.parent_path()),"output directory does not exist");auto parent=fs::canonical(output.parent_path());for(auto& item:items)if(fs::is_directory(item))require(!beneath(fs::canonical(item),parent),"output must be outside the source directory");cancelled(stop);Workspace workspace(parent);auto image=workspace.path/"image";
-    auto squash=[&](const fs::path& target,const CreationOptions& settings){Args args;for(auto& item:items)args.push_back(fs::path(item.generic_u16string()).native());args.push_back(fs::path(target.generic_u16string()).native());auto flags=settings.arguments();args.insert(args.end(),flags.begin(),flags.end());run_process(executable(tools_,"mksquashfs"),args,log,stop);};
+    auto squash=[&](const fs::path& target,const CreationOptions& settings){
+        const auto standard=executable(tools_,"mksquashfs");
+        if(fs::is_regular_file(standard)){
+            Args args;for(auto& item:items)args.push_back(fs::path(item.generic_u16string()).native());
+            args.push_back(fs::path(target.generic_u16string()).native());auto flags=settings.arguments();args.insert(args.end(),flags.begin(),flags.end());
+            run_process(standard,args,log,stop);
+        }else{
+            auto native=executable(tools_,"archivefs-tar2sqfs");
+            require(fs::is_regular_file(native),"SquashFS creation tool is missing");
+            auto args=native_squash_arguments(settings);args.push_back(target.native());
+            const auto exclusions=load_exclusions(settings.exclude_file);
+            run_process(native,args,log,stop,[&](const auto& sink){write_tar_impl(items,sink,stop,settings.keep_directory,exclusions);});
+        }
+    };
     if(options.format==ArchiveFormat::squashfs&&options.extreme){
         options.block_size=1048576;options.memory_mib.reset();options.no_fragments=false;options.always_fragments=true;options.no_data_compression=options.no_inode_compression=options.no_fragment_compression=options.no_duplicates=false;options.gzip_window.reset();options.lzo_algorithm.clear();options.lz4_high_compression=false;options.xz_dictionary.clear();options.xz_filters.clear();options.level.reset();
         std::uintmax_t best=UINTMAX_MAX;std::uint64_t best_used=UINT64_MAX;for(unsigned i=0;i<4;++i){auto c=options;c.codec=std::array{"xz","xz","zstd","gzip"}[i];if(i<2){c.xz_dictionary="100%";if(i==0)c.xz_filters="x86,arm,armthumb,powerpc,sparc,ia64";}else c.level=i==2?22:9;auto trial=workspace.path/("candidate-"+std::to_string(i));if(log)log("Testing "+c.codec);squash(trial,c);auto used=validate_image(trial,decoders_,options.format);auto size=fs::file_size(trial);if(size<best||(size==best&&used<best_used)){if(fs::exists(image))fs::remove(image);fs::rename(trial,image);best=size;best_used=used;}else fs::remove(trial);}

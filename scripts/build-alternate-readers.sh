@@ -22,6 +22,7 @@ git clone --depth 1 --branch v1.3.2 https://github.com/AgentD/squashfs-tools-ng.
   cd "$sq"
   # Explicitly declare wctype() with both MinGW CRT header variants.
   sed -i '/^#include <stdlib.h>$/a #include <wctype.h>' lib/compat/fnmatch.c
+  python3 "$root/native/cpp/scripts/squashfs_creator_patch.py" "$sq"
   autoreconf -fi
   ./configure --host="$host" --prefix="$prefix" --enable-shared --disable-static \
     --with-gzip --with-xz --with-lzo --with-lz4 --with-zstd --without-selinux
@@ -32,7 +33,7 @@ git clone --depth 1 --branch v1.3.2 https://github.com/AgentD/squashfs-tools-ng.
   "$root/native/cpp/squashfs_parallel.c" -L"$prefix/lib" -lsquashfs -llzo2 \
   -o "$out/winsqfs-native.dll"
 cp "$prefix"/bin/*.dll "$out/"
-cp "$prefix/bin/tar2sqfs.exe" "$out/tools/"
+cp "$prefix/bin/tar2sqfs.exe" "$out/tools/archivefs-tar2sqfs.exe"
 cp "$sq"/COPYING* "$out/licenses/"
 commit=7e52cbffa83fbe9eb10bbf110cb12d503a048081
 git init "$er"

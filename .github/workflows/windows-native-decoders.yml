@@ -6,6 +6,7 @@ on:
       - 'scripts/build-alternate-readers.sh'
       - 'native/cpp/scripts/build.ps1'
       - 'native/cpp/scripts/native_readers_test.py'
+      - 'native/cpp/scripts/squashfs_creator_patch.py'
       - '.github/workflows/windows-native-decoders.yml'
   workflow_dispatch:
 permissions:

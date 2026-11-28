@@ -45,6 +45,20 @@ int main(int argc,char** argv){try{
     throws([&]{creator.create_batch({input,folder},batch,options);});
     auto collision=temp.p/"collision";fs::create_directory(collision);throws([&]{creator.create_batch({input,input},collision,options);});require(fs::is_empty(collision),"duplicate names checked before creation");
     throws([&]{creator.create_batch({input},collision,options,{},cancelled.get_token());});require(fs::is_empty(collision),"cancelled batch has no output");
+    // The architecture-native creator accepts the same presets using a TAR stream.
+#ifdef _WIN32
+    fs::remove(tools/"mksquashfs.exe");fs::copy_file(tool,tools/"archivefs-tar2sqfs.exe");
+#else
+    fs::remove(tools/"mksquashfs");fs::copy_file(tool,tools/"archivefs-tar2sqfs");
+#endif
+    for(unsigned preset=1;preset<=8;++preset){
+        auto settings=CreationOptions::for_preset(ArchiveFormat::squashfs,static_cast<CompressionPreset>(preset));
+        auto output=temp.p/("native-squashfs-"+std::to_string(preset)+".image");
+        creator.create({input,folder},output,settings);
+        auto source=open_file_source(output);std::vector<char> actual(bytes.size());
+        source->read_exact(1028,std::as_writable_bytes(std::span(actual)));
+        require(actual==bytes,"native SquashFS TAR transport");
+    }
     std::set<std::string> logs;run_process(tool,{fs::path("echo").native()},[&](std::string_view l){logs.emplace(l);},{},[&](const auto& write){write(bytes.data(),bytes.size());});require(logs.contains("input=8193")&&logs.contains("done"),"pipe transport");throws([&]{run_process(tool,{fs::path("fail").native()});});
     // The child closes its input before consuming a large write. This must
     // return an exception, without SIGPIPE killing the parent.

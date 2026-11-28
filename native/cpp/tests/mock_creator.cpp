@@ -34,11 +34,13 @@ fs::path output;std::vector<char> content(8193,'a');std::array<char,1028> header
         auto it=std::find(args.begin(),args.end(),fs::path("-noappend"));if(it==args.end()||it-args.begin()<3)throw std::runtime_error("missing SquashFS output");output=*(it-1);std::copy_n("hsqs",4,header.begin());
     }else if(tool=="mkdwarfs"){
         auto it=std::find(args.begin(),args.end(),fs::path("-o"));if(it==args.end()||it+1==args.end())throw std::runtime_error("missing DwarFS output");output=*(it+1);std::copy_n("DWARFS",6,header.begin());
-    }else if(tool=="mkfs.erofs"){
+    }else if(tool=="mkfs.erofs"||tool=="archivefs-tar2sqfs"){
 #ifdef _WIN32
         _setmode(_fileno(stdin),_O_BINARY);
 #endif
-        output=args.back();header[1024]=static_cast<char>(0xe2);header[1025]=static_cast<char>(0xe1);header[1026]=static_cast<char>(0xf5);header[1027]=static_cast<char>(0xe0);
+        output=args.back();
+        if(tool=="archivefs-tar2sqfs")std::copy_n("hsqs",4,header.begin());
+        else{header[1024]=static_cast<char>(0xe2);header[1025]=static_cast<char>(0xe1);header[1026]=static_cast<char>(0xf5);header[1027]=static_cast<char>(0xe0);}
         auto a=archive_read_new();if(!a)throw std::bad_alloc();struct Guard{struct archive* a;~Guard(){archive_read_free(a);}}guard{a};
         archive_read_support_format_tar(a);archive_read_support_filter_none(a);
         if(archive_read_open_fd(a,0,65536)!=ARCHIVE_OK)throw std::runtime_error("cannot open TAR stream");

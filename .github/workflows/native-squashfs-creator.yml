@@ -1,0 +1,44 @@
+name: Native SquashFS creator
+on:
+  push:
+    branches: ['refactor/native-cpp-validation', 'refactor/native-cpp']
+    paths:
+      - 'native/cpp/image_creation.cpp'
+      - 'native/cpp/scripts/squashfs_creator_patch.py'
+      - 'native/cpp/scripts/squashfs_creator_test.py'
+      - '.github/workflows/native-squashfs-creator.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-creator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libarchive-dev libssl-dev build-essential autoconf automake libtool pkg-config liblzo2-dev liblz4-dev liblzma-dev libzstd-dev zlib1g-dev squashfs-tools
+      - name: Compile the patched upstream creator
+        run: |
+          git clone --depth 1 --branch v1.3.2 https://github.com/AgentD/squashfs-tools-ng.git /tmp/sqfs
+          python3 native/cpp/scripts/squashfs_creator_patch.py /tmp/sqfs
+          cd /tmp/sqfs
+          autoreconf -fi
+          ./configure --prefix=/tmp/sqfs-install --with-lzo --with-zstd --with-xz --with-lz4 --with-gzip --without-selinux
+          make -j2
+          make install
+      - name: Build the actual SquashFS adapter and test application
+        run: |
+          cmake -S native/cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
+          mkdir -p build/native/tools
+          cp build/archivefs-read build/native/archivefs
+          cp /tmp/sqfs-install/bin/tar2sqfs build/native/tools/archivefs-tar2sqfs
+          gcc -std=c11 -D_GNU_SOURCE -O2 -shared -fPIC -I/tmp/sqfs-install/include native/cpp/squashfs_parallel.c \
+              -L/tmp/sqfs-install/lib -lsquashfs -llzo2 -o build/native/libwinsqfs-native.so
+      - name: Verify creation and data with independent real readers
+        env:
+          LD_LIBRARY_PATH: /tmp/sqfs-install/lib
+        run: python3 native/cpp/scripts/squashfs_creator_test.py build/native

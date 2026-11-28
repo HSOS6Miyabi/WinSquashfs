@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 """Validate actual native decoder binaries, rather than the test ABI mocks."""
-import io
 from pathlib import Path
 import random
 import struct
 import subprocess
 import sys
-import tarfile
 import tempfile
 
 root = Path(sys.argv[1]).resolve()
@@ -37,21 +35,21 @@ with tempfile.TemporaryDirectory(prefix="archivefs-native-readers-") as temp:
     source = work / "文件.bin"
     content = random.Random(2026).randbytes(1048576) + b"native\0reader"
     source.write_bytes(content)
-    stream = io.BytesIO()
-    with tarfile.open(fileobj=stream, mode="w", format=tarfile.PAX_FORMAT) as tar:
-        info = tarfile.TarInfo(source.name)
-        info.size = len(content)
-        tar.addfile(info, io.BytesIO(content))
     for format, suffix in (("SquashFS", "squashfs"), ("DwarFS", "dwarfs"), ("EROFS", "erofs")):
         image = work / ("native." + suffix)
-        if format == "SquashFS":
-            run(root / "tools/tar2sqfs.exe", "-c", "zstd", image, input=stream.getvalue())
-        else:
-            run(cli, "create", format, "4", image, source)
+        run(cli, "create", format, "4", image, source)
         assert run(cli, "info", image).decode("utf-8").startswith(format + " ")
         for offset, size in ((0, 1), (17, 4096), (65521, 100), (len(content) - 8, 32)):
             assert run(cli, "read", image, source.name, offset, size).decode().strip() == content[offset:offset + size].hex().upper()
         destination = work / suffix
         run(cli, "unpack", image, destination)
         assert (destination / source.name).read_bytes() == content
-        print(f"PASS {arch} {format}: native decoder, Unicode names and exact random reads")
+        print(f"PASS {arch} {format}: native decoder and creator, Unicode names and exact random reads")
+    for preset in range(1, 9):
+        image = work / f"中文镜像-{preset}.squashfs"
+        run(cli, "create", "SquashFS", str(preset), image, source)
+        assert run(cli, "read", image, source.name, 17, 4096).decode().strip() == content[17:4113].hex().upper()
+        if preset == 1:
+            flags = struct.unpack_from("<H", image.read_bytes(), 24)[0]
+            assert flags & 0x0003 == 0x0003, flags
+        print(f"PASS {arch} SquashFS preset {preset}")
