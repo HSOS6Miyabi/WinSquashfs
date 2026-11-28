@@ -122,7 +122,7 @@ jobs:
           $vcpkg=$env:VCPKG_INSTALLATION_ROOT
           if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
           $triplet="$arch-windows-static-md"
-          & "$vcpkg/vcpkg.exe" install 'libarchive[bzip2,crypto,lz4,lzma,zstd]' nlohmann-json --classic "--triplet=$triplet" "--x-install-root=$ports"
+          & "$vcpkg/vcpkg.exe" install 'libarchive[bzip2,crypto,lz4,lzma,zstd]' nlohmann-json --classic --recurse "--triplet=$triplet" "--x-install-root=$ports"
           if($LASTEXITCODE){exit $LASTEXITCODE}
           $env:PKG_CONFIG_PATH="$ports/$triplet/lib/pkgconfig"
           $env:PATH="$ports/$triplet/tools/pkgconf;$env:PATH"
