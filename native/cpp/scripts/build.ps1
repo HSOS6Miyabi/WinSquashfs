@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-param([ValidateSet('All','ConfigureDependencies','Dependencies','Application','Tests')][string]$Stage='All')
+param([ValidateSet('All','ConfigureDependencies','Dependencies','Application','CoreDistribution','Gui','Tests')][string]$Stage='All')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 Set-Location $root
@@ -41,6 +41,11 @@ if ($Stage -in @('All','ConfigureDependencies','Dependencies')) {
     }
     if ($Stage -in @('ConfigureDependencies','Dependencies')) { return }
 }
+if ($Stage -eq 'Gui') {
+    Invoke-Checked msbuild @('native/cpp/gui/WinArchiveFSPro.vcxproj','/restore','/m','/p:Configuration=Release','/p:Platform=x64',"/p:ArchiveFSCoreLib=$build/archivefs_core.lib","/p:OutDir=$dist/",'/p:WindowsAppSDKSelfContained=true')
+    if (!(Test-Path "$dist/WinArchiveFSPro.exe")) { throw 'Missing WinUI application' }
+    return
+}
 $env:PKG_CONFIG_PATH = "$ports/x64-windows-static-md/lib/pkgconfig"
 $env:PATH = "$ports/x64-windows-static-md/tools/pkgconf;$env:PATH"
 # The test build uses deterministic mock decoder libraries. The application
@@ -75,5 +80,6 @@ New-Item -ItemType Directory -Force "$dist/prerequisites" | Out-Null
 Copy-Item artifacts/winfsp.msi "$dist/prerequisites/WinFsp.msi" -Force
 $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
 Move-Item "$dist/winsqfs-shell.dll" "$dist/winsqfs-shell-$version.dll" -Force
+if ($Stage -eq 'CoreDistribution') { return }
 Invoke-Checked msbuild @('native/cpp/gui/WinArchiveFSPro.vcxproj','/restore','/m','/p:Configuration=Release','/p:Platform=x64',"/p:ArchiveFSCoreLib=$build/archivefs_core.lib","/p:OutDir=$dist/",'/p:WindowsAppSDKSelfContained=true')
 if (!(Test-Path "$dist/WinArchiveFSPro.exe")) { throw 'Missing WinUI application' }

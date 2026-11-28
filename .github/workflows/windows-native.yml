@@ -83,9 +83,13 @@ jobs:
           key: ${{ steps.dwarfs-cache.outputs.cache-primary-key }}
       - name: Build and test native applications
         shell: pwsh
-        run: ./native/cpp/scripts/build.ps1 -Stage Application
+        run: ./native/cpp/scripts/build.ps1 -Stage CoreDistribution
       - name: Test real archives and mounted filesystem
         run: python native/cpp/scripts/windows_integration.py artifacts/dist
+      - name: Compile and package WinUI
+        if: success() || failure()
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage Gui
       - name: WinUI interaction and localization tests
         shell: powershell
         run: |
@@ -186,6 +190,27 @@ jobs:
           msbuild native/cpp/gui/WinArchiveFSPro.vcxproj /restore /m /p:Configuration=Release /p:Platform=x64 "/p:ArchiveFSCoreLib=$core" "/p:OutDir=$out/" /p:WindowsAppSDKSelfContained=true
           if($LASTEXITCODE){exit $LASTEXITCODE}
 
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build libarchive-dev libssl-dev
+      - name: Configure sanitized core
+        run: >
+          cmake -S native/cpp -B build/sanitizers -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=clang++
+          "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer"
+          "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+          "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined"
+      - name: Build
+        run: cmake --build build/sanitizers --parallel 2
+      - name: Execute core and concurrent I/O tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build/sanitizers --output-on-failure --repeat until-fail:10
   installer-runtime:
     needs: windows
     runs-on: windows-2025
@@ -204,7 +229,7 @@ jobs:
         run: ./tests/runtime-install.ps1 -Scenario '${{ matrix.scenario }}' -Distribution output/dist -Setup output/WinArchiveFSPro-Setup-x64.exe
   release:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, windows-core, installer-runtime]
+    needs: [windows, windows-core, installer-runtime, linux-sanitizers]
     runs-on: ubuntu-latest
     permissions:
       contents: write

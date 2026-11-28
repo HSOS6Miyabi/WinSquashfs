@@ -9,7 +9,7 @@
     <RootNamespace>WinArchiveFSPro</RootNamespace><ProjectName>WinArchiveFSPro</ProjectName><TargetName>WinArchiveFSPro</TargetName>
     <DefaultLanguage>en-US</DefaultLanguage><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion><WindowsTargetPlatformMinVersion>10.0.17763.0</WindowsTargetPlatformMinVersion>
     <AppContainerApplication>false</AppContainerApplication><ApplicationType>Windows Store</ApplicationType><ApplicationTypeRevision>10.0</ApplicationTypeRevision><AppxPackage>false</AppxPackage><WindowsPackageType>None</WindowsPackageType>
-    <UseWinUI>true</UseWinUI><EnableMsixTooling>true</EnableMsixTooling><WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <RuntimeIdentifiers>win10-x64</RuntimeIdentifiers><UseWinUI>true</UseWinUI><EnableMsixTooling>true</EnableMsixTooling><WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <CppWinRTOptimized>true</CppWinRTOptimized><CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge><MinimalCoreWin>true</MinimalCoreWin>
     <RestoreProjectStyle>PackageReference</RestoreProjectStyle><NuGetTargetMoniker>native,Version=v0.0</NuGetTargetMoniker><NuGetTargetPlatformIdentifier>Windows</NuGetTargetPlatformIdentifier><NuGetTargetPlatformVersion>$(WindowsTargetPlatformVersion)</NuGetTargetPlatformVersion>
   </PropertyGroup>
