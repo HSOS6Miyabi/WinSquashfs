@@ -140,3 +140,5 @@ exercise(True, "auto", 2, 2)
 exercise(False, "auto", 0, 4)
 exercise(True, "writeback", 0, 4)
 print("PASS HTTP PATCH selected only for advertised capability; cache policy and whole-file fallback")
+if len(sys.argv)>2 and sys.argv[2]=="--winfsp":
+    exercise(True, "winfsp", 2, 2)
