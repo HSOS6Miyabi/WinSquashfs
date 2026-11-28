@@ -31,7 +31,7 @@ private:
     Microsoft::UI::Xaml::Controls::Button cancel_{nullptr},mount_button_{nullptr},
         close_button_{nullptr},up_button_{nullptr},verify_button_{nullptr},
         extract_selected_button_{nullptr},extract_all_button_{nullptr},
-        open_unc_button_{nullptr},copy_unc_button_{nullptr},mount_open_button_{nullptr},mount_eject_button_{nullptr};
+        open_unc_button_{nullptr},copy_unc_button_{nullptr},mount_open_button_{nullptr},mount_eject_button_{nullptr},search_button_{nullptr};
     Microsoft::UI::Xaml::Controls::ComboBox drive_choice_{nullptr};
     Microsoft::UI::Xaml::Controls::TextBlock image_summary_{nullptr},mount_empty_{nullptr};
     Microsoft::UI::Xaml::Controls::ListView entries_{nullptr},source_list_{nullptr},mount_list_{nullptr};
@@ -43,7 +43,8 @@ private:
     void navigate(int page);
     void browser();void creator();void mount_page();void unc_page();void about_page();
     void open_image(std::filesystem::path path,int mode=0);
-    void refresh_entries();fire_and_forget preview_selected();void extract(bool all);void mount_image();
+    void refresh_entries();
+    void search_subtree();fire_and_forget preview_selected();void extract(bool all);void mount_image();
     void mount_path(std::filesystem::path path,std::u16string drive);
     void refresh_drive_choices();
     void update_browser_buttons();

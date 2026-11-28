@@ -31,6 +31,12 @@ with tempfile.TemporaryDirectory(prefix='archivefs-cli-') as work:
         assert run('info', image).startswith(name + ' ')
         assert 'File\t8193\tdata.bin' in run('list', image)
         assert 'File\t20\tsmall.txt' in run('list', image, 'folder')
+        assert run('search', image, 'SMALL.TXT') == 'File\t20\t/folder/small.txt'
+        assert run('search', image, 'DATA', 'folder') == ''
+        assert run('search', image, 'data') == 'File\t8193\t/data.bin'
+        assert run('search', image, 'not-found') == ''
+        run('search', image, '', success=False)
+        run('search', image, 'txt', 'missing', success=False)
         assert '文件\t8193\tdata.bin' in run('--lang', 'zh-CN', 'list', image)
         assert run('read', image, 'data.bin', 1000, 97) == data[1000:1097].hex().upper()
         assert run('read', image, 'data.bin', 8190, 20) == data[8190:].hex().upper()

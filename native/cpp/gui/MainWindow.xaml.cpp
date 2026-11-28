@@ -107,7 +107,9 @@ void MainWindow::browser(){
     for(auto const& b:{extract_selected_button_,extract_all_button_,open_unc_button_,copy_unc_button_})actions.Children().Append(b);
     page_actions_.Children().Append(actions);
     address_=identify(box(tr(L"Archive path",L"存档内路径")),L"ArchivePath");address_.KeyDown([this](auto const&,Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const& e){if(e.Key()==Windows::System::VirtualKey::Enter&&archive_){try{auto node=archive_->find(u16(address_.Text()));if(!node||node->info.kind!=FileKind::directory)throw std::runtime_error("directory not found");directory_=node;refresh_entries();}catch(...){report(std::current_exception());}}});children.Append(address_);
-    filter_=identify(box(tr(L"Filter by name",L"按名称筛选")),L"FileFilter");filter_.TextChanged([this](auto const&,auto const&){if(!busy_)refresh_entries();});children.Append(filter_);
+    filter_=identify(box(tr(L"Filter by name",L"按名称筛选")),L"FileFilter");filter_.TextChanged([this](auto const&,auto const&){if(!busy_)refresh_entries();});
+    Grid search_row;search_row.ColumnSpacing(8);ColumnDefinition search_text;search_text.Width(GridLength{1,GridUnitType::Star});search_row.ColumnDefinitions().Append(search_text);ColumnDefinition search_action;search_action.Width(GridLength{1,GridUnitType::Auto});search_row.ColumnDefinitions().Append(search_action);
+    search_row.Children().Append(filter_);search_button_=button(tr(L"Search subfolders",L"搜索子目录"),[this]{search_subtree();},L"SearchSubtree");search_button_.VerticalAlignment(VerticalAlignment::Bottom);Grid::SetColumn(search_button_,1);search_row.Children().Append(search_button_);children.Append(search_row);
     Grid files;files.ColumnSpacing(12);
     ColumnDefinition list_column;list_column.Width(GridLength{3,GridUnitType::Star});files.ColumnDefinitions().Append(list_column);
     ColumnDefinition preview_column;preview_column.Width(GridLength{2,GridUnitType::Star});files.ColumnDefinitions().Append(preview_column);
@@ -120,12 +122,27 @@ void MainWindow::update_browser_buttons(){
     for(auto const& control:{mount_button_,close_button_,verify_button_,extract_all_button_,open_unc_button_,copy_unc_button_})
         if(control)control.IsEnabled(opened);
     if(up_button_)up_button_.IsEnabled(opened&&directory_&&!directory_->parent.expired());
+    if(search_button_)search_button_.IsEnabled(opened&&directory_&&filter_&&!filter_.Text().empty());
     if(extract_selected_button_){
         const auto index=entries_?entries_.SelectedIndex():-1;
         extract_selected_button_.IsEnabled(opened&&index>=0&&static_cast<std::size_t>(index)<visible_.size());
     }
 }
 void MainWindow::refresh_entries(){if(!entries_||page_!=0)return;++preview_revision_;preview_stop_.request_stop();entries_.Items().Clear();visible_.clear();if(preview_)preview_.Text(L"");update_browser_buttons();if(!archive_||!directory_){address_.Text(L"");image_summary_.Text(tr(L"Open a read-only filesystem image",L"打开只读文件系统镜像"));return;}try{auto info=archive_->info();image_summary_.Text(text(image_.u16string()+u" · "+to_utf16(format_name(info.format))+u" · "+to_utf16(std::to_string(info.image_size))+u" B"));std::u16string path;for(auto p=directory_;p&&p->parent.lock();p=p->parent.lock())path=u"\\"+p->windows_name+path;address_.Text(text(path.empty()?u"\\":path));auto filter=lower(std::wstring(filter_.Text()));for(auto& n:archive_->children(directory_)){auto name=text(display_name(n));if(!filter.empty()&&lower(std::wstring(name)).find(filter)==std::wstring::npos&&lower(std::wstring(text(n->windows_name))).find(filter)==std::wstring::npos)continue;visible_.push_back(n);auto suffix=n->info.kind==FileKind::directory?tr(L"  [Folder]",L"  [文件夹]"):text("  "+std::to_string(n->info.size)+" B");entries_.Items().Append(box_value(hstring(std::wstring(name)+std::wstring(suffix))));}}catch(...){report(std::current_exception());}}
+void MainWindow::search_subtree(){
+    if(!archive_||!directory_||filter_.Text().empty())return;
+    auto tree=archive_;auto directory=directory_;auto query=u16(filter_.Text());
+    run([this,tree,directory,query](std::stop_token token){
+        auto result=tree->search(directory,query,10000,token);
+        return [this,tree,result=std::move(result)]{
+            ++preview_revision_;preview_stop_.request_stop();entries_.Items().Clear();visible_.clear();preview_.Text(L"");
+            for(auto& node:result.nodes){visible_.push_back(node);auto name=text(tree->path_of(node));auto suffix=node->info.kind==FileKind::directory?tr(L"  [Folder]",L"  [文件夹]"):text("  "+std::to_string(node->info.size)+" B");entries_.Items().Append(box_value(hstring(std::wstring(name)+std::wstring(suffix))));}
+            update_browser_buttons();
+            auto count=text(std::to_string(result.nodes.size()));
+            status_.Text(hstring(std::wstring(count)+std::wstring(result.truncated?tr(L"+ results; refine the search",L" 个以上结果，请缩小搜索范围"):tr(L" results",L" 个搜索结果")))));
+        };
+    },tr(L"Searching subfolders",L"正在搜索子目录"));
+}
 fire_and_forget MainWindow::preview_selected(){
     auto lifetime=get_strong();preview_stop_.request_stop();preview_stop_=std::stop_source();auto token=preview_stop_.get_token();auto revision=++preview_revision_;auto i=entries_.SelectedIndex();if(!preview_)co_return;if(!archive_||i<0||static_cast<size_t>(i)>=visible_.size()){preview_.Text(L"");co_return;}auto node=visible_[i];auto tree=archive_;auto heading=display_name(node)+to_utf16("\n"+std::to_string(node->info.size)+" B\n");preview_.Text(text(heading));if(node->info.kind!=FileKind::regular)co_return;
     apartment_context ui;std::u16string value;std::exception_ptr error;co_await resume_background();try{std::vector<std::byte> bytes(static_cast<size_t>(std::min<uint64_t>(node->info.size,4096)));auto n=tree->read(node,0,bytes,token);std::string content;if(n)content.assign(reinterpret_cast<const char*>(bytes.data()),n);try{if(content.find('\0')!=std::string::npos)throw std::runtime_error("binary");value=to_utf16(content);}catch(...){std::ostringstream out;out<<std::hex<<std::setfill('0');for(size_t k=0;k<n;++k){out<<std::setw(2)<<std::to_integer<unsigned>(bytes[k])<<((k%16==15)?'\n':' ');}value=to_utf16(out.str());}}catch(...){error=std::current_exception();}try{co_await ui;}catch(...){co_return;}if(closing_||page_!=0||revision!=preview_revision_||token.stop_requested())co_return;if(error){report(error);co_return;}preview_.Text(text(heading+u"\n"+value));

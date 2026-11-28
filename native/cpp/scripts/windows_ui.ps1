@@ -65,6 +65,11 @@ try{
   $p=Start-Process $gui -ArgumentList @('--open',('"'+$image+'"')) -PassThru
   $w=Window $p 'FileList'
   $null=Control $w 'MountImage'
+  Set-Value $w 'FileFilter' 'hello.txt'
+  Invoke-Control $w 'SearchSubtree'
+  $null=Wait-Until {foreach($item in (Items $w 'FileList')){if($item.Current.Name -like '*hello.txt*'){return $item}}} 'recursive file search'
+  Save-WindowScreenshot $p 'search-subfolders'
+  Set-Value $w 'FileFilter' ''
   foreach($id in @('CloseImage','VerifyImage','ExtractAll','OpenUnc','CopyUnc')) {
     if(!(Control $w $id $false).Current.IsEnabled){throw "Open image action disabled: $id"}
   }

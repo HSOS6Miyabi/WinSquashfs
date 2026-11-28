@@ -113,8 +113,8 @@ int cli(std::vector<std::u16string> args) {
         } else break;
     }
     if(args.size()==1&&(args[0]==u"--help"||args[0]==u"help")) {
-        std::cout<<language.tr("Usage: archivefs [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n",
-            "用法：archivefs [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n");return 0;
+        std::cout<<language.tr("Usage: archivefs [--lang en-US|zh-CN|system] info|list|search|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n",
+            "用法：archivefs [--lang en-US|zh-CN|system] info|list|search|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n");return 0;
     }
     if(args.size()==1&&(args[0]==u"--version"||args[0]==u"version")) {std::cout<<ARCHIVEFS_VERSION<<'\n';return 0;}
     if(args.empty()) throw UsageError("invalid command arguments");
@@ -154,6 +154,7 @@ int cli(std::vector<std::u16string> args) {
     }
     if(!((command==u"info"||command==u"verify")&&args.size()==2) &&
        !(command==u"list"&&(args.size()==2||args.size()==3)) &&
+       !(command==u"search"&&(args.size()==3||args.size()==4)) &&
        !(command==u"read"&&args.size()==5) && !(command==u"unpack"&&args.size()==3))
         throw UsageError("invalid command arguments");
     ArchiveTree tree(open_archive(std::filesystem::path(args[1]),modules));
@@ -164,6 +165,13 @@ int cli(std::vector<std::u16string> args) {
         if(!directory||directory->info.kind!=FileKind::directory) throw std::runtime_error("directory not found");
         for(const auto& node:tree.children(directory))
             std::cout<<language.kind(node->info.kind)<<'\t'<<node->info.size<<'\t'<<node->name<<'\n';
+    } else if(command==u"search") {
+        auto directory=args.size()==4?tree.find(args[3]):tree.root();
+        if(!directory||directory->info.kind!=FileKind::directory)throw std::runtime_error("directory not found");
+        auto result=tree.search(directory,args[2]);
+        for(auto& node:result.nodes)
+            std::cout<<language.kind(node->info.kind)<<'\t'<<node->info.size<<'\t'<<to_utf8(tree.path_of(node))<<'\n';
+        if(result.truncated)std::cerr<<language.tr("Search limited to 10000 results; refine the query.\n","仅显示前 10000 个搜索结果，请缩小搜索范围。\n");
     } else if(command==u"read") {
         auto node=tree.find(args[2]);
         if(!node) throw std::runtime_error("entry not found");
