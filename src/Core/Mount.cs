@@ -44,7 +44,7 @@ internal sealed class ReadOnlyFileSystem : FileSystemBase
         h.FileInfoTimeout = 1000; h.CaseSensitiveSearch = false; h.CasePreservedNames = true;
         h.UnicodeOnDisk = true; h.PersistentAcls = true; h.FileSystemName = "SquashFS"; h.ReadOnlyVolume = true;
         h.VolumeCreationTime = (ulong)archive.Root.Modified.UtcDateTime.ToFileTimeUtc();
-        h.VolumeSerialNumber = unchecked((uint)archive.ImageSize ^ archive.Root.Inode);
+        h.VolumeSerialNumber = unchecked((uint)archive.ImageSize ^ (uint)archive.Root.Inode);
         return STATUS_SUCCESS;
     }
     public override int GetVolumeInfo(out VolumeInfo v)

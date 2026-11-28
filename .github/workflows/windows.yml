@@ -7,7 +7,20 @@ on:
 permissions:
   contents: read
 jobs:
+  erofs-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cross-compile upstream EROFS tools and native reader
+        run: bash scripts/build-erofs.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinSquashfs-erofs-native
+          path: artifacts/erofs/
+          if-no-files-found: error
   build:
+    needs: erofs-native
     runs-on: windows-2025
     timeout-minutes: 45
     steps:
@@ -36,6 +49,13 @@ jobs:
       - name: Build native reader and collect Linux tool ports
         shell: msys2 {0}
         run: bash scripts/build-native.sh
+      - name: Build DwarFS reader and collect creator
+        shell: pwsh
+        run: ./scripts/build-dwarfs.ps1
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinSquashfs-erofs-native
+          path: artifacts/native
       - name: Install WinFsp SDK and driver
         shell: pwsh
         run: ./scripts/install-winfsp.ps1

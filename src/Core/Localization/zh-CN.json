@@ -229,5 +229,10 @@
   "Choose an absolute source directory.": "请选择源目录的绝对路径。",
   "The source cannot be another WinSquashfs volume.": "源路径不能指向其他 WinSquashfs 挂载卷。",
   "Include local and mapped network drives": "包含本地磁盘及映射的网络驱动器",
-  "Image is outside the configured UNC shares. Configure a source directory or enable drive mappings.": "镜像不在已配置的 UNC 共享目录中。请配置源目录或启用驱动器映射。"
+  "Image is outside the configured UNC shares. Configure a source directory or enable drive mappings.": "镜像不在已配置的 UNC 共享目录中。请配置源目录或启用驱动器映射。",
+  "Cannot open {0} image (error {1}).": "无法打开 {0} 镜像（错误代码：{1}）。",
+  "Cannot read {0} directory (error {1}).": "无法读取 {0} 目录（错误代码：{1}）。",
+  "Unsupported or invalid read-only image.": "不支持此只读镜像格式，或镜像已损坏。",
+  "Image-defined compression": "镜像内定义的压缩算法",
+  "Invalid directory hierarchy.": "目录层级无效。"
 }

@@ -132,7 +132,7 @@ internal sealed class UncFileSystem : FileSystemBase
         sd.GetBinaryForm(security, 0);
     }
 
-    internal static bool IsImageName(string name) => Path.GetExtension(name).ToLowerInvariant() is ".squashfs" or ".sqfs" or ".sfs";
+    internal static bool IsImageName(string name) => Path.GetExtension(name).ToLowerInvariant() is ".squashfs" or ".sqfs" or ".sfs" or ".dwarfs" or ".erofs";
     internal static bool SafeComponent(string part) =>
         part.Length is > 0 and <= 255 && part != "." && part != ".." &&
         !part.EndsWith('.') && !part.EndsWith(' ') && part.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 &&
@@ -237,7 +237,7 @@ internal sealed class UncFileSystem : FileSystemBase
         return new Node(normalized.Length == 0 ? "\\" : normalized, path);
     }
 
-    private static ulong Index(string path, uint inode = 0)
+    private static ulong Index(string path, ulong inode = 0)
     {
         byte[] hash = SHA256.HashData(Encoding.Unicode.GetBytes(path.ToUpperInvariant() + "\0" + inode));
         return BitConverter.ToUInt64(hash) | 1UL;

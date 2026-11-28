@@ -40,7 +40,7 @@ public sealed class Entry
     public string WindowsName { get; internal set; }
     public Entry? Parent { get; }
     public uint Type { get; }
-    public uint Inode { get; }
+    public ulong Inode { get; }
     public ulong Size { get; }
     public DateTimeOffset Modified { get; }
     public bool IsDirectory => Type is 1 or 8;
@@ -58,6 +58,13 @@ public sealed class Entry
     internal Dictionary<string, Entry> ChildMap { get; } = new(StringComparer.OrdinalIgnoreCase);
     internal List<Entry> ChildList { get; } = new();
     public IReadOnlyList<Entry> Children { get; }
+    internal Entry(ulong inode, string name, uint mode, ulong size, ulong mtime, Entry? parent)
+    {
+        Inode = inode; Parent = parent; Name = name; WindowsName = name; Size = size;
+        Type = (mode & 0xF000u) switch { 0x4000 => 1u, 0x8000 => 2u, 0xA000 => 3u, _ => 4u };
+        Modified = DateTimeOffset.FromUnixTimeSeconds((long)Math.Min(mtime,253402300799UL));
+        Children = ChildList.AsReadOnly();
+    }
     internal Entry(IntPtr p, Entry? parent)
     {
         Pointer = p; Parent = parent;
@@ -103,7 +110,8 @@ public sealed record ArchiveVerification(long Files, ulong Bytes);
 
 public sealed class Archive : IDisposable
 {
-    private readonly ImageHandle handle;
+    private readonly ImageHandle? handle;
+    private readonly ExtraArchive? extra;
     private readonly VolatileImageSource? source;
     private readonly LocalReadIdentity? ownedIdentity;
     private readonly object gate = new();
@@ -113,7 +121,8 @@ public sealed class Archive : IDisposable
     public ulong ImageSize { get; }
     public uint BlockSize { get; }
     public uint Compression { get; }
-    public string Codec => Compression switch { 1 => "gzip", 2 => "lzma", 3 => "lzo", 4 => "xz", 5 => "lz4", 6 => "zstd", _ => "Unknown" };
+    public ImageFormat Format { get; }
+    public string Codec => Format != ImageFormat.SquashFS ? Localization.T("Image-defined compression") : Compression switch { 1 => "gzip", 2 => "lzma", 3 => "lzo", 4 => "xz", 5 => "lz4", 6 => "zstd", _ => "Unknown" };
 
     public bool SourceValid => source?.Valid != false;
     internal bool UsesOplock => source?.UsesOplock == true;
@@ -142,6 +151,44 @@ public sealed class Archive : IDisposable
                 source = new VolatileImageSource(Path, readIdentity);
                 source.BeginRead();
             }
+            Format = ExtraArchive.Detect(Path, source);
+            if (Format != ImageFormat.SquashFS)
+            {
+                extra = new ExtraArchive(Path, Format, source);
+                ImageSize = extra.Size;
+                BlockSize = extra.BlockSize;
+                Root = new Entry(extra.Root,"",0x4000,0,extra.Modified,null);
+                var directories = new HashSet<ulong> { Root.Inode };
+                var queue = new Stack<Entry>();
+                queue.Push(Root);
+                while(queue.TryPop(out var parent))
+                {
+                    Exception? error = null;
+                    ExtraArchive.Visit visit = (inode,name,length,mode,size,time) =>
+                    {
+                        try
+                        {
+                            string filename = Marshal.PtrToStringUTF8(name,checked((int)length)) ?? throw new IOException();
+                            if(filename.Length == 0 || filename is "." or ".." || filename.Contains('/') || filename.Contains('\0'))
+                                throw new IOException(Localization.T("Invalid file name."));
+                            var child = new Entry(inode,filename,mode,size,time,parent);
+                            AddChild(parent,child);
+                            if(child.IsDirectory)
+                            {
+                                if(!directories.Add(inode)) throw new IOException(Localization.T("Invalid directory hierarchy."));
+                                queue.Push(child);
+                            }
+                            return 0;
+                        }
+                        catch(Exception ex) { error=ex; return -1; }
+                    };
+                    try { extra.List(parent.Inode,visit); }
+                    catch when(error != null) { throw error; }
+                    parent.ChildList.Sort((a,b) => StringComparer.OrdinalIgnoreCase.Compare(a.WindowsName,b.WindowsName));
+                }
+                source?.CheckRead();
+                return;
+            }
             int status = source == null ? Native.ws_open(Path, out handle) :
                 Native.ws_open_source(source.Size, source.Reader, out handle);
             source?.EnsureValid();
@@ -155,19 +202,25 @@ public sealed class Archive : IDisposable
                 for (IntPtr p = Native.ws_child(parent.Pointer); p != IntPtr.Zero; p = Native.ws_next(p))
                 {
                     var child = new Entry(p, parent);
-                    string name = WindowsNames.Encode(child.Name);
-                    string unique = name;
-                    for (int suffix = 2; parent.ChildMap.ContainsKey(unique); suffix++) unique = name + "~" + suffix;
-                    child.WindowsName = unique;
-                    parent.ChildMap.Add(unique, child); parent.ChildList.Add(child);
+                    AddChild(parent, child);
                     if (child.IsDirectory) pending.Push(child);
                 }
                 parent.ChildList.Sort((a,b) => StringComparer.OrdinalIgnoreCase.Compare(a.WindowsName,b.WindowsName));
             }
             source?.CheckRead();
         }
-        catch { handle?.Dispose(); source?.Dispose(); ownedIdentity?.Dispose(); throw; }
+        catch { handle?.Dispose(); extra?.Dispose(); source?.Dispose(); ownedIdentity?.Dispose(); throw; }
         finally { source?.EndRead(); }
+    }
+
+    private static void AddChild(Entry parent, Entry child)
+    {
+        string name = WindowsNames.Encode(child.Name);
+        string unique = name;
+        for(int suffix=2;parent.ChildMap.ContainsKey(unique);suffix++) unique=name+"~"+suffix;
+        child.WindowsName=unique;
+        parent.ChildMap.Add(unique,child);
+        parent.ChildList.Add(child);
     }
 
     public Entry? Find(string path)
@@ -196,7 +249,7 @@ public sealed class Archive : IDisposable
             source?.BeginRead();
             try
             {
-                int result = Native.ws_read(handle, entry.Pointer, offset, buffer, length);
+                int result = extra != null ? extra.Read(entry.Inode,offset,buffer,length) : Native.ws_read(handle!, entry.Pointer, offset, buffer, length);
                 source?.EnsureValid();
                 if (result < 0) throw new IOException(Localization.T("SquashFS read failed (error {0}).", result));
                 source?.CheckRead();
@@ -253,7 +306,7 @@ public sealed class Archive : IDisposable
         pending.Push(Root);
         var buffer = new byte[1024 * 1024];
         long files = 0; ulong bytes = 0;
-        var inodes = new HashSet<uint>();
+        var inodes = new HashSet<ulong>();
         while (pending.TryPop(out var item))
         {
             token.ThrowIfCancellationRequested();
@@ -325,6 +378,6 @@ public sealed class Archive : IDisposable
 
     public void Dispose()
     {
-        lock (gate) { if (!disposed) { disposed = true; try { handle.Dispose(); } finally { try { source?.Dispose(); } finally { ownedIdentity?.Dispose(); } } } }
+        lock (gate) { if (!disposed) { disposed = true; try { handle?.Dispose(); extra?.Dispose(); } finally { try { source?.Dispose(); } finally { ownedIdentity?.Dispose(); } } } }
     }
 }
