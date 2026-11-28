@@ -7,7 +7,7 @@ $ErrorActionPreference='Stop'
 $AppDirectory=(Resolve-Path $AppDirectory).Path
 . (Join-Path $PSScriptRoot 'icons.ps1')
 Assert-IconAssets -AppDirectory $AppDirectory
-$cli=Join-Path $AppDirectory 'winsqfs.exe'
+$cli=Join-Path $AppDirectory 'archivefs.exe'
 [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false)
 function Invoke-CliExpect {
     $expected=[int]$args[0]
@@ -36,7 +36,7 @@ function Invoke-CliExpect {
     finally {$p.Dispose()}
 }
 function Invoke-Cli { Invoke-CliExpect 0 @args }
-foreach($exe in @('WinSquashfs.exe','winsqfs.exe','WinSquashfs.Unc.exe')){
+foreach($exe in @('WinArchiveFSPro.exe','archivefs.exe','WinArchiveFSPro.Unc.exe')){
     $file=Join-Path $AppDirectory $exe
     if(!(Test-Path $file)){throw "Missing $file"}
     $actual=[Diagnostics.FileVersionInfo]::GetVersionInfo($file).FileVersion
@@ -45,8 +45,8 @@ foreach($exe in @('WinSquashfs.exe','winsqfs.exe','WinSquashfs.Unc.exe')){
 if((Invoke-Cli --version) -ne $Version){throw 'CLI version mismatch'}
 $doctor=Invoke-Cli doctor
 if(($doctor -join "`n") -notmatch 'WinFsp runtime 2\.'){throw "WinFsp diagnostic failed: $doctor"}
-$root=Join-Path $env:TEMP ('WinSquashfsDist-'+[guid]::NewGuid().ToString('N'))
-$settingsDirectory=Join-Path $env:LOCALAPPDATA 'WinSquashfs'
+$root=Join-Path $env:TEMP ('WinArchiveFSProDist-'+[guid]::NewGuid().ToString('N'))
+$settingsDirectory=Join-Path $env:LOCALAPPDATA 'WinArchiveFSPro'
 $settingsFile=Join-Path $settingsDirectory 'unc.json'
 $languageFile=Join-Path $settingsDirectory 'language.txt'
 $backup=@{}
@@ -88,10 +88,10 @@ try {
         }
         $drive=$drive.TrimEnd('\')
         $driveRoot=$drive+'\'
-        if([IO.DriveInfo]::new($driveRoot).DriveFormat -ne 'SquashFS'){throw 'Unexpected filesystem name'}
+        if([IO.DriveInfo]::new($driveRoot).DriveFormat -ne 'ArchiveFS'){throw 'Unexpected filesystem name'}
         if([Convert]::ToHexString([IO.File]::ReadAllBytes($driveRoot+'测试.txt')) -ne '0001027FFF'){throw 'Packaged mount read mismatch'}
         if($ShellEject) {
-            $handler=Get-Item 'HKLM:\Software\Classes\Drive\shellex\ContextMenuHandlers\WinSquashfs.Eject'
+            $handler=Get-Item 'HKLM:\Software\Classes\Drive\shellex\ContextMenuHandlers\WinArchiveFSPro.Eject'
             $clsid=$handler.GetValue('')
             if($clsid -ne '{9B20352F-1BC4-48E6-AE3B-146F32657DA9}'){throw 'Eject handler registration missing'}
             $server=(Get-Item "HKLM:\Software\Classes\CLSID\$clsid\InprocServer32").GetValue('')
@@ -111,13 +111,13 @@ try {
             foreach($candidate in $item.Verbs()){
                 $name=$candidate.Name.Replace('&','').Trim()
                 $names+=$name
-                if($name -in @('Eject (WinSquashfs)','弹出（WinSquashfs）')){$verb=$candidate}
+                if($name -in @('Eject (WinArchiveFSPro)','弹出（WinArchiveFSPro）')){$verb=$candidate}
             }
             if(!$verb){throw "Eject menu missing on $drive; shell filesystem: $($item.ExtendedProperty('System.Volume.FileSystem')); verbs: $($names -join '; ')"}
             foreach($candidate in $computer.Items()){
                 if($candidate.Path.TrimEnd('\') -eq $env:SystemDrive){
                     foreach($v in $candidate.Verbs()){
-                        if($v.Name -match 'WinSquashfs'){throw 'SquashFS eject menu appears on the system drive'}
+                        if($v.Name -match 'WinArchiveFSPro'){throw 'ArchiveFS eject menu appears on the system drive'}
                     }
                 }
             }

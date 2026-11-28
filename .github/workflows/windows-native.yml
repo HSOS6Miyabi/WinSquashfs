@@ -111,6 +111,7 @@ jobs:
           if (!(Test-Path "$app/WinArchiveFSPro.exe")) { throw 'Missing GUI' }
           if (!(Test-Path "$app/WinArchiveFSPro.Unc.exe")) { throw 'Missing UNC agent' }
           if (!(Test-Path "$app/archivefs.exe")) { throw 'Missing native CLI' }
+          & ./tests/distribution.ps1 -AppDirectory $app -Version ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version -ShellEject
           python native/cpp/scripts/windows_integration.py $app
           if($LASTEXITCODE) { exit $LASTEXITCODE }
           & ./tests/association.ps1 -AppDirectory $app
@@ -181,3 +182,36 @@ jobs:
           $out=Join-Path $PWD 'artifacts/core-ui'
           msbuild native/cpp/gui/WinArchiveFSPro.vcxproj /restore /m /p:Configuration=Release /p:Platform=x64 "/p:ArchiveFSCoreLib=$core" "/p:OutDir=$out/" /p:WindowsAppSDKSelfContained=true
           if($LASTEXITCODE){exit $LASTEXITCODE}
+
+  installer-runtime:
+    needs: windows
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [clean, upgrade]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: output
+      - name: Validate driver installation and Explorer integration
+        shell: pwsh
+        run: ./tests/runtime-install.ps1 -Scenario '${{ matrix.scenario }}' -Distribution output/dist -Setup output/WinArchiveFSPro-Setup-x64.exe
+  release:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, windows-core, installer-runtime]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: output
+      - name: Package and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release.sh

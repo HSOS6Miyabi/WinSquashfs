@@ -32,26 +32,26 @@ if [[ -n "$tag_refs" ]]; then
   [[ "$tag_commit" == "$commit" ]] || { echo "Existing tag targets a different commit"; exit 1; }
 fi
 
-test -f output/WinSquashfs-Setup-x64.exe
-for name in WinSquashfs.exe winsqfs.exe WinSquashfs.Unc.exe winsqfs-native.dll winsqfs-dwarfs.dll winsqfs-erofs.dll tools/mkfs.erofs.exe tools/fsck.erofs.exe README.md README.zh-CN.md LICENSE THIRD-PARTY.md tools/mksquashfs.exe tools/unsquashfs.exe prerequisites/WinFsp.msi "winsqfs-shell-$version.dll"; do
+test -f output/WinArchiveFSPro-Setup-x64.exe
+for name in WinArchiveFSPro.exe archivefs.exe WinArchiveFSPro.Unc.exe winsqfs-native.dll archivefs_core.dll winsqfs-erofs.dll tools/mkfs.erofs.exe tools/fsck.erofs.exe README.md README.zh-CN.md LICENSE THIRD-PARTY.md tools/mksquashfs.exe tools/unsquashfs.exe prerequisites/WinFsp.msi "winsqfs-shell-$version.dll"; do
   test -f "output/dist/$name"
 done
-test -f output/dist/tools/dwarfs-universal.exe || test -f output/dist/tools/mkdwarfs.exe
+test -f output/dist/tools/mkdwarfs.exe
 mkdir -p release
-cp output/WinSquashfs-Setup-x64.exe release/WinSquashfs-Setup-x64.exe
-(cd output/dist && zip -qr ../../release/WinSquashfs-portable-x64.zip .)
-unzip -tq release/WinSquashfs-portable-x64.zip
-(cd release && sha256sum WinSquashfs-Setup-x64.exe WinSquashfs-portable-x64.zip > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+cp output/WinArchiveFSPro-Setup-x64.exe release/WinArchiveFSPro-Setup-x64.exe
+(cd output/dist && zip -qr ../../release/WinArchiveFSPro-portable-x64.zip .)
+unzip -tq release/WinArchiveFSPro-portable-x64.zip
+(cd release && sha256sum WinArchiveFSPro-Setup-x64.exe WinArchiveFSPro-portable-x64.zip > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
 
 if [[ -z "$release_info" ]]; then
   gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$commit" --draft \
-    --title "WinSquashfs $tag" --notes-file RELEASE_NOTES.md
+    --title "WinArchiveFSPro $tag" --notes-file RELEASE_NOTES.md
 fi
 gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber \
-  release/WinSquashfs-Setup-x64.exe release/WinSquashfs-portable-x64.zip release/SHA256SUMS.txt
+  release/WinArchiveFSPro-Setup-x64.exe release/WinArchiveFSPro-portable-x64.zip release/SHA256SUMS.txt
 release_id="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId)"
 assets="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets")"
-for name in WinSquashfs-Setup-x64.exe WinSquashfs-portable-x64.zip SHA256SUMS.txt; do
+for name in WinArchiveFSPro-Setup-x64.exe WinArchiveFSPro-portable-x64.zip SHA256SUMS.txt; do
   size="$(stat -c %s "release/$name")"
   digest="sha256:$(sha256sum "release/$name" | cut -d' ' -f1)"
   jq -e --arg name "$name" --arg digest "$digest" --argjson size "$size" \

@@ -52,7 +52,7 @@ endif()
 
 if(WIN32)
   target_compile_definitions(archivefs_core PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN PRIVATE _WIN32_WINNT=0x0A00)
-  target_link_libraries(archivefs_core PRIVATE bcrypt)
+  target_link_libraries(archivefs_core PUBLIC bcrypt)
 else()
   find_package(OpenSSL REQUIRED)
   target_link_libraries(archivefs_core PRIVATE OpenSSL::Crypto)

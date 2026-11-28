@@ -8,7 +8,7 @@ $versions=([xml](Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) 'Dire
 $required=[version]($versions.WinFspRuntimeVersion+'.0')
 $Distribution=(Resolve-Path $Distribution).Path
 $Setup=(Resolve-Path $Setup).Path
-$cli=Join-Path $Distribution 'winsqfs.exe'
+$cli=Join-Path $Distribution 'archivefs.exe'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 function Get-Runtime {
     $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,[Microsoft.Win32.RegistryView]::Registry32)
@@ -42,7 +42,7 @@ function Invoke-ExpectedFailure([string[]]$Arguments) {
         if(!$p.WaitForExit(30000)){$p.Kill($true);throw "Dependency check timed out: $Arguments"}
         $message=$stderr.GetAwaiter().GetResult()
         $null=$stdout.GetAwaiter().GetResult()
-        if($p.ExitCode -ne 1 -or $message -notmatch 'WinFsp could not initialize' -or $message -match "The type initializer for 'Fsp.Interop.Api'"){
+        if($p.ExitCode -ne 1 -or $message -notmatch 'WinFsp could not initialize'){
             throw "Wrong dependency error ($($p.ExitCode)): $message"
         }
         Write-Host $message
@@ -79,7 +79,7 @@ if($Scenario -eq 'upgrade'){
     Write-Host "Verified existing incompatible WinFsp $($prior.Version)"
 }
 
-$testRoot=Join-Path $env:TEMP ('WinSquashfsDependency-'+[guid]::NewGuid().ToString('N'))
+$testRoot=Join-Path $env:TEMP ('WinArchiveFSProDependency-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force "$testRoot\source"|Out-Null
 Set-Content "$testRoot\source\hello.txt" 'Dependency check' -NoNewline
 $image="$testRoot\test.squashfs"
@@ -94,15 +94,15 @@ try {
 
     $lang=if($Scenario -eq 'upgrade'){'2052'}else{'1033'}
     $p=Start-Process $Setup -ArgumentList @('/S',"/LANG=$lang") -Wait -PassThru
-    if($p.ExitCode -ne 0){throw "WinSquashfs setup returned $($p.ExitCode). Log: $env:TEMP\WinSquashfs-WinFsp-install.log"}
+    if($p.ExitCode -ne 0){throw "WinArchiveFSPro setup returned $($p.ExitCode). Log: $env:TEMP\WinArchiveFSPro-WinFsp-install.log"}
     $installed=Get-Runtime
     if(!$installed -or $installed.Version.Major -ne $required.Major -or $installed.Version -lt $required){throw "Setup did not install the required WinFsp runtime: $installed"}
     Write-Host "PASS $Scenario installed WinFsp $($installed.Version) from the product installer"
-    $app=Join-Path $env:ProgramFiles 'WinSquashfs\app'
+    $app=Join-Path $env:ProgramFiles 'WinArchiveFSPro\app'
     . (Join-Path $PSScriptRoot 'icons.ps1')
     Assert-InstalledIcons -AppDirectory $app -Setup $Setup
     & (Join-Path $PSScriptRoot 'installer-appearance.ps1') -Setup $Setup -Uninstaller (Join-Path (Split-Path -Parent $app) 'Uninstall.exe')
-    $installedCli=Join-Path $app 'winsqfs.exe'
+    $installedCli=Join-Path $app 'archivefs.exe'
     & $installedCli doctor
     if($LASTEXITCODE){throw 'Installed native library cannot initialize'}
     & (Join-Path $PSScriptRoot 'distribution.ps1') -AppDirectory $app -Version $versions.Version -ShellEject

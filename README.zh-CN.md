@@ -1,90 +1,44 @@
-# WinSquashfs
+# WinArchiveFSPro
 
 简体中文 | [English](README.md)
 
-WinSquashfs 是适用于 Windows x64 的 SquashFS、DwarFS 和 EROFS 镜像管理器，采用 WinUI 3 和 WinFsp，可直接浏览镜像、预览文件、提取内容、创建镜像及挂载只读卷。
+适用于 Windows 的原生只读存档文件系统管理器，支持浏览、创建、校验、提取和挂载 SquashFS、DwarFS、EROFS 镜像。
 
 ## 主要功能
 
-- 无需挂载即可浏览镜像中的文件和目录，筛选文件，查看属性、文本及十六进制预览。
-- 通过 WinFsp 挂载只读卷，支持自动选择盘符或指定盘符。
-- 通过 UNC 路径直接访问镜像，按需在内存中解压数据块，不占用盘符。
-- 支持 GZIP、XZ、LZO、LZ4 和 Zstandard 压缩算法，可设置数据块大小、压缩级别、处理器数量、内存上限及各类高级参数。
-- 集成 mksquashfs、unsquashfs、sqfscat 和 sqfstar 的 Windows 移植版本。
-- 支持镜像校验、最近打开记录、拖放打开、文件和目录提取。
-- 安装程序注册文件关联及资源管理器右键菜单。
+- WinUI 3 中英文界面，支持文件预览、筛选、最近打开记录、拖放及多文件选择。
+- 八档压缩预设及各格式的高级压缩选项。
+- 通过 WinFsp 原生接口挂载只读盘符或直接访问 UNC 路径，无需将镜像内容提取到磁盘。
+- 并发随机读取、共享镜像缓存及可配置的单镜像缓存容量。
+- 资源管理器打开、编辑、弹出及多选创建存档命令。
 
-## 存档格式及创建
-
-| 格式 | 创建工具 | 读取模块 |
+| 格式 | 读取模块 | 创建工具 |
 | --- | --- | --- |
-| SquashFS 4.0 | mksquashfs | libsquashfs |
-| DwarFS | mkdwarfs 0.12.4 | Rust 原生读取模块，支持文件系统版本 2.3～2.5 及不压缩、Zstandard、LZ4、LZMA |
-| EROFS | mkfs.erofs | liberofs，支持单设备原始文件系统镜像 |
+| SquashFS | libsquashfs，并行读取上下文 | mksquashfs |
+| DwarFS | 官方 C++ DwarFS 0.15.10 | mkdwarfs |
+| EROFS | liberofs，单设备原始镜像 | mkfs.erofs |
 
-三种格式共用镜像浏览、预览、校验、提取、盘符挂载和 UNC 访问功能，浏览及挂载时直接随机读取镜像数据，无需提取到磁盘。
+挂载卷映射普通文件及目录，符号链接和特殊文件在浏览器中显示其类型。对 Windows 不支持的名称生成兼容名称。极限压缩采用各格式的高压缩率设置。
 
-创建面板支持添加多个文件、文件夹及拖放操作。单独选择一个目录时，镜像根目录包含该目录的内容；选择多个源文件或目录时，保留各项名称。可在资源管理器中选中多个项目，右键选择“使用 WinSquashfs 创建存档”。
+## 安装
 
-八个压缩预设依次为不压缩、最快、快速、均衡、高压缩、超高压缩、最大压缩和极限压缩。极限压缩使用格式支持的高压缩率算法及参数，不额外限制内存预算。SquashFS 会分别采用 XZ（含及不含 BCJ）、Zstandard 22 级和 GZIP 9 级创建镜像，保留体积最小的结果。DwarFS 使用 LZMA 9 级极限模式，数据块及字典最大为 1 GiB；EROFS 使用 LZMA 极限模式、最大物理簇及压缩区段去重。最终压缩率随数据内容变化。DwarFS 多源创建优先使用硬链接构造临时源目录，跨文件系统时复制源文件；EROFS 通过标准输入传输 TAR 数据流。
+支持 Windows x64，Windows 10 1809 及更新版本。挂载及 UNC 访问需要 WinFsp 2.2.26323 或兼容的更新 2.x 版本。安装程序可安装或升级 WinFsp，便携版的 prerequisites 目录包含驱动安装包。无需安装 .NET。
 
-命令行示例：`winsqfs create DwarFS 8 output.dwarfs file1.txt file2.txt folder`。
-
-## 安装及语言设置
-
-从 [Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) 或 [Actions](https://github.com/HSOS6Miyabi/WinSquashfs/actions) 下载 Windows x64 安装程序或便携版。挂载与 UNC 访问需要 WinFsp 2.2.26323（WinFsp 2026）或兼容的更新 2.x 版本。安装程序会在需要时安装或升级 WinFsp。便携版包含 prerequisites\WinFsp.msi，可离线安装驱动程序。可运行 `winsqfs doctor` 或在“工具与关于”中点击“检查 WinFsp 运行时”查看当前安装情况。
-
-界面默认跟随 Windows 显示语言，可在“工具与关于 → 界面语言”选择简体中文或英文，保存后重新启动程序。安装程序支持简体中文和英文，右键菜单使用安装时选择的语言。
-
-## 弹出挂载卷
-
-可在资源管理器中右键点击已挂载的镜像盘符，选择“弹出（WinSquashfs）”。Windows 11 可通过“显示更多选项”找到该命令。也可在挂载管理页面卸载，或执行 `winsqfs eject X:`。
-
-## 文件关联
-
-双击已关联的镜像文件，直接在资源管理器中打开其 UNC 路径。右键选择“使用 WinSquashfs 编辑”可打开图形界面。图形界面的“挂载镜像”按钮可将镜像挂载为盘符。
+[版本下载](https://github.com/HSOS6Miyabi/WinSquashfs/releases) · [构建记录](https://github.com/HSOS6Miyabi/WinSquashfs/actions)
 
 ## UNC 访问
 
-在“UNC 访问”页面启动后台进程。启用本地磁盘映射后，可以直接通过以下路径访问镜像中的文件：
+启动独立 UNC 后台进程后，可通过以下路径访问镜像：
 
-    C:\images\linux.squashfs
-    \\sfs$\C\images\linux.squashfs
     \\sfs$\C\images\linux.squashfs\etc\os-release
+    \\sfs.localhost\C\images\linux.squashfs
+    \\sfs$\path\archive.dwarfs
+    \\sfs$\UNC\NAS\backup\archive.erofs
 
-也可将自定义目录映射为共享名称，例如将 C:\images 映射为 path，然后使用 \\sfs$\path\linux.squashfs 访问镜像。
+两个虚拟主机名共用已启用的盘符映射、自定义目录和网络共享入口。程序使用实际运行进程的 Windows 访问令牌和网络凭据，显式路径按文件内容识别格式。本地临时访问优先使用机会锁，其他源采用短时读取句柄及文件身份检查。源镜像发生变更后，相应缓存失效。显式盘符挂载期间保护源镜像，弹出后解除保护。后台进程可独立运行并设置为登录时启动。
 
-对于网络共享上的源镜像，例如 \\nas\backup\rootfs.squashfs，可直接访问 \\sfs$\UNC\nas\backup\rootfs.squashfs。支持本地目录、映射的网络驱动器、UNC 共享、自定义 UNC 目录映射、目录联接及符号链接。程序使用实际运行进程的 Windows 访问令牌和网络凭据，不主动切换为普通用户令牌。显式指定镜像路径时不限制文件扩展名。UNC 挂载卷供运行后台进程的 Windows 账户访问。
+## 命令行与构建
 
-UNC 访问和镜像浏览器对支持机会锁的本地文件使用 Read-Handle Oplock。其他程序请求冲突访问时，程序释放读取句柄。SMB 网络文件及不支持机会锁的文件系统采用短时读取句柄，并检查文件身份和修改信息。源文件删除、重命名、替换或修改后，程序根据机会锁中断及异步目录变更通知释放相应镜像缓存，其他镜像及 UNC 入口保持可用。同一目录的镜像共享监听请求，不定期轮询源文件。无法接收变更通知时，在实际访问时校验文件身份；文件服务器未提供稳定文件标识符时，使用可用的文件大小及时间信息进行检查，并在镜像空闲时立即释放缓存。缓存只在最早的空闲期限到达时安排一次定时唤醒。显式盘符挂载期间仍会保护源镜像。
+执行 archivefs --help 查看命令，使用 --lang zh-CN 输出简体中文。构建及测试方法见[原生核心文档](native/cpp/README.md)。
 
-关闭主窗口后，后台进程仍可提供访问。可以设置登录时自动启动、空闲超时及空闲镜像数量上限。应用共享设置将重新启动后台进程，请先关闭正在使用的 UNC 文件。
-
-## 命令行
-
-    winsqfs --version
-    winsqfs doctor
-    winsqfs --lang zh-CN info image.squashfs
-    winsqfs --lang zh-CN list image.squashfs
-    winsqfs --lang zh-CN verify image.squashfs
-    winsqfs mount image.squashfs X:
-    winsqfs eject X:
-    winsqfs serve path C:\images 60
-    winsqfs unc-start
-    winsqfs unc-status
-    winsqfs unc-path C:\images\linux.squashfs
-    winsqfs unc-stop
-    winsqfs pack C:\source C:\output.squashfs zstd
-    winsqfs unpack image.squashfs C:\new-directory
-
-命令行默认使用英文，可通过 --lang zh-CN、--lang en-US 或 --lang system 指定本次命令的语言。原版 squashfs-tools 工具输出保留原始语言。按 Ctrl+C 停止命令行挂载或前台 UNC 服务。
-
-## 兼容性
-
-Windows 文件系统仅映射普通文件和目录。Linux 符号链接和特殊文件在浏览器中显示其类型；提取到 Windows 时跳过此类文件。对于 Windows 不支持的文件名，程序会生成兼容的名称。镜像校验检查文件能否读取及数据块是否有效。
-
-## 构建与许可证
-
-参见 [英文 README](README.md) 中的构建说明。Windows CI 会运行文件系统、压缩算法、安装和中英文界面自动化测试，并上传窗口截图。项目版本号统一在 Directory.Build.props 中设置。Windows CI 完成所有测试后，发布尚未公开的版本，生成安装程序、便携版 ZIP 和 SHA-256 校验文件。
-
-本项目采用 GPL-3.0-only 许可证，依赖组件的许可证见 [THIRD-PARTY.md](THIRD-PARTY.md)。
+本项目采用 GPL-3.0-only 许可证，依赖组件许可证见 [THIRD-PARTY.md](THIRD-PARTY.md)。
