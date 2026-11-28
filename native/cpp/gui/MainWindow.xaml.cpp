@@ -61,7 +61,7 @@ MainWindow::MainWindow(){
     Closed([this](auto const&,auto const&){closing_=true;stop_.request_stop();preview_stop_.request_stop();mount_timer_.Stop();mounts_.clear();});
     navigate(0);
 }
-HWND MainWindow::hwnd(){HWND result=nullptr;check_hresult(this->as<IWindowNative>()->get_WindowHandle(&result));return result;}
+HWND MainWindow::hwnd(){HWND result=nullptr;check_hresult(get_strong().as<Microsoft::UI::Xaml::Window>().as<IWindowNative>()->get_WindowHandle(&result));return result;}
 void MainWindow::report(std::exception_ptr error){try{if(error)std::rethrow_exception(error);}catch(const hresult_error& e){status_.Text(e.message());}catch(const std::exception& e){status_.Text(text(e.what()));}catch(...){status_.Text(tr(L"Operation failed",L"操作失败"));}}
 fire_and_forget MainWindow::run(Task task,hstring message){auto lifetime=get_strong();if(busy_||closing_)co_return;busy_=true;stop_=std::stop_source();auto token=stop_.get_token();nav_host_.IsEnabled(false);scroll_.IsEnabled(false);page_actions_.IsHitTestVisible(false);cancel_.IsEnabled(true);status_.Text(message);apartment_context ui;std::exception_ptr error;std::function<void()> finish;
     co_await resume_background();try{finish=task(token);}catch(...){error=std::current_exception();}try{co_await ui;}catch(...){co_return;}if(closing_)co_return;busy_=false;nav_host_.IsEnabled(true);scroll_.IsEnabled(true);page_actions_.IsHitTestVisible(true);cancel_.IsEnabled(false);if(error){report(error);co_return;}status_.Text(tr(L"Completed",L"已完成"));try{if(finish)finish();}catch(...){report(std::current_exception());}}
