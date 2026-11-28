@@ -14,6 +14,7 @@ class Server(ThreadingHTTPServer):
     def __init__(self, patch):
         super().__init__(("127.0.0.1", 0), Handler)
         self.files = {"/dav/a.txt": b"0123456789"}
+        self.dirs = {"/dav"}
         self.patch = patch
         self.puts = 0
         self.patches = 0
@@ -69,14 +70,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         path = self.path_value()
         fs = self.server.files
-        if path != "/dav" and path not in fs:
+        if path not in self.server.dirs and path not in fs:
             return self.response(404)
         paths = [path]
         if self.headers.get("Depth") == "1":
-            paths += [p for p in fs if p.startswith(path + "/") and "/" not in p[len(path) + 1:]]
+            paths += [p for p in list(fs) + sorted(self.server.dirs) if p.startswith(path + "/") and "/" not in p[len(path) + 1:]]
         rows = []
         for p in paths:
-            if p == "/dav":
+            if p in self.server.dirs:
                 props = "<d:resourcetype><d:collection/></d:resourcetype>"
             else:
                 props = "<d:resourcetype/><d:getcontentlength>%d</d:getcontentlength><d:getetag>%s</d:getetag>" % (len(fs[p]), escape(self.etag(p)))
@@ -184,6 +185,7 @@ if len(sys.argv) == 4 and sys.argv[1] == "--serve":
     from pathlib import Path
     server = Server(True)
     server.expected_auth = "Basic " + base64.b64encode(("ui:" + sys.argv[3]).encode()).decode()
+    server.dirs.add("/dav/destination")
     Path(sys.argv[2]).write_text(str(server.server_port), encoding="ascii")
     server.serve_forever()
     sys.exit(0)

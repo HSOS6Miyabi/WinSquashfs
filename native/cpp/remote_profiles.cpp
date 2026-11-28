@@ -2,6 +2,7 @@
 #include "windows_services.hpp"
 #include "windows_atomic_file.hpp"
 #include "remote_control.hpp"
+#include "remote_unc_path.hpp"
 #include <wincrypt.h>
 #include <nlohmann/json.hpp>
 #include <set>
@@ -85,11 +86,11 @@ std::u16string projected_path(std::string_view connection,std::string_view raw){
 }
 void control_remote(RemoteCommand command,std::string_view protocol,std::string_view connection,std::string_view from,std::string_view to={},bool replace=false){
     auto profiles=load_remote_connections();auto p=parse_remote_protocol(protocol);
-    auto profile=std::find_if(profiles.begin(),profiles.end(),[&](const auto& c){return c.protocol==p&&c.name==connection;});
+    auto profile=std::find_if(profiles.begin(),profiles.end(),[&](const auto& c){return c.protocol==p&&!WindowsNameLess{}(to_utf16(c.name),to_utf16(connection))&&!WindowsNameLess{}(to_utf16(connection),to_utf16(c.name));});
     if(profile==profiles.end())throw RemoteFailure(RemoteError::missing,"Saved remote connection not found");
     if(profile->read_only)throw RemoteFailure(RemoteError::permission,"Remote connection is read-only");
-    auto source=projected_path(connection,from);
-    auto destination=command==RemoteCommand::copy?projected_path(connection,to):std::u16string{};
+    auto source=projected_path(profile->name,from);
+    auto destination=command==RemoteCommand::copy?projected_path(profile->name,to):std::u16string{};
     auto request=encode_remote_control(command,destination,replace);
     start_agent();
     auto path=u"\\\\$sfs\\"+to_utf16(protocol)+source;
@@ -106,5 +107,39 @@ void copy_remote_file(std::string_view protocol,std::string_view connection,std:
 }
 void recover_remote_file(std::string_view protocol,std::string_view connection,std::string_view path,bool discard){
     control_remote(discard?RemoteCommand::discard:RemoteCommand::retry,protocol,connection,path);
+}
+void paste_remote_files(const std::filesystem::path& directory,const std::vector<std::filesystem::path>& sources,std::stop_token stop){
+    auto destination=parse_remote_unc(directory.wstring());
+    if(!destination||sources.empty()||sources.size()>256)throw std::invalid_argument("Invalid remote copy selection");
+    start_agent(stop);
+    auto attributes=GetFileAttributesW(directory.c_str());
+    if(attributes==INVALID_FILE_ATTRIBUTES)detail::file_error(GetLastError(),"Open remote destination directory");
+    if(!(attributes&FILE_ATTRIBUTE_DIRECTORY))throw std::invalid_argument("Remote destination is not a directory");
+    struct Copy{std::string source,target;};
+    std::vector<Copy> copies;
+    auto utf8=[](std::wstring_view value){return to_utf8(std::u16string(value.begin(),value.end()));};
+    std::vector<std::wstring> destinations;
+    for(auto& path:sources){
+        if(stop.stop_requested())throw std::runtime_error("Remote copy cancelled");
+        auto source=parse_remote_unc(path.wstring());
+        if(!source)throw std::invalid_argument("Source is not a remote file");
+        auto target=server_paste_target(*destination,*source);
+        if(target.empty())throw std::invalid_argument("Server paste requires different paths in the same remote connection");
+        auto attrs=GetFileAttributesW(path.c_str());
+        if(attrs==INVALID_FILE_ATTRIBUTES)detail::file_error(GetLastError(),"Open remote source file");
+        if(attrs&FILE_ATTRIBUTE_DIRECTORY)throw RemoteFailure(RemoteError::unsupported,"Server paste accepts regular files");
+        if(std::any_of(destinations.begin(),destinations.end(),[&](auto& value){return unc_equal(value,target);}))
+            throw RemoteFailure(RemoteError::exists,"Duplicate server paste destination");
+        auto target_path=directory/std::filesystem::path(source->leaf);
+        auto target_attrs=GetFileAttributesW(target_path.c_str());
+        if(target_attrs!=INVALID_FILE_ATTRIBUTES)throw RemoteFailure(RemoteError::exists,"Server paste destination already exists");
+        auto error=GetLastError();
+        if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)detail::file_error(error,"Check remote copy destination");
+        destinations.push_back(target);copies.push_back({utf8(source->relative),utf8(target)});
+    }
+    for(auto& copy:copies){
+        if(stop.stop_requested())throw std::runtime_error("Remote copy cancelled");
+        copy_remote_file(utf8(destination->protocol),utf8(destination->connection),copy.source,copy.target);
+    }
 }
 }

@@ -2,6 +2,7 @@
 #include "remote_projection.hpp"
 #include "remote_control.hpp"
 #include "remote_recovery.hpp"
+#include "remote_unc_path.hpp"
 #include <array>
 #include <cstring>
 #include <iostream>
@@ -54,6 +55,16 @@ void mounted_test(const std::shared_ptr<Projection>& p,const std::shared_ptr<Pro
 int main(int argc,char** argv){
     try{
         if(argc!=4)return 2;
+        auto source_path=parse_remote_unc(L"\\\\$sfs\\sftp\\NAS\\源\\a.bin");
+        auto destination_path=parse_remote_unc(L"\\\\sfs$\\root\\SFTP\\nas\\target");
+        check(source_path&&destination_path&&server_paste_target(*destination_path,*source_path)==L"/target/a.bin","server paste path aliases");
+        check(!parse_remote_unc(L"\\\\$sfs\\ftp\\nas\\a.bin")&&!parse_remote_unc(L"\\\\$sfs\\sftp\\nas\\..\\file"),"server paste path rejection");
+        check(server_paste_target(*source_path,*destination_path).size()>0,"same connection path mapping");
+        auto control=encode_remote_control(RemoteCommand::copy,u"\\test\\destination");
+        check(decode_remote_control(control).destination==u"\\test\\destination","remote control encoding");
+        control.pop_back();bool invalid=false;
+        try{(void)decode_remote_control(control);}catch(const std::invalid_argument&){invalid=true;}
+        check(invalid,"invalid control packet rejected");
         RemoteConnection c;c.name="test";c.endpoint=argv[1];c.root="/dav";c.cache_mib=8;c.read_cache_mib=0;c.metadata_seconds=0;
         auto mode=std::string_view(argv[3]);
         if(mode=="writeback"||mode=="recover"||mode=="conflict"||mode=="lost-response")c.cache_mode="writeback";

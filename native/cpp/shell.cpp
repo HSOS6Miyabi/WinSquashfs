@@ -14,10 +14,14 @@
 #include <cwchar>
 #include <string>
 #include <vector>
+#include <ole2.h>
+#include "remote_unc_path.hpp"
 
 namespace {
 const CLSID EjectClass = {0x9b20352f,0x1bc4,0x48e6,{0xae,0x3b,0x14,0x6f,0x32,0x65,0x7d,0xa9}};
 const CLSID PackClass = {0x57ab2c11,0x7881,0x46eb,{0x9a,0xf8,0x33,0x19,0x4e,0xdf,0x60,0x71}};
+const CLSID PasteClass = {0xa0bd4e92,0x67d5,0x4f50,{0x9d,0xc7,0xa1,0x61,0x8d,0xe8,0x2a,0x63}};
+constexpr wchar_t PasteVerb[] = L"WinArchiveFSPro.ServerPaste";
 constexpr wchar_t Verb[] = L"WinArchiveFSPro.Eject";
 constexpr wchar_t PackVerb[] = L"WinArchiveFSPro.Pack";
 HINSTANCE module = nullptr;
@@ -208,7 +212,7 @@ bool FilesFromSelection(IDataObject *data, std::vector<std::wstring> &paths)
     return !paths.empty();
 }
 
-HRESULT LaunchPack(const std::vector<std::wstring> &paths)
+HRESULT LaunchPack(const std::vector<std::wstring> &paths,const wchar_t* verb=L"--pack-list")
 {
     if(paths.empty())return E_INVALIDARG;
     wchar_t folder[MAX_PATH+1]={}, list[MAX_PATH+1]={};
@@ -233,7 +237,7 @@ HRESULT LaunchPack(const std::vector<std::wstring> &paths)
     if(!n || n>=ARRAYSIZE(exe) || !separator){DeleteFileW(list);return E_FAIL;}
     separator[1]=0;
     HRESULT hr=StringCchCatW(exe,ARRAYSIZE(exe),L"WinArchiveFSPro.exe");
-    if(SUCCEEDED(hr))hr=StringCchPrintfW(command,ARRAYSIZE(command),L"\"%ls\" --pack-list \"%ls\"",exe,list);
+    if(SUCCEEDED(hr))hr=StringCchPrintfW(command,ARRAYSIZE(command),L"\"%ls\" %ls \"%ls\"",exe,verb,list);
     STARTUPINFOW si={};si.cb=sizeof(si);PROCESS_INFORMATION pi={};
     if(FAILED(hr)||!CreateProcessW(exe,command,nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))
     { if(SUCCEEDED(hr))hr=HRESULT_FROM_WIN32(GetLastError());DeleteFileW(list);return hr; }
@@ -342,12 +346,88 @@ public:
     }
 };
 
+class PasteMenu final : public IShellExtInit, public IContextMenu
+{
+    volatile LONG refs=1;
+    std::vector<std::wstring> paths;
+public:
+    PasteMenu(){InterlockedIncrement(&objects);}
+    ~PasteMenu(){InterlockedDecrement(&objects);}
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid,void** out)override{
+        if(!out)return E_POINTER;
+        *out=nullptr;
+        if(IsEqualIID(iid,IID_IUnknown)||IsEqualIID(iid,IID_IShellExtInit))*out=static_cast<IShellExtInit*>(this);
+        else if(IsEqualIID(iid,IID_IContextMenu))*out=static_cast<IContextMenu*>(this);
+        else return E_NOINTERFACE;
+        AddRef();return S_OK;
+    }
+    ULONG STDMETHODCALLTYPE AddRef()override{return InterlockedIncrement(&refs);}
+    ULONG STDMETHODCALLTYPE Release()override{LONG count=InterlockedDecrement(&refs);if(!count)delete this;return count;}
+    HRESULT STDMETHODCALLTYPE Initialize(PCIDLIST_ABSOLUTE folder,IDataObject* data,HKEY)override{
+        paths.clear();
+        try{
+            std::wstring destination;
+            if(data){
+                std::vector<std::wstring> selection;
+                if(!FilesFromSelection(data,selection)||selection.size()!=1)return S_OK;
+                destination=std::move(selection.front());
+            }else if(folder){
+                wchar_t path[32768]{};
+                if(!SHGetPathFromIDListEx(folder,path,ARRAYSIZE(path),GPFIDL_DEFAULT))return S_OK;
+                destination=path;
+            }
+            auto target=archivefs::parse_remote_unc(destination);
+            if(!target)return S_OK;
+            IDataObject* clipboard=nullptr;
+            if(FAILED(OleGetClipboard(&clipboard))||!clipboard)return S_OK;
+            struct ReleaseClipboard{IDataObject* value;~ReleaseClipboard(){value->Release();}} release{clipboard};
+            std::vector<std::wstring> sources;
+            if(!FilesFromSelection(clipboard,sources)||sources.empty()||sources.size()>256)return S_OK;
+            std::size_t units=destination.size()+1;
+            for(auto& source:sources){
+                auto parsed=archivefs::parse_remote_unc(source);
+                if(!parsed||archivefs::server_paste_target(*target,*parsed).empty())return S_OK;
+                units+=source.size()+1;if(units>524288)return S_OK;
+            }
+            paths.push_back(std::move(destination));paths.insert(paths.end(),sources.begin(),sources.end());
+            return S_OK;
+        }catch(...){paths.clear();return E_OUTOFMEMORY;}
+    }
+    HRESULT STDMETHODCALLTYPE QueryContextMenu(HMENU menu,UINT index,UINT first,UINT last,UINT flags)override{
+        if((flags&CMF_DEFAULTONLY)||first>last||paths.size()<2)return MAKE_HRESULT(SEVERITY_SUCCESS,FACILITY_NULL,0);
+        const wchar_t* title=Chinese()?L"在服务器上粘贴副本":L"Paste copy on server";
+        if(!InsertMenuW(menu,index,MF_BYPOSITION|MF_STRING,first,title))return HRESULT_FROM_WIN32(GetLastError());
+        return MAKE_HRESULT(SEVERITY_SUCCESS,FACILITY_NULL,1);
+    }
+    HRESULT STDMETHODCALLTYPE InvokeCommand(CMINVOKECOMMANDINFO* info)override{
+        if(!info||paths.size()<2)return E_INVALIDARG;
+        if(IS_INTRESOURCE(info->lpVerb)){
+            if(LOWORD(reinterpret_cast<ULONG_PTR>(info->lpVerb))!=0)return E_INVALIDARG;
+        }else if(info->cbSize>=sizeof(CMINVOKECOMMANDINFOEX)&&(info->fMask&CMIC_MASK_UNICODE)){
+            auto* ex=reinterpret_cast<CMINVOKECOMMANDINFOEX*>(info);
+            if(!ex->lpVerbW||IS_INTRESOURCE(ex->lpVerbW)||_wcsicmp(ex->lpVerbW,PasteVerb))return E_INVALIDARG;
+        }else if(_stricmp(info->lpVerb,"WinArchiveFSPro.ServerPaste"))return E_INVALIDARG;
+        try{return LaunchPack(paths,L"--server-paste-list");}catch(...){return E_FAIL;}
+    }
+    HRESULT STDMETHODCALLTYPE GetCommandString(UINT_PTR id,UINT type,UINT*,LPSTR text,UINT size)override{
+        if(id)return E_INVALIDARG;
+        switch(type){
+        case GCS_VERBW:return StringCchCopyW(reinterpret_cast<LPWSTR>(text),size,PasteVerb);
+        case GCS_VERBA:return StringCchCopyA(text,size,"WinArchiveFSPro.ServerPaste");
+        case GCS_HELPTEXTW:return StringCchCopyW(reinterpret_cast<LPWSTR>(text),size,Chinese()?L"使用远程服务器的复制功能":L"Copy files within the remote server");
+        case GCS_HELPTEXTA:return StringCchCopyA(text,size,"Copy files within the remote server");
+        case GCS_VALIDATEA:case GCS_VALIDATEW:return S_OK;
+        default:return E_NOTIMPL;
+        }
+    }
+};
+
 class Factory final : public IClassFactory
 {
     volatile LONG refs = 1;
-    bool pack;
+    int kind;
 public:
-    explicit Factory(bool create) : pack(create) { InterlockedIncrement(&objects); }
+    explicit Factory(int value) : kind(value) { InterlockedIncrement(&objects); }
     ~Factory() { InterlockedDecrement(&objects); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **out) override
     {
@@ -370,7 +450,7 @@ public:
         if (!out) return E_POINTER;
         *out = nullptr;
         if (outer) return CLASS_E_NOAGGREGATION;
-        auto *object = new(std::nothrow) EjectMenu(pack);
+        IShellExtInit* object=kind==2?static_cast<IShellExtInit*>(new(std::nothrow) PasteMenu):static_cast<IShellExtInit*>(new(std::nothrow) EjectMenu(kind==1));
         if (!object) return E_OUTOFMEMORY;
         HRESULT hr = object->QueryInterface(iid, out);
         object->Release();
@@ -411,9 +491,9 @@ extern "C" ARCHIVEFS_COM_EXPORT HRESULT WINAPI DllGetClassObject(REFCLSID clsid,
 {
     if (!out) return E_POINTER;
     *out = nullptr;
-    bool pack=IsEqualCLSID(clsid,PackClass);
-    if (!pack && !IsEqualCLSID(clsid, EjectClass)) return CLASS_E_CLASSNOTAVAILABLE;
-    auto *factory = new(std::nothrow) Factory(pack);
+    int kind=IsEqualCLSID(clsid,PackClass)?1:IsEqualCLSID(clsid,PasteClass)?2:IsEqualCLSID(clsid,EjectClass)?0:-1;
+    if(kind<0)return CLASS_E_CLASSNOTAVAILABLE;
+    auto *factory = new(std::nothrow) Factory(kind);
     if (!factory) return E_OUTOFMEMORY;
     HRESULT hr = factory->QueryInterface(iid, out);
     factory->Release();
