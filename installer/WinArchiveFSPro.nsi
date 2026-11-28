@@ -38,7 +38,14 @@ VIProductVersion "${PRODUCT_VERSION}.0"
 !define PACK_CLSID "{57AB2C11-7881-46EB-9AF8-33194EDF6071}"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\WinArchiveFSPro"
 Name "WinArchiveFSPro"
-OutFile "..\artifacts\WinArchiveFSPro-Setup-${PRODUCT_ARCH}.exe"
+!ifndef SETUP_OUTPUT
+  !define SETUP_OUTPUT "..\artifacts\WinArchiveFSPro-Setup-${PRODUCT_ARCH}.exe"
+!endif
+OutFile "${SETUP_OUTPUT}"
+!ifdef ARCHIVEFS_SIGN_INSTALLER
+  !uninstfinalize 'powershell.exe -NoProfile -NonInteractive -File "$%ARCHIVEFS_SIGN_SCRIPT%" -Path "%1"' = 0
+  !finalize 'powershell.exe -NoProfile -NonInteractive -File "$%ARCHIVEFS_SIGN_SCRIPT%" -Path "%1"' = 0
+!endif
 InstallDir "${PRODUCT_PROGRAMFILES}\WinArchiveFSPro"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma

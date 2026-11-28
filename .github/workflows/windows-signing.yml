@@ -1,0 +1,72 @@
+name: Authenticode signing of tested distributions
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful native integration run ID for this commit
+        required: true
+        type: string
+      alternate_run_id:
+        description: Successful alternate architecture run ID (leave blank for the same run)
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: archivefs-signing
+  cancel-in-progress: false
+jobs:
+  sign:
+    environment: code-signing
+    runs-on: [self-hosted, Windows, X64, archivefs-signing]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify all artifacts belong to the tested commit
+        id: validate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          ALTERNATE_RUN_ID: ${{ inputs.alternate_run_id }}
+        run: |
+          $alternate=if($env:ALTERNATE_RUN_ID){$env:ALTERNATE_RUN_ID}else{$env:RUN_ID}
+          foreach($id in @($env:RUN_ID,$alternate) | Sort-Object -Unique){
+            if($id -notmatch '^\d+$'){throw 'Invalid workflow run ID'}
+            $run=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$id" | ConvertFrom-Json
+            if($LASTEXITCODE -or $run.head_sha -ne $env:GITHUB_SHA -or $run.conclusion -ne 'success'){throw 'Only successful runs of this exact commit can be signed'}
+            $workflow=if($id -eq $env:RUN_ID){'.github/workflows/windows-native.yml'}else{'.github/workflows/windows-native-decoders.yml'}
+            if($run.path -ne $workflow){throw 'Unexpected source workflow'}
+          }
+          "alternate=$alternate" >> $env:GITHUB_OUTPUT
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: artifacts/signing-input
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x86
+          path: artifacts/signing-input
+          run-id: ${{ steps.validate.outputs.alternate }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-arm64
+          path: artifacts/signing-input
+          run-id: ${{ steps.validate.outputs.alternate }}
+          github-token: ${{ github.token }}
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Sign applications, installers and uninstallers
+        shell: pwsh
+        env:
+          ARCHIVEFS_SIGNING_CERT_SHA1: ${{ vars.ARCHIVEFS_SIGNING_CERT_SHA1 }}
+        run: |
+          $nsis=Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'NSIS/makensis.exe'
+          ./scripts/sign-distributions.ps1 -ArtifactDirectory artifacts/signing-input -OutputDirectory artifacts/signed -MakeNsis $nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinArchiveFSPro-signed-distributions
+          path: artifacts/signed/
+          if-no-files-found: error
