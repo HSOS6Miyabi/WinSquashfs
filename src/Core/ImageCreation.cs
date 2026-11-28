@@ -148,7 +148,7 @@ public static class ImageCreator
                     await SquashTools.RunAsync(universal?"dwarfs-universal":"mkdwarfs",(universal?args:args.Skip(1)).Concat(new[]{"-i",source,"-o",temporary}),log,token);
                     break;
                 case ImageFormat.EROFS:
-                    await SquashTools.RunAsync("mkfs.erofs",options.ErofsArguments().Concat(new[]{temporary,"-"}),log,token,
+                    await SquashTools.RunAsync("mkfs.erofs",options.ErofsArguments().Append(temporary),log,token,
                         (stream,cancel)=>WriteTarAsync(items,stream,cancel));
                     break;
                 default: throw new ArgumentException();
