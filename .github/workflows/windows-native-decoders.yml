@@ -20,10 +20,12 @@ jobs:
             arch: x86
             msystem: MINGW32
             compiler: gcc
+            extra: ''
           - runner: windows-11-arm
             arch: arm64
             msystem: CLANGARM64
             compiler: clang
+            extra: 'lzo2:p libdeflate:p'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     steps:
@@ -34,21 +36,32 @@ jobs:
           msystem: ${{ matrix.msystem }}
           update: true
           suppress-deprecation-warnings: msystem-mingw32
-          install: git autoconf automake libtool make pkgconf python
+          install: git curl autoconf automake libtool make pkgconf python
           pacboy: >-
             ${{ matrix.compiler }}:p
             binutils:p
             pkgconf:p
             zlib:p
             xz:p
-            lzo2:p
             lz4:p
             zstd:p
-            libdeflate:p
-            tre:p
+            libtre:p
+            ${{ matrix.extra }}
             gettext:p
             libiconv:p
             libwinpthread:p
+      - name: Install signed archived x86 compression libraries
+        if: matrix.arch == 'x86'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$(mktemp -d)"
+          for package in mingw-w64-i686-lzo2-2.10-3-any.pkg.tar.zst mingw-w64-i686-libdeflate-1.26-1-any.pkg.tar.zst; do
+            curl --fail --location --retry 3 -O "https://repo.msys2.org/mingw/mingw32/$package"
+            curl --fail --location --retry 3 -O "https://repo.msys2.org/mingw/mingw32/$package.sig"
+            pacman-key --verify "$package.sig" "$package"
+            pacman -U --noconfirm "$package"
+          done
       - name: Build native SquashFS and EROFS libraries
         shell: msys2 {0}
         run: bash scripts/build-alternate-readers.sh ${{ matrix.arch }}
