@@ -39,7 +39,7 @@ public:
     }
     std::size_t read(const ProjectedNodePtr& n,std::uint64_t offset,std::span<std::byte> bytes)const override{require(n);return n->route->read(n->routed,offset,bytes);}
     ProjectedNodePtr create_file(std::u16string_view path,bool dir)override{
-        auto [name,p,rest]=resolve(path);if(!p||rest==u"\\")throw RemoteFailure(RemoteError::permission,"Namespace root is read-only");
+        auto [name,p,rest]=resolve(path);if(!p||!p->writable_volume()||rest==u"\\")throw RemoteFailure(RemoteError::permission,"Namespace path is read-only");
         return wrap(name,p,p->create_file(rest,dir));
     }
     std::size_t write(const ProjectedNodePtr& n,std::uint64_t offset,std::span<const std::byte> bytes,bool append,bool constrained)override{require(n);return n->route->write(n->routed,offset,bytes,append,constrained);}

@@ -84,7 +84,7 @@ struct NativeMount::Impl {
     std::shared_ptr<Projection> projection;Security security,write_security{true};FSP_FILE_SYSTEM* fs=nullptr;std::u16string point;std::mutex mutex;bool started=false;
     static Impl& self(FSP_FILE_SYSTEM* fs){return *static_cast<Impl*>(fs->UserContext);}
     static Context& context(PVOID raw){return *static_cast<Context*>(raw);}
-    static NTSTATUS volume(FSP_FILE_SYSTEM* fs,FSP_FSCTL_VOLUME_INFO* info)noexcept{return protect([&]()->NTSTATUS{*info={};info->TotalSize=self(fs).projection->capacity();constexpr wchar_t label[]=L"WinArchiveFSPro";std::copy_n(label,std::size(label)-1,info->VolumeLabel);info->VolumeLabelLength=static_cast<UINT16>((std::size(label)-1)*sizeof(wchar_t));return STATUS_SUCCESS;});}
+    static NTSTATUS volume(FSP_FILE_SYSTEM* fs,FSP_FSCTL_VOLUME_INFO* info)noexcept{return protect([&]()->NTSTATUS{*info={};info->TotalSize=self(fs).projection->capacity();info->FreeSize=self(fs).projection->writable_volume()?info->TotalSize:0;constexpr wchar_t label[]=L"WinArchiveFSPro";std::copy_n(label,std::size(label)-1,info->VolumeLabel);info->VolumeLabelLength=static_cast<UINT16>((std::size(label)-1)*sizeof(wchar_t));return STATUS_SUCCESS;});}
     static void file_info(Impl& self,const ProjectedNodePtr& node,FSP_FSCTL_FILE_INFO& result){fill_info(self.projection->query_info(node),result,self.projection->writable(node));}
     static NTSTATUS security_name(FSP_FILE_SYSTEM* fs,PWSTR name,PUINT32 attrs,PSECURITY_DESCRIPTOR sd,SIZE_T* size)noexcept{return protect([&]()->NTSTATUS{
         auto& s=self(fs);auto node=s.projection->open(narrow(name));if(!node)return STATUS_OBJECT_NAME_NOT_FOUND;

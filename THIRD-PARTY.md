@@ -13,3 +13,7 @@
 - vcpkg dependency licenses are included in licenses/vcpkg.
 
 The source of WinArchiveFSPro, its native adapter and build scripts are available in this repository.
+
+- libcurl: https://curl.se/libcurl/ (curl license), HTTP, FTP, TLS and AWS Signature V4.
+- libssh2: https://libssh2.org/ (BSD-3-Clause), SSH transport and authentication.
+- libxml2: https://gitlab.gnome.org/GNOME/libxml2 (MIT), WebDAV and S3 XML responses.

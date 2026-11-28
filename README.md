@@ -57,3 +57,25 @@ Start the UNC agent to browse `\\sfs$\mtp` (MTP/PTP), `\\sfs$\adb` (existing ADB
 Slow archive opens display a native Windows progress notification based on the furthest successfully read offset relative to the image size. Nested SquashFS, DwarFS and EROFS images are opened directly from their parent archive readers without extracting them to disk.
 
 Mounted archives resolve symbolic links within the archive, including absolute POSIX targets. Unresolved links and special files are visible as unavailable filesystem objects. Use `archivefs readlink IMAGE ENTRY` to inspect a link target.
+
+
+### Remote connections
+
+Start the UNC agent and save connections in the Remote connections page. Browse the six protocol shares:
+
+    \\$sfs\dav
+    \\$sfs\s3
+    \\$sfs\ftp
+    \\$sfs\ftps
+    \\$sfs\sftp
+    \\$sfs\scp
+
+The unified namespace is available at \\$sfs\root. The optional signed UNC filter provides the direct server-root spelling \\$sfs\. The existing sfs$ and sfs.localhost names remain available.
+
+WebDAV supports Range reads and advertised SabreDAV PATCH partial updates. Server-specific partial PUT is explicitly opt-in. FTP and FTPS use MLSD listings, REST reads and APPE for append writes. S3 uses Signature V4, path-style bucket URLs, ListObjectsV2, Range reads, PUT and CopyObject. S3 file rename is copy followed by deletion; multipart uploads and directory rename are not supported.
+
+SFTP uses positioned I/O. Server-side copy prefers the negotiated copy-data extension and optionally uses SSH commands when the extension is unavailable. SCP uses positioned SSH commands and SCP upload, with optional authorized non-interactive sudo. The SSH command root can differ from the SFTP-visible root.
+
+Connection settings include read-only mode, timeout, metadata expiration and separate read and write cache limits. Automatic mode prefers direct writes; writeback stages a complete file locally and uploads on flush; direct mode rejects operations requiring staging. Failed uploads retain their cached data in the recovery directory. Close and flush files before using the server-side copy action or archivefs remote-copy command. Windows-specific attributes and ACL changes are limited. The remote volume capacity is nominal, not the server quota.
+
+Credentials use Windows DPAPI. SSH requires a trusted SHA256 host fingerprint; TLS validates certificates and hostnames, optionally using a private CA file. Use HTTPS or FTPS on untrusted networks.
