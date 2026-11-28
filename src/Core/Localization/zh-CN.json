@@ -283,5 +283,7 @@
   "Open an image to explore its contents.": "打开镜像以浏览其内容。",
   "Open or drop an image to begin.": "打开或拖入镜像开始浏览。",
   "Drop one image.": "请拖入一个镜像文件。",
-  "Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|create|unpack ...": "用法：winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|create|unpack ..."
+  "Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|create|unpack ...": "用法：winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|create|unpack ...",
+  "Testing maximum compression with {0}…": "正在试验 {0} 的最高压缩设置…",
+  "Selected smallest image: {0}, {1} bytes.": "已选择体积最小的镜像：{0}，{1} 字节。"
 }

@@ -26,7 +26,7 @@ A WinUI 3 desktop application for SquashFS, DwarFS and EROFS images on Windows x
 
 All three use the same browser, preview, verification, extraction, WinFsp and UNC interface. Multi-source DwarFS creation assembles a temporary source tree using hard links where possible and copies across filesystems; EROFS streams a TAR representation to its creation tool. Browsing and mounting do not extract the image to disk.
 
-The eighth preset uses XZ with the largest SquashFS block and BCJ filter trials, LZMA extreme with large DwarFS blocks and dictionaries, or EROFS LZMA preset 9 extreme with maximum physical clusters and deduplication. Compression ratio varies with input data.
+The eighth preset tries XZ with and without BCJ, Zstandard level 22 and gzip level 9 for SquashFS, retaining the smallest result. DwarFS uses LZMA preset 9 extreme and a dictionary matching the largest useful data block (up to 1 GiB). EROFS uses LZMA preset 9 extreme, maximum physical clusters and deduplication. Compression ratio varies with input data.
 
 Example: `winsqfs create DwarFS 8 output.dwarfs file1.txt file2.txt folder`.
 

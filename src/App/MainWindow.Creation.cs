@@ -132,7 +132,7 @@ public sealed partial class MainWindow
             ImageFormat.SquashFS=>new[]{"zstd","gzip","xz","lz4","lzo"},
             ImageFormat.DwarFS=>new[]{"null","lz4","lz4hc","zstd","lzma"},
             _=>new[]{"none","lz4","lz4hc","zstd","lzma","deflate"}};
-        packBlocks=format==ImageFormat.DwarFS?Enumerable.Range(16,11).Select(i=>1<<i).ToArray():
+        packBlocks=format==ImageFormat.DwarFS?Enumerable.Range(10,21).Select(i=>1<<i).ToArray():
             Enumerable.Range(12,9).Select(i=>1<<i).ToArray();
         BlockBox.ItemsSource=packBlocks.Select(b=>FormatSize((ulong)b)).ToArray();
         BlockBox.Header=Localization.T(format==ImageFormat.EROFS?"Physical cluster size":"Data block size");

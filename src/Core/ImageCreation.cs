@@ -29,7 +29,7 @@ public sealed record CreationOptions(ImageFormat Format, CompressionPreset Prese
                 Extreme:i==7),
             ImageFormat.DwarFS => new(format,preset, Codec: new[]{"null","lz4","zstd","zstd","zstd","zstd","lzma","lzma"}[i],
                 Level:new int?[]{null,null,1,5,12,19,8,9}[i],
-                BlockSize:1 << new[]{20,20,21,22,23,24,25,26}[i],Extreme:i==7),
+                BlockSize:1 << new[]{20,20,21,22,23,24,26,30}[i],Extreme:i==7),
             ImageFormat.EROFS => new(format,preset,Codec:new[]{"none","lz4","lz4hc","lz4hc","zstd","zstd","lzma","lzma"}[i],
                 Level:new int?[]{null,null,3,9,9,22,9,109}[i],
                 BlockSize:new[]{4096,4096,16384,32768,65536,262144,1048576,1048576}[i],
@@ -44,15 +44,15 @@ public sealed record CreationOptions(ImageFormat Format, CompressionPreset Prese
         string codec=Codec ?? "zstd";
         if(codec is not ("null" or "lz4" or "lz4hc" or "zstd" or "lzma")) throw new ArgumentException(Localization.T("Unknown compressor."));
         int block=BlockSize ?? 4194304;
-        if(block < 65536 || block > 67108864 || (block & (block-1))!=0) throw new ArgumentException(Localization.T("Invalid block size."));
+        if(block < 1024 || block > 1073741824 || (block & (block-1))!=0) throw new ArgumentException(Localization.T("Invalid block size."));
         int bits=System.Numerics.BitOperations.Log2((uint)block);
         int preset=new[]{0,1,2,4,6,7,8,9}[(int)Preset-1];
         string compression=codec;
         if(Level.HasValue && codec is "zstd" or "lzma" or "lz4hc") compression+=":level="+Level.Value;
-        if(Extreme && codec=="lzma") compression+=":extreme:dict_size=26";
+        if(Extreme && codec=="lzma") compression+=":extreme:dict_size="+Math.Max(12,bits);
         var a=new List<string>{"--tool=mkdwarfs","-l",preset.ToString(),"-S",bits.ToString(),"-C",compression,"--no-progress"};
         // The embedded reader supports null, Zstandard, LZ4 and LZMA data.
-        a.Add("--schema-compression=zstd");
+        a.Add("--schema-compression="+(codec=="null"?"null":Extreme?"lzma:level=9:extreme":"zstd:level=16"));
         a.Add("--metadata-compression="+(Extreme ? "lzma:level=9:extreme" : codec=="null" ? "null" : "zstd"));
         if(Threads>0) a.AddRange(new[]{"-N",Threads.ToString()});
         if(MemoryMiB.HasValue && !Extreme) a.AddRange(new[]{"-L",MemoryMiB.Value+"m"});
@@ -122,7 +122,10 @@ public static class ImageCreator
             switch(options.Format)
             {
                 case ImageFormat.SquashFS:
-                    await SquashTools.PackSourcesAsync(items,temporary,options.Squash??new PackOptions(),log,token);
+                    if(options.Extreme)
+                        await CreateExtremeSquashAsync(items,temporary,options.Squash??new PackOptions(),log,token);
+                    else
+                        await SquashTools.PackSourcesAsync(items,temporary,options.Squash??new PackOptions(),log,token);
                     break;
                 case ImageFormat.DwarFS:
                     string source;
@@ -136,6 +139,10 @@ public static class ImageCreator
                             await StageAsync(item,Path.Combine(stage,Name(item)),token);
                         source=stage;
                     }
+                    // The writer supports blocks up to 1 GiB. A block larger
+                    // than all input data cannot improve compression.
+                    if(options.Extreme && options.Preset==CompressionPreset.Extreme && options.BlockSize==1073741824)
+                        options=options with{BlockSize=LargestUsefulBlock(source,token)};
                     bool universal=File.Exists(Path.Combine(AppContext.BaseDirectory,"tools","dwarfs-universal.exe"));
                     var args=options.DwarfsArguments();
                     await SquashTools.RunAsync(universal?"dwarfs-universal":"mkdwarfs",(universal?args:args.Skip(1)).Concat(new[]{"-i",source,"-o",temporary}),log,token);
@@ -157,6 +164,67 @@ public static class ImageCreator
             if(File.Exists(temporary)) File.Delete(temporary);
             if(stage!=null && Directory.Exists(stage)) Directory.Delete(stage,true);
         }
+    }
+
+    private static int LargestUsefulBlock(string root,CancellationToken token)
+    {
+        const long max=1L<<30;
+        long size=0;
+        var pending=new Stack<string>();pending.Push(root);
+        while(pending.TryPop(out var folder))
+        {
+            foreach(var p in Directory.EnumerateFileSystemEntries(folder))
+            {
+                token.ThrowIfCancellationRequested();
+                var attr=File.GetAttributes(p);
+                if((attr&FileAttributes.ReparsePoint)!=0) continue;
+                if((attr&FileAttributes.Directory)!=0) pending.Push(p);
+                else
+                {
+                    size+=Math.Min(max,new System.IO.FileInfo(p).Length);
+                    if(size>=max)return (int)max;
+                }
+            }
+        }
+        return (int)System.Numerics.BitOperations.RoundUpToPowerOf2((ulong)Math.Max(1L<<20,size));
+    }
+
+    private static async Task CreateExtremeSquashAsync(IReadOnlyList<string> sources,string output,
+        PackOptions requested,Action<string>? log,CancellationToken token)
+    {
+        var common=requested with{BlockSize=1048576,MemoryMiB=null,NoFragments=false,AlwaysFragments=true,
+            NoCompression=false,NoInodeCompression=false,NoFragmentCompression=false,NoDuplicates=false,
+            Level=null,XzDictionary=null,XzFilters=null,GzipWindow=null,LzoAlgorithm=null,Lz4HighCompression=false};
+        var candidates=new[]{
+            common with{Codec="xz",XzDictionary="100%",XzFilters="x86,arm,armthumb,powerpc,sparc,ia64"},
+            common with{Codec="xz",XzDictionary="100%"},
+            common with{Codec="zstd",Level=22},
+            common with{Codec="gzip",Level=9}
+        };
+        long bestDisk=long.MaxValue;
+        ulong bestUsed=ulong.MaxValue;
+        string? winner=null;
+        foreach(var option in candidates)
+        {
+            string trial=output+"."+Guid.NewGuid().ToString("N");
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                string label=option.Codec+(option.XzFilters!=null?" + BCJ":"");
+                log?.Invoke(Localization.T("Testing maximum compression with {0}…",label));
+                await SquashTools.PackSourcesAsync(sources,trial,option,log,token);
+                long disk=new System.IO.FileInfo(trial).Length;
+                ulong used;
+                using(var archive=new Archive(trial)) used=archive.ImageSize;
+                if(disk<bestDisk||(disk==bestDisk&&used<bestUsed))
+                {
+                    File.Move(trial,output,overwrite:true);
+                    bestDisk=disk;bestUsed=used;winner=label;
+                }
+            }
+            finally{if(File.Exists(trial))File.Delete(trial);}
+        }
+        log?.Invoke(Localization.T("Selected smallest image: {0}, {1} bytes.",winner,bestDisk));
     }
 
     // Multi-source DwarFS creation uses hard links on the same filesystem,

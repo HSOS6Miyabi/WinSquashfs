@@ -44,8 +44,9 @@ pub unsafe extern "C" fn wa_open(length: u64, reader: SourceRead, out: *mut *mut
         config.block_cache_size_limit(1usize << 30);
         let mut metadata_limit=64usize << 20;
         let mut index_limit=2usize << 20;
+        let mut schema_limit=16usize << 10;
         let (index, archive)=loop {
-            config.metadata_size_limit(metadata_limit).section_index_size_limit(index_limit);
+            config.metadata_size_limit(metadata_limit).section_index_size_limit(index_limit).metadata_schema_size_limit(schema_limit);
             match Archive::new_with_config(Source { length, read: reader },&config) {
                 Ok(pair)=>break pair,
                 Err(e)=>{
@@ -55,14 +56,16 @@ pub unsafe extern "C" fn wa_open(length: u64, reader: SourceRead, out: *mut *mut
                         detail.push_str(&format!(": {cause}"));
                         chain=cause.source();
                     }
-                    if !detail.contains("limit") && !detail.contains("PayloadTooLong") { return Err(e.into()); }
+                    if !detail.contains("exceeds the limit") && !detail.contains("exceeding the limit") && !detail.contains("PayloadTooLong") { return Err(e.into()); }
                     if detail.contains("section index") && !detail.contains("metadata") {
                         index_limit=index_limit.checked_mul(2).ok_or("section index too large")?;
+                    } else if detail.contains("schema") {
+                        schema_limit=schema_limit.checked_mul(2).ok_or("schema too large")?;
                     } else {
                         metadata_limit=metadata_limit.checked_mul(2).ok_or("metadata too large")?;
                     }
                     // Vec cannot represent a buffer larger than isize::MAX.
-                    if metadata_limit>isize::MAX as usize || index_limit>isize::MAX as usize {
+                    if metadata_limit>isize::MAX as usize || index_limit>isize::MAX as usize || schema_limit>isize::MAX as usize {
                         return Err(e.into());
                     }
                 }
