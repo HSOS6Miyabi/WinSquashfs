@@ -6,6 +6,11 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#define WIN32_NO_STATUS
+#include <windows.h>
+#undef WIN32_NO_STATUS
+#include <winternl.h>
+typedef NTSTATUS* PNTSTATUS;
 #include <winfsp/winfsp.h>
 #include <sddl.h>
 #include <winver.h>
@@ -35,8 +40,8 @@ struct Api {
         // Load the installed SDK/runtime, rather than any same-named DLL in
         // the current working directory.
         wchar_t path[32768]{};DWORD bytes=sizeof(path);
-        auto result=RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\WOW6432Node\\WinFsp",L"InstallDir",RRF_RT_REG_SZ,path,&bytes);
-        if(result!=ERROR_SUCCESS){bytes=sizeof(path);result=RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\WinFsp",L"InstallDir",RRF_RT_REG_SZ|RRF_SUBKEY_WOW6432KEY,path,&bytes);}
+        auto result=RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\WOW6432Node\\WinFsp",L"InstallDir",RRF_RT_REG_SZ,nullptr,path,&bytes);
+        if(result!=ERROR_SUCCESS){bytes=sizeof(path);result=RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\WinFsp",L"InstallDir",RRF_RT_REG_SZ|RRF_SUBKEY_WOW6432KEY,nullptr,path,&bytes);}
         if(result!=ERROR_SUCCESS)throw std::system_error(static_cast<int>(result),std::system_category(),"WinFsp InstallDir");
         auto dll=std::filesystem::path(path)/L"bin"/L"winfsp-" L"" FSP_FSCTL_PRODUCT_FILE_ARCH L".dll";
         DWORD ignored=0;const auto bytes_version=GetFileVersionInfoSizeW(dll.c_str(),&ignored);
