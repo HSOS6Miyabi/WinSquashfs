@@ -36,6 +36,7 @@ public:
     virtual void read_exact(InodeId inode, std::uint64_t offset, std::span<std::byte> output) const = 0;
     virtual void validate_source() const = 0;
     virtual void validate_path() const { validate_source(); }
+    virtual bool source_changed() const noexcept { return false; }
 };
 
 ArchiveFormat detect_format(const RandomAccessSource& source);
@@ -63,6 +64,7 @@ public:
     }
     ArchiveInfo info() const { backend_->validate_source(); return backend_->info(); }
     void validate_path() const { backend_->validate_path(); }
+    bool source_changed() const noexcept { return backend_->source_changed(); }
     FileInfo stat(InodeId id) const { backend_->validate_source(); return backend_->stat(id); }
     std::vector<DirectoryEntry> list(InodeId id) const {
         backend_->validate_source();

@@ -75,6 +75,7 @@ public:
     }
     void validate_source()const override{source_->validate();}
     void validate_path()const override{source_->validate_path();}
+    bool source_changed()const noexcept override{return source_->source_changed();}
 private:
     static dwarfs::reader::filesystem_options options(){dwarfs::reader::filesystem_options o;o.block_cache.max_bytes=128u<<20;o.block_cache.num_workers=std::clamp(std::thread::hardware_concurrency(),2u,8u);o.metadata.readonly=true;o.metadata.check_consistency=true;o.inode_reader.readahead=1u<<20;return o;}
     dwarfs::reader::inode_view inode(InodeId id)const{if(id>static_cast<std::uint64_t>(INT_MAX))throw std::out_of_range("DwarFS inode");auto result=filesystem_.find(static_cast<int>(id));if(!result)throw std::out_of_range("DwarFS inode not found");return *result;}

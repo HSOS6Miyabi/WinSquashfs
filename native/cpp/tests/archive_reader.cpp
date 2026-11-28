@@ -111,6 +111,12 @@ int main() {
     require_failure([&] { volatile_source->validate(); });
     auto disappearing = open_file_source(path, SourcePolicy::transient_handle);
     std::filesystem::remove(path);
+#ifdef _WIN32
+    // Local NTFS directory notifications must reach existing source generations.
+    for(unsigned i=0;i<100&&!disappearing->source_changed();++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    require(disappearing->source_changed());
+#endif
     require_failure([&] { disappearing->validate(); });
 
     for (auto format : {ArchiveFormat::squashfs, ArchiveFormat::dwarfs, ArchiveFormat::erofs, ArchiveFormat::unknown}) {

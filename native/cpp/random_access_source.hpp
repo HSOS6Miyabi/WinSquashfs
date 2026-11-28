@@ -29,6 +29,7 @@ public:
     // Check whether a cached generation can still be used.
     virtual void validate() const = 0;
     virtual void validate_path() const { validate(); }
+    virtual bool source_changed() const noexcept { return false; }
 };
 
 enum class SourcePolicy { protected_handle, transient_handle };

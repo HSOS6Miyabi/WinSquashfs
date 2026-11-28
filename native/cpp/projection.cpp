@@ -25,14 +25,20 @@ ArchiveOpener make_archive_opener(fs::path decoders,std::size_t cache_bytes){ret
 struct ImagePool::Entry {std::u16string key;std::shared_future<std::shared_ptr<ArchiveTree>> future;std::size_t active=0;Clock::time_point idle=Clock::time_point::max();};
 struct ImagePool::State {
     State(ArchiveOpener fn,Settings cfg):opener(std::move(fn)),settings(cfg){}
-    ArchiveOpener opener;Settings settings;mutable std::mutex mutex;std::condition_variable_any wake;std::map<std::u16string,std::shared_ptr<Entry>,WindowsNameLess> images;
+    ArchiveOpener opener;Settings settings;mutable std::mutex mutex;std::condition_variable_any wake;std::uint64_t revision=0;std::map<std::u16string,std::shared_ptr<Entry>,WindowsNameLess> images;
+    void changed(){++revision;wake.notify_all();}
+    Clock::time_point deadline() const {
+        auto next=Clock::time_point::max();
+        for(auto& [key,entry]:images)if(!entry->active)next=std::min(next,entry->idle+settings.idle_time);
+        return next;
+    }
     void erase_if_current(const std::shared_ptr<Entry>& entry){auto it=images.find(entry->key);if(it!=images.end()&&it->second==entry)images.erase(it);}
     void trim(){
         auto now=Clock::now();std::vector<std::shared_ptr<Entry>> idle;
         for(auto it=images.begin();it!=images.end();){auto entry=it->second;if(!entry->active&&entry->idle+settings.idle_time<=now)it=images.erase(it);else{if(!entry->active)idle.push_back(entry);++it;}}
         if(idle.size()>settings.idle_images){std::sort(idle.begin(),idle.end(),[](auto& a,auto& b){return a->idle<b->idle;});for(std::size_t i=0;i<idle.size()-settings.idle_images;++i)erase_if_current(idle[i]);}
     }
-    void release(const std::shared_ptr<Entry>& entry)noexcept{try{std::lock_guard lock(mutex);if(entry->active&&!--entry->active){entry->idle=Clock::now();trim();}wake.notify_all();}catch(...){}}
+    void release(const std::shared_ptr<Entry>& entry)noexcept{try{std::lock_guard lock(mutex);if(entry->active&&!--entry->active){entry->idle=Clock::now();trim();}changed();}catch(...){}}
     void sweep(){
         std::vector<std::shared_ptr<Entry>> check;
         {std::lock_guard lock(mutex);trim();for(auto& [key,entry]:images)if(entry->future.wait_for(std::chrono::seconds(0))==std::future_status::ready)check.push_back(entry);}
@@ -44,7 +50,17 @@ struct ImagePool::State {
 ImagePool::Lease::~Lease(){state_->release(entry_);}
 ImagePool::ImagePool(ArchiveOpener opener,Settings settings):state_(std::make_shared<State>(std::move(opener),settings)){
     if(!state_->opener||settings.idle_time.count()<0||settings.idle_time>std::chrono::hours(24)||settings.idle_images>1024)throw std::invalid_argument("invalid image cache configuration");
-    worker_=std::jthread([state=state_](std::stop_token stop){while(!stop.stop_requested()){std::unique_lock lock(state->mutex);if(state->images.empty())state->wake.wait(lock,stop,[&]{return !state->images.empty();});else state->wake.wait_for(lock,stop,std::chrono::milliseconds(500),[]{return false;});lock.unlock();if(!stop.stop_requested())state->sweep();}});
+    worker_=std::jthread([state=state_](std::stop_token stop){
+        std::unique_lock lock(state->mutex);
+        while(!stop.stop_requested()){
+            state->trim();
+            auto next=state->deadline();
+            auto revision=state->revision;
+            auto changed=[&]{return state->revision!=revision;};
+            if(next==Clock::time_point::max())state->wake.wait(lock,stop,changed);
+            else state->wake.wait_until(lock,stop,next,changed);
+        }
+    });
 }
 ImagePool::~ImagePool(){worker_.request_stop();state_->wake.notify_all();if(worker_.joinable())worker_.join();}
 std::size_t ImagePool::size()const{std::lock_guard lock(state_->mutex);return state_->images.size();}
@@ -52,7 +68,7 @@ void ImagePool::sweep(){state_->sweep();}
 std::shared_ptr<ImagePool::Lease> ImagePool::acquire(const fs::path& path){
     auto absolute=fs::absolute(path).lexically_normal();auto key=absolute.u16string();
     for(int attempt=0;attempt<2;++attempt){std::shared_ptr<Entry> entry;std::shared_ptr<std::promise<std::shared_ptr<ArchiveTree>>> promise;
-        {std::lock_guard lock(state_->mutex);auto it=state_->images.find(key);if(it!=state_->images.end())entry=it->second;else{promise=std::make_shared<std::promise<std::shared_ptr<ArchiveTree>>>();entry=std::make_shared<Entry>();entry->key=key;entry->future=promise->get_future().share();state_->images.emplace(key,entry);state_->wake.notify_all();}++entry->active;}
+        {std::lock_guard lock(state_->mutex);auto it=state_->images.find(key);if(it!=state_->images.end())entry=it->second;else{promise=std::make_shared<std::promise<std::shared_ptr<ArchiveTree>>>();entry=std::make_shared<Entry>();entry->key=key;entry->future=promise->get_future().share();state_->images.emplace(key,entry);state_->changed();}++entry->active;}
         try{
             if(promise){try{promise->set_value(state_->opener(absolute,SourcePolicy::transient_handle));}catch(...){promise->set_exception(std::current_exception());}}
             auto tree=entry->future.get();if(!tree)throw std::runtime_error("archive opener returned no image");tree->validate_path();return std::shared_ptr<Lease>(new Lease(state_,entry,std::move(tree)));

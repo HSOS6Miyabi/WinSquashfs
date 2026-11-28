@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "random_access_source.hpp"
+#include "directory_changes.hpp"
 #include <algorithm>
 #include <atomic>
 #include <limits>
@@ -299,8 +300,31 @@ class FileSource final : public RandomAccessSource, public std::enable_shared_fr
 public:
     FileSource(std::filesystem::path path, SourcePolicy policy)
         : path_(std::filesystem::absolute(std::move(path))), policy_(policy) {
+#ifdef _WIN32
+        if(policy_==SourcePolicy::transient_handle) {
+            changes_=std::make_unique<DirectoryChanges>();
+            changes_->subscribe(path_);
+        }
+#endif
         auto h = std::make_shared<Handle>(open_handle(path_, policy_));
         original_ = stamp(h->get());
+#ifdef _WIN32
+        if(changes_){
+            std::wstring resolved(512,L'\0');
+            auto count=GetFinalPathNameByHandleW(h->get(),resolved.data(),static_cast<DWORD>(resolved.size()),0);
+            if(count>=resolved.size()&&count<32768){
+                resolved.resize(count+1);
+                count=GetFinalPathNameByHandleW(h->get(),resolved.data(),static_cast<DWORD>(resolved.size()),0);
+            }
+            if(count&&count<resolved.size()){
+                resolved.resize(count);
+                if(resolved.starts_with(L"\\\\?\\UNC\\"))resolved=L"\\\\"+resolved.substr(8);
+                else if(resolved.starts_with(L"\\\\?\\"))resolved.erase(0,4);
+                if(CompareStringOrdinal(path_.c_str(),-1,resolved.c_str(),-1,TRUE)!=CSTR_EQUAL)
+                    changes_->subscribe(std::filesystem::path(resolved));
+            }else changes_->state()->complete=false;
+        }
+#endif
         if (policy_ == SourcePolicy::protected_handle) retained_ = h;
 #ifdef _WIN32
         else {
@@ -337,10 +361,8 @@ public:
                 if(retained->get()!=invalid_handle &&
                    (policy_==SourcePolicy::protected_handle || !oplock_ || !oplock_->broken())){
                     if(policy_==SourcePolicy::protected_handle)return;
-                    auto now=std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch()).count();
-                    auto previous=last_probe_.load();
-                    if(now-previous<500 || !last_probe_.compare_exchange_strong(previous,now))return;
+                    if(changes_&&changes_->state()->complete.load(std::memory_order_acquire)&&
+                        changes_->state()->revision.load(std::memory_order_acquire)==checked_revision_.load(std::memory_order_acquire))return;
                 }
             }
 #endif
@@ -360,6 +382,9 @@ public:
                 return;
             }
 #ifdef _WIN32
+            // Capture the notification revision before checking the file.
+            // Changes arriving during the probe remain pending.
+            auto revision=changes_?changes_->state()->revision.load(std::memory_order_acquire):0;
             // When the read/handle oplock is healthy, the retained read handle
             // excludes writers. A metadata probe detects ancestor renames.
             if(auto retained=retained_handle()){
@@ -368,7 +393,10 @@ public:
                     cached=retained->get()!=invalid_handle&&oplock_&&!oplock_->broken();}
                 if(cached){
                     check_named_path();
-                    if(!oplock_->broken()){ensure_valid();return;}
+                    if(!oplock_->broken()){
+                        checked_revision_.store(revision,std::memory_order_release);
+                        ensure_valid();return;
+                    }
                 }
             }
 #endif
@@ -376,8 +404,19 @@ public:
             // writes while checking identity and the committed modification time.
             auto probe=open_handle(path_,policy_);
             check(probe.get());
+#ifdef _WIN32
+            checked_revision_.store(revision,std::memory_order_release);
+#endif
             ensure_valid();
         } catch (...) { invalidate(); throw; }
+    }
+    bool source_changed() const noexcept override {
+        if(invalid_.load(std::memory_order_acquire))return true;
+#ifdef _WIN32
+        if(changes_)return changes_->state()->revision.load(std::memory_order_acquire)!=
+            checked_revision_.load(std::memory_order_acquire);
+#endif
+        return false;
     }
     std::unique_ptr<ReadSession> begin_read() const override {
         return std::make_unique<Session>(shared_from_this());
@@ -419,7 +458,8 @@ private:
     mutable std::shared_ptr<Handle> retained_;
 #ifdef _WIN32
     mutable std::shared_mutex retained_io_;
-    mutable std::atomic<std::int64_t> last_probe_{0};
+    std::unique_ptr<DirectoryChanges> changes_;
+    mutable std::atomic<std::uint64_t> checked_revision_{0};
     std::unique_ptr<Oplock> oplock_;
 #endif
     mutable std::atomic<bool> invalid_{false};
