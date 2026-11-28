@@ -27,6 +27,7 @@ private:
     Microsoft::UI::Xaml::Controls::ScrollViewer scroll_{nullptr};
     Microsoft::UI::Dispatching::DispatcherQueueTimer mount_timer_{nullptr};
     Microsoft::UI::Xaml::Controls::TextBlock status_{nullptr};
+    Microsoft::UI::Xaml::Controls::ProgressRing progress_{nullptr};
     Microsoft::UI::Xaml::Controls::Button cancel_{nullptr},mount_button_{nullptr};
     Microsoft::UI::Xaml::Controls::ComboBox drive_choice_{nullptr};
     Microsoft::UI::Xaml::Controls::TextBlock image_summary_{nullptr};
