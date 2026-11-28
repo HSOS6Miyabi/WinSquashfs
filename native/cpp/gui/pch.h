@@ -35,3 +35,5 @@
 #include <cmath>
 #include "windows_services.hpp"
 #include "image_creation.hpp"
+
+#include "MainWindow.xaml.h"
