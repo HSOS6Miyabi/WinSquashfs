@@ -154,7 +154,7 @@ try {
         $agentStarted=$true
         Write-Host "Starting $language agent from $other CLI with redirected output"
         Invoke-Cli --lang $other unc-start|Out-Null
-        if([ArchiveFSTray]::FindWindow('WinArchiveFSPro.Unc.Tray',$null) -eq [IntPtr]::Zero){throw 'Notification area window missing'}
+        if([ArchiveFSTray]::FindWindow('WinArchiveFSPro.Unc.Tray','WinArchiveFSPro UNC') -eq [IntPtr]::Zero){throw 'Notification area window missing'}
         Write-Host "Agent started; checking both languages and UNC data"
         if((Invoke-Cli --lang en-US unc-status) -ne 'Running'){throw 'English status did not detect running agent'}
         if((Invoke-Cli --lang zh-CN unc-status) -ne '运行中'){throw 'Chinese status did not detect running agent'}
@@ -174,7 +174,7 @@ try {
     [IO.File]::WriteAllText($settingsFile,($settings|ConvertTo-Json -Depth 4 -Compress))
     $agentStarted=$true
     Invoke-Cli unc-start|Out-Null
-    if([ArchiveFSTray]::FindWindow('WinArchiveFSPro.Unc.Tray',$null) -ne [IntPtr]::Zero){throw 'Disabled notification area window exists'}
+    if([ArchiveFSTray]::FindWindow('WinArchiveFSPro.Unc.Tray','WinArchiveFSPro UNC') -ne [IntPtr]::Zero){throw 'Disabled notification area window exists'}
     if([Convert]::ToHexString([IO.File]::ReadAllBytes('\\sfs$\extra-dist\测试镜像.squashfs\测试.txt')) -ne '0001027FFF'){throw 'Additional directory alias read mismatch'}
     $letter=$null
     foreach($c in [char[]]'ZYXWVUTSRQPONMLKJIHGFED'){if(![IO.Directory]::Exists(([string]$c+':\'))){$letter=[string]$c;break}}
