@@ -39,12 +39,20 @@ struct ImagePool::State {
         if(idle.size()>settings.idle_images){std::sort(idle.begin(),idle.end(),[](auto& a,auto& b){return a->idle<b->idle;});for(std::size_t i=0;i<idle.size()-settings.idle_images;++i)erase_if_current(idle[i]);}
     }
     void release(const std::shared_ptr<Entry>& entry)noexcept{try{std::lock_guard lock(mutex);if(entry->active&&!--entry->active){entry->idle=Clock::now();trim();}changed();}catch(...){}}
-    void sweep(){
+    void sweep(bool changed_only=false){
         std::vector<std::shared_ptr<Entry>> check;
         {std::lock_guard lock(mutex);trim();for(auto& [key,entry]:images)if(entry->future.wait_for(std::chrono::seconds(0))==std::future_status::ready)check.push_back(entry);}
         // Active readers may retain their own generation. Drop the cache
         // entry if the named source has disappeared or been replaced.
-        for(auto& entry:check){try{entry->future.get()->validate_path();}catch(...){std::lock_guard lock(mutex);erase_if_current(entry);}}
+        for(auto& entry:check){
+            try{
+                auto tree=entry->future.get();
+                if(!changed_only||tree->source_changed())tree->validate_path();
+            }catch(...){
+                std::lock_guard lock(mutex);
+                erase_if_current(entry);
+            }
+        }
     }
 };
 ImagePool::Lease::~Lease(){state_->release(entry_);}
@@ -52,13 +60,21 @@ ImagePool::ImagePool(ArchiveOpener opener,Settings settings):state_(std::make_sh
     if(!state_->opener||settings.idle_time.count()<0||settings.idle_time>std::chrono::hours(24)||settings.idle_images>1024)throw std::invalid_argument("invalid image cache configuration");
     worker_=std::jthread([state=state_](std::stop_token stop){
         std::unique_lock lock(state->mutex);
+        constexpr auto check_interval=std::chrono::milliseconds(500);
+        auto next_check=Clock::now()+check_interval;
         while(!stop.stop_requested()){
             state->trim();
-            auto next=state->deadline();
-            auto revision=state->revision;
-            auto changed=[&]{return state->revision!=revision;};
-            if(next==Clock::time_point::max())state->wake.wait(lock,stop,changed);
-            else state->wake.wait_until(lock,stop,next,changed);
+            if(Clock::now()>=next_check){
+                // A slow or remote filesystem must not hold the pool mutex.
+                lock.unlock();
+                state->sweep(true);
+                lock.lock();
+                next_check=Clock::now()+check_interval;
+                continue;
+            }
+            const auto next=std::min(state->deadline(),next_check);
+            const auto revision=state->revision;
+            state->wake.wait_until(lock,stop,next,[&]{return state->revision!=revision;});
         }
     });
 }

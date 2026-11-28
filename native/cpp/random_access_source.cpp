@@ -412,11 +412,16 @@ public:
     }
     bool source_changed() const noexcept override {
         if(invalid_.load(std::memory_order_acquire))return true;
+        if(policy_==SourcePolicy::protected_handle)return false;
 #ifdef _WIN32
-        if(changes_)return changes_->state()->revision.load(std::memory_order_acquire)!=
-            checked_revision_.load(std::memory_order_acquire);
+        // A healthy oplock plus complete directory monitoring avoids redundant
+        // metadata I/O. Otherwise the caller must periodically check the name.
+        if(changes_&&oplock_&&!oplock_->broken()&&
+           changes_->state()->complete.load(std::memory_order_acquire))
+            return changes_->state()->revision.load(std::memory_order_acquire)!=
+                checked_revision_.load(std::memory_order_acquire);
 #endif
-        return false;
+        return true;
     }
     std::unique_ptr<ReadSession> begin_read() const override {
         return std::make_unique<Session>(shared_from_this());

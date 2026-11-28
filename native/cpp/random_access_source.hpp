@@ -29,6 +29,7 @@ public:
     // Check whether a cached generation can still be used.
     virtual void validate() const = 0;
     virtual void validate_path() const { validate(); }
+    // True when the source may have changed or requires a periodic identity check.
     virtual bool source_changed() const noexcept { return false; }
 };
 

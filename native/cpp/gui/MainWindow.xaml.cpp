@@ -58,11 +58,28 @@ MainWindow::MainWindow(){
     page_actions_=panel(true);page_actions_.Margin(Thickness{12,8,12,8});Grid::SetRow(page_actions_,1);content.Children().Append(page_actions_);
     nav_host_.Content(content);Grid::SetRow(nav_host_,1);root.Children().Append(nav_host_);
     auto footer=panel(true);progress_=ProgressRing();progress_.Width(20);progress_.Height(20);progress_.IsActive(false);progress_.Visibility(Visibility::Collapsed);footer.Children().Append(progress_);status_=identify(label(tr(L"Ready",L"就绪")),L"StatusText");cancel_=button(tr(L"Cancel",L"取消"),[this]{stop_.request_stop();});cancel_.IsEnabled(false);footer.Children().Append(cancel_);footer.Children().Append(status_);Grid::SetRow(footer,2);root.Children().Append(footer);
-    mount_timer_=DispatcherQueue().CreateTimer();mount_timer_.Interval(std::chrono::seconds(1));mount_timer_.Tick([this](auto const&,auto const&){auto count=mounts_.size();std::erase_if(mounts_,[](auto& m){return !m->mounted();});if(count!=mounts_.size()&&!busy_){refresh_mounts();refresh_drive_choices();}if(archive_&&!busy_&&archive_->source_changed()){try{archive_->validate_path();}catch(...){archive_.reset();directory_.reset();image_.clear();++preview_revision_;preview_stop_.request_stop();if(page_==0)refresh_entries();status_.Text(tr(L"Source image removed or modified",L"源镜像已删除或修改"));}}});mount_timer_.Start();
+    mount_timer_=DispatcherQueue().CreateTimer();mount_timer_.Interval(std::chrono::seconds(1));mount_timer_.Tick([this](auto const&,auto const&){auto count=mounts_.size();std::erase_if(mounts_,[](auto& m){return !m->mounted();});if(count!=mounts_.size()&&!busy_){refresh_mounts();refresh_drive_choices();}if(!busy_)check_source();});mount_timer_.Start();
     Closed([this](auto const&,auto const&){closing_=true;stop_.request_stop();preview_stop_.request_stop();mount_timer_.Stop();mounts_.clear();});
     navigate(0);
 }
 HWND MainWindow::hwnd(){HWND result=nullptr;check_hresult(get_strong().as<Microsoft::UI::Xaml::Window>().as<IWindowNative>()->get_WindowHandle(&result));return result;}
+fire_and_forget MainWindow::check_source(){
+    if(closing_||source_check_pending_||busy_||!archive_||!archive_->source_changed())co_return;
+    auto lifetime=get_strong();
+    auto tree=archive_;
+    source_check_pending_=true;
+    apartment_context ui;
+    bool invalid=false;
+    co_await resume_background();
+    try{tree->validate_path();}catch(...){invalid=true;}
+    try{co_await ui;}catch(...){co_return;}
+    source_check_pending_=false;
+    if(closing_||busy_||archive_!=tree||!invalid)co_return;
+    archive_.reset();directory_.reset();image_.clear();
+    ++preview_revision_;preview_stop_.request_stop();
+    if(page_==0)refresh_entries();
+    status_.Text(tr(L"Source image removed or modified",L"源镜像已删除或修改"));
+}
 void MainWindow::report(std::exception_ptr error){try{if(error)std::rethrow_exception(error);}catch(const hresult_error& e){status_.Text(e.message());}catch(const std::exception& e){status_.Text(text(e.what()));}catch(...){status_.Text(tr(L"Operation failed",L"操作失败"));}}
 fire_and_forget MainWindow::run(Task task,hstring message){auto lifetime=get_strong();if(busy_||closing_)co_return;busy_=true;stop_=std::stop_source();auto token=stop_.get_token();nav_host_.IsEnabled(false);scroll_.IsEnabled(false);page_actions_.IsHitTestVisible(false);progress_.Visibility(Visibility::Visible);progress_.IsActive(true);cancel_.IsEnabled(true);status_.Text(message);apartment_context ui;std::exception_ptr error;std::function<void()> finish;
     co_await resume_background();try{finish=task(token);}catch(...){error=std::current_exception();}try{co_await ui;}catch(...){co_return;}if(closing_)co_return;busy_=false;nav_host_.IsEnabled(true);scroll_.IsEnabled(true);page_actions_.IsHitTestVisible(true);progress_.IsActive(false);progress_.Visibility(Visibility::Collapsed);cancel_.IsEnabled(false);if(error){report(error);co_return;}status_.Text(tr(L"Completed",L"已完成"));try{if(finish)finish();}catch(...){report(std::current_exception());}}
@@ -74,25 +91,43 @@ void MainWindow::browser(){
     auto commands=panel(true);
     commands.Children().Append(button(tr(L"Open image",L"打开镜像"),[this]{try{auto p=pick(false);if(!p.empty())open_image(p.front());}catch(...){report(std::current_exception());}},L"OpenImage"));
     auto recent=button(tr(L"Recent",L"最近打开"),[]{});MenuFlyout menu;for(auto& p:recent_images()){MenuFlyoutItem item;item.Text(text(p.u16string()));item.Click([this,p](auto const&,auto const&){open_image(p);});menu.Items().Append(item);}MenuFlyoutItem clear;clear.Text(tr(L"Clear history",L"清除历史记录"));clear.Click([this](auto const&,auto const&){try{clear_recent_images();navigate(0);}catch(...){report(std::current_exception());}});menu.Items().Append(clear);recent.Flyout(menu);commands.Children().Append(recent);
-    commands.Children().Append(button(tr(L"Close",L"关闭"),[this]{archive_.reset();directory_.reset();image_.clear();refresh_entries();},L"CloseImage"));
-    commands.Children().Append(button(tr(L"Up",L"上一级"),[this]{if(directory_)if(auto p=directory_->parent.lock()){directory_=p;refresh_entries();}},L"UpDirectory"));children.Append(commands);
+    close_button_=button(tr(L"Close",L"关闭"),[this]{archive_.reset();directory_.reset();image_.clear();refresh_entries();},L"CloseImage");
+    commands.Children().Append(close_button_);
+    up_button_=button(tr(L"Up",L"上一级"),[this]{if(directory_)if(auto p=directory_->parent.lock()){directory_=p;refresh_entries();}},L"UpDirectory");
+    commands.Children().Append(up_button_);children.Append(commands);
     auto mount_row=panel(true);drive_choice_=identify(combo(tr(L"Drive letter",L"盘符"),{tr(L"Automatic",L"自动")}),L"DriveChoice");drive_choice_.MinWidth(100);refresh_drive_choices();mount_row.Children().Append(drive_choice_);
     mount_button_=button(tr(L"Mount image",L"挂载镜像"),[this]{mount_image();},L"MountImage");accent(mount_button_);mount_row.Children().Append(mount_button_);
-    mount_row.Children().Append(button(tr(L"Verify",L"校验"),[this]{if(!archive_)return;auto tree=archive_;run([this,tree](std::stop_token s){auto r=tree->verify(s);return [this,r]{status_.Text(text(std::to_string(r.files)+" files / "+std::to_string(r.bytes)+" bytes"));};},tr(L"Verifying",L"正在校验"));},L"VerifyImage"));children.Append(mount_row);
-    auto actions=panel(true);actions.Children().Append(button(tr(L"Extract selected",L"提取选中项"),[this]{extract(false);},L"ExtractSelected"));actions.Children().Append(button(tr(L"Extract all",L"全部提取"),[this]{extract(true);},L"ExtractAll"));actions.Children().Append(button(tr(L"Open UNC",L"打开 UNC"),[this]{if(!image_.empty()){auto p=image_;run([p](std::stop_token s){open_unc(p,s);return std::function<void()>{};},tr(L"Opening UNC path",L"正在打开 UNC 路径"));}},L"OpenUnc"));actions.Children().Append(button(tr(L"Copy UNC path",L"复制 UNC 路径"),[this]{try{if(image_.empty())return;Windows::ApplicationModel::DataTransfer::DataPackage data;data.SetText(text(Settings::load().unc_path(image_)));Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(data);}catch(...){report(std::current_exception());}},L"CopyUnc"));page_actions_.Children().Append(actions);
+    verify_button_=button(tr(L"Verify",L"校验"),[this]{if(!archive_)return;auto tree=archive_;run([this,tree](std::stop_token s){auto r=tree->verify(s);return [this,r]{status_.Text(text(std::to_string(r.files)+" files / "+std::to_string(r.bytes)+" bytes"));};},tr(L"Verifying",L"正在校验"));},L"VerifyImage");
+    mount_row.Children().Append(verify_button_);children.Append(mount_row);
+    auto actions=panel(true);
+    extract_selected_button_=button(tr(L"Extract selected",L"提取选中项"),[this]{extract(false);},L"ExtractSelected");
+    extract_all_button_=button(tr(L"Extract all",L"全部提取"),[this]{extract(true);},L"ExtractAll");
+    open_unc_button_=button(tr(L"Open UNC",L"打开 UNC"),[this]{if(!image_.empty()){auto p=image_;run([p](std::stop_token s){open_unc(p,s);return std::function<void()>{};},tr(L"Opening UNC path",L"正在打开 UNC 路径"));}},L"OpenUnc");
+    copy_unc_button_=button(tr(L"Copy UNC path",L"复制 UNC 路径"),[this]{try{if(image_.empty())return;Windows::ApplicationModel::DataTransfer::DataPackage data;data.SetText(text(Settings::load().unc_path(image_)));Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(data);}catch(...){report(std::current_exception());}},L"CopyUnc");
+    for(auto const& b:{extract_selected_button_,extract_all_button_,open_unc_button_,copy_unc_button_})actions.Children().Append(b);
+    page_actions_.Children().Append(actions);
     address_=identify(box(tr(L"Archive path",L"存档内路径")),L"ArchivePath");address_.KeyDown([this](auto const&,Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const& e){if(e.Key()==Windows::System::VirtualKey::Enter&&archive_){try{auto node=archive_->find(u16(address_.Text()));if(!node||node->info.kind!=FileKind::directory)throw std::runtime_error("directory not found");directory_=node;refresh_entries();}catch(...){report(std::current_exception());}}});children.Append(address_);
     filter_=identify(box(tr(L"Filter by name",L"按名称筛选")),L"FileFilter");filter_.TextChanged([this](auto const&,auto const&){if(!busy_)refresh_entries();});children.Append(filter_);
     Grid files;files.ColumnSpacing(12);
     ColumnDefinition list_column;list_column.Width(GridLength{3,GridUnitType::Star});files.ColumnDefinitions().Append(list_column);
     ColumnDefinition preview_column;preview_column.Width(GridLength{2,GridUnitType::Star});files.ColumnDefinitions().Append(preview_column);
-    entries_=identify(ListView(),L"FileList");entries_.Height(204);entries_.SelectionMode(ListViewSelectionMode::Single);entries_.SelectionChanged([this](auto const&,auto const&){if(!busy_)preview_selected();});entries_.DoubleTapped([this](auto const&,auto const&){auto i=entries_.SelectedIndex();if(i>=0&&static_cast<size_t>(i)<visible_.size()&&visible_[i]->info.kind==FileKind::directory){directory_=visible_[i];refresh_entries();}});files.Children().Append(entries_);
+    entries_=identify(ListView(),L"FileList");entries_.Height(204);entries_.SelectionMode(ListViewSelectionMode::Single);entries_.SelectionChanged([this](auto const&,auto const&){if(!busy_){update_browser_buttons();preview_selected();}});entries_.DoubleTapped([this](auto const&,auto const&){auto i=entries_.SelectedIndex();if(i>=0&&static_cast<size_t>(i)<visible_.size()&&visible_[i]->info.kind==FileKind::directory){directory_=visible_[i];refresh_entries();}});files.Children().Append(entries_);
     preview_=identify(box(tr(L"Preview / metadata",L"预览及属性")),L"FilePreview");preview_.AcceptsReturn(true);preview_.IsReadOnly(true);preview_.TextWrapping(TextWrapping::Wrap);preview_.Height(204);Grid::SetColumn(preview_,1);files.Children().Append(preview_);children.Append(files);
     body_.AllowDrop(true);refresh_entries();
 }
-void MainWindow::update_browser_buttons(){if(mount_button_)mount_button_.IsEnabled(static_cast<bool>(archive_));}
+void MainWindow::update_browser_buttons(){
+    const bool opened=static_cast<bool>(archive_);
+    for(auto const& control:{mount_button_,close_button_,verify_button_,extract_all_button_,open_unc_button_,copy_unc_button_})
+        if(control)control.IsEnabled(opened);
+    if(up_button_)up_button_.IsEnabled(opened&&directory_&&!directory_->parent.expired());
+    if(extract_selected_button_){
+        const auto index=entries_?entries_.SelectedIndex():-1;
+        extract_selected_button_.IsEnabled(opened&&index>=0&&static_cast<std::size_t>(index)<visible_.size());
+    }
+}
 void MainWindow::refresh_entries(){if(!entries_||page_!=0)return;++preview_revision_;preview_stop_.request_stop();entries_.Items().Clear();visible_.clear();if(preview_)preview_.Text(L"");update_browser_buttons();if(!archive_||!directory_){address_.Text(L"");image_summary_.Text(tr(L"Open a read-only filesystem image",L"打开只读文件系统镜像"));return;}try{auto info=archive_->info();image_summary_.Text(text(image_.u16string()+u" · "+to_utf16(format_name(info.format))+u" · "+to_utf16(std::to_string(info.image_size))+u" B"));std::u16string path;for(auto p=directory_;p&&p->parent.lock();p=p->parent.lock())path=u"\\"+p->windows_name+path;address_.Text(text(path.empty()?u"\\":path));auto filter=lower(std::wstring(filter_.Text()));for(auto& n:archive_->children(directory_)){auto name=text(display_name(n));if(!filter.empty()&&lower(std::wstring(name)).find(filter)==std::wstring::npos&&lower(std::wstring(text(n->windows_name))).find(filter)==std::wstring::npos)continue;visible_.push_back(n);auto suffix=n->info.kind==FileKind::directory?tr(L"  [Folder]",L"  [文件夹]"):text("  "+std::to_string(n->info.size)+" B");entries_.Items().Append(box_value(hstring(std::wstring(name)+std::wstring(suffix))));}}catch(...){report(std::current_exception());}}
 fire_and_forget MainWindow::preview_selected(){
-    auto lifetime=get_strong();preview_stop_.request_stop();preview_stop_=std::stop_source();auto token=preview_stop_.get_token();auto revision=++preview_revision_;auto i=entries_.SelectedIndex();if(!preview_||!archive_||i<0||static_cast<size_t>(i)>=visible_.size())co_return;auto node=visible_[i];auto tree=archive_;auto heading=display_name(node)+to_utf16("\n"+std::to_string(node->info.size)+" B\n");preview_.Text(text(heading));if(node->info.kind!=FileKind::regular)co_return;
+    auto lifetime=get_strong();preview_stop_.request_stop();preview_stop_=std::stop_source();auto token=preview_stop_.get_token();auto revision=++preview_revision_;auto i=entries_.SelectedIndex();if(!preview_)co_return;if(!archive_||i<0||static_cast<size_t>(i)>=visible_.size()){preview_.Text(L"");co_return;}auto node=visible_[i];auto tree=archive_;auto heading=display_name(node)+to_utf16("\n"+std::to_string(node->info.size)+" B\n");preview_.Text(text(heading));if(node->info.kind!=FileKind::regular)co_return;
     apartment_context ui;std::u16string value;std::exception_ptr error;co_await resume_background();try{std::vector<std::byte> bytes(static_cast<size_t>(std::min<uint64_t>(node->info.size,4096)));auto n=tree->read(node,0,bytes,token);std::string content;if(n)content.assign(reinterpret_cast<const char*>(bytes.data()),n);try{if(content.find('\0')!=std::string::npos)throw std::runtime_error("binary");value=to_utf16(content);}catch(...){std::ostringstream out;out<<std::hex<<std::setfill('0');for(size_t k=0;k<n;++k){out<<std::setw(2)<<std::to_integer<unsigned>(bytes[k])<<((k%16==15)?'\n':' ');}value=to_utf16(out.str());}}catch(...){error=std::current_exception();}try{co_await ui;}catch(...){co_return;}if(closing_||page_!=0||revision!=preview_revision_||token.stop_requested())co_return;if(error){report(error);co_return;}preview_.Text(text(heading+u"\n"+value));
 }
 fire_and_forget MainWindow::accept_drop(DragEventArgs args,bool create){auto lifetime=get_strong();auto deferral=args.GetDeferral();try{if(!busy_&&!closing_&&args.DataView().Contains(Windows::ApplicationModel::DataTransfer::StandardDataFormats::StorageItems())){auto items=co_await args.DataView().GetStorageItemsAsync();if(!closing_&&!busy_){std::vector<fs::path> paths;for(auto item:items)if(!item.Path().empty())paths.emplace_back(u16(item.Path()));if(create){for(auto& p:paths)if(std::find(sources_.begin(),sources_.end(),p)==sources_.end())sources_.push_back(p);refresh_sources();}else if(!paths.empty())open_image(paths.front());}}}catch(...){if(!closing_)report(std::current_exception());}deferral.Complete();}

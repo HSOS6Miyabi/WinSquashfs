@@ -52,9 +52,16 @@ try{
   $p=Start-Process $gui -ArgumentList @('--open',('"'+$image+'"')) -PassThru
   $w=Window $p 'FileList'
   $null=Control $w 'MountImage'
+  foreach($id in @('CloseImage','VerifyImage','ExtractAll','OpenUnc','CopyUnc')) {
+    if(!(Control $w $id $false).Current.IsEnabled){throw "Open image action disabled: $id"}
+  }
+  foreach($id in @('UpDirectory','ExtractSelected')) {
+    if((Control $w $id $false).Current.IsEnabled){throw "Root or unselected action enabled: $id"}
+  }
   $entry=Wait-Until {foreach($item in (Items $w 'FileList')){if($item.Current.Name -like 'extra.txt*'){return $item}}} 'file list entry'
   $entry.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
   $null=Wait-Until {(Value $w 'FilePreview') -like '*second selected file*'} 'file preview'
+  $null=Control $w 'ExtractSelected'
   Save-WindowScreenshot $p 'browser-preview'
   if((Control $w 'FilePreview' $false).Current.IsOffscreen){throw 'Preview is offscreen at the default desktop resolution'}
   $before=@([IO.DriveInfo]::GetDrives().Name)
@@ -67,6 +74,11 @@ try{
   Save-WindowScreenshot $p 'mounted'
   Invoke-Control $w 'UnmountImage'
   $null=Wait-Until {!([IO.Directory]::Exists($drive))} 'eject drive'
+  Navigate $w 'NavBrowse'
+  Invoke-Control $w 'CloseImage'
+  foreach($id in @('MountImage','CloseImage','VerifyImage','ExtractSelected','ExtractAll','OpenUnc','CopyUnc','UpDirectory')) {
+    if((Control $w $id $false).Current.IsEnabled){throw "Closed image action enabled: $id"}
+  }
   Navigate $w 'NavUnc'
   Invoke-Control $w 'StartUnc'
   $unc='\\sfs$\'+$alias+'\'+[IO.Path]::GetFileName($image)
