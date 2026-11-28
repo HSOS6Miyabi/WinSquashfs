@@ -14,7 +14,7 @@ A native Windows application for browsing, creating, extracting, verifying and m
 
 | Format | Reader | Creator |
 | --- | --- | --- |
-| SquashFS | libsquashfs, parallel read contexts | mksquashfs |
+| SquashFS | libsquashfs, parallel read contexts | mksquashfs (x64), tar2sqfs (x86/ARM64) |
 | DwarFS | official C++ DwarFS 0.15.10 | mkdwarfs |
 | EROFS | liberofs, single-device raw images | mkfs.erofs |
 
@@ -22,7 +22,7 @@ Regular files and directories are projected into Windows. Symbolic links and spe
 
 ## Installation
 
-Windows x64, Windows 10 1809 or newer. Mounting and UNC access require WinFsp 2.2.26323 or a compatible newer 2.x version. The installer installs or upgrades WinFsp; the portable distribution includes its MSI in prerequisites. No .NET runtime is required.
+Windows 10 1809 or newer, with native x64, x86 and ARM64 packages. Choose the installer for the operating system's architecture. Mounting and UNC access require WinFsp 2.2.26323 or a compatible newer 2.x version. The installer installs or upgrades WinFsp; the portable distribution includes its MSI in prerequisites. No .NET runtime is required.
 
 [Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) · [Builds](https://github.com/HSOS6Miyabi/WinSquashfs/actions)
 

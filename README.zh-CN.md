@@ -14,7 +14,7 @@
 
 | 格式 | 读取模块 | 创建工具 |
 | --- | --- | --- |
-| SquashFS | libsquashfs，并行读取上下文 | mksquashfs |
+| SquashFS | libsquashfs，并行读取上下文 | mksquashfs（x64）、tar2sqfs（x86/ARM64） |
 | DwarFS | 官方 C++ DwarFS 0.15.10 | mkdwarfs |
 | EROFS | liberofs，单设备原始镜像 | mkfs.erofs |
 
@@ -22,7 +22,7 @@
 
 ## 安装
 
-支持 Windows x64，Windows 10 1809 及更新版本。挂载及 UNC 访问需要 WinFsp 2.2.26323 或兼容的更新 2.x 版本。安装程序可安装或升级 WinFsp，便携版的 prerequisites 目录包含驱动安装包。无需安装 .NET。
+支持 Windows 10 1809 及更新版本，提供 x64、x86 和 ARM64 原生版本。请根据操作系统的架构选择安装包。挂载及 UNC 访问需要 WinFsp 2.2.26323 或兼容的更新 2.x 版本。安装程序可安装或升级 WinFsp，便携版的 prerequisites 目录包含驱动安装包。无需安装 .NET。
 
 [版本下载](https://github.com/HSOS6Miyabi/WinSquashfs/releases) · [构建记录](https://github.com/HSOS6Miyabi/WinSquashfs/actions)
 

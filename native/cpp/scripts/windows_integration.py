@@ -87,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             if standard.is_file():
                 command=[str(standard),"-",fixture.as_posix(),"-tar","-noappend","-no-progress","-comp","zstd"]
             else:
-                command=[str(app/"tools"/"archivefs-tar2sqfs.exe"),"-q","-c","zstd",str(fixture)]
+                command=[str(app/"tools"/"archivefs-tar2sqfs.exe"),"-q","-s","-S","-c","zstd",str(fixture)]
         else:
             command=[str(app/"tools"/"mkfs.erofs.exe"),"--tar=f","-zlz4",str(fixture)]
         subprocess.run(command,input=link_tar.getvalue(),check=True,capture_output=True,timeout=90)

@@ -214,6 +214,8 @@ jobs:
           if-no-files-found: error
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y clang ninja-build libarchive-dev libssl-dev
+      - name: Test release archive assembly
+        run: bash scripts/test-release-packaging.sh
       - name: Configure sanitized core
         run: >
           cmake -S native/cpp -B build/sanitizers -G Ninja
@@ -270,9 +272,12 @@ jobs:
           name: WinArchiveFSPro-mount-comparison
           path: artifacts/mount-comparison
           if-no-files-found: warn
+  alternate-distributions:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/windows-native-decoders.yml
   release:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, windows-core, installer-runtime, product-upgrade, linux-sanitizers]
+    needs: [windows, windows-core, installer-runtime, product-upgrade, linux-sanitizers, alternate-distributions]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -281,6 +286,14 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: WinArchiveFSPro-windows-x64
+          path: output
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x86
+          path: output
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-arm64
           path: output
       - name: Package and publish
         env:
