@@ -5,5 +5,19 @@ if($LASTEXITCODE){throw 'DwarFS native reader build failed'}
 Copy-Item native/dwarfs-reader/target/x86_64-pc-windows-msvc/release/winsqfs_dwarfs.dll artifacts/native/winsqfs-dwarfs.dll
 $exe=Join-Path (Resolve-Path artifacts/native/tools) 'dwarfs-universal.exe'
 Invoke-WebRequest 'https://github.com/mhx/dwarfs/releases/download/v0.12.4/dwarfs-universal-0.12.4-Windows-AMD64.exe' -OutFile $exe
-if((Get-FileHash $exe -Algorithm SHA256).Hash -ne '094EAAF821DF47DAAA11899927F269F57F71843B39ECD53BA70692447CB3E65'){throw 'DwarFS binary hash mismatch'}
+$hash=(Get-FileHash $exe -Algorithm SHA256).Hash
+if($hash -ne '094EAAF821DF47DAAA11899927F269F57F71843B39ECD53BA70692447CB3E65'){
+    Write-Warning "Standalone DwarFS asset checksum mismatch ($hash); trying the verified distribution archive."
+    $zip=Join-Path $env:RUNNER_TEMP 'dwarfs-0.12.4-Windows-AMD64.7z'
+    Invoke-WebRequest 'https://github.com/mhx/dwarfs/releases/download/v0.12.4/dwarfs-0.12.4-Windows-AMD64.7z' -OutFile $zip
+    $hash=(Get-FileHash $zip -Algorithm SHA256).Hash
+    if($hash -ne '5574D6AEB970C4CBABD50526994159C0551B2DC3E940EDC774AC0952E1528C93'){throw "DwarFS archive hash mismatch: $hash"}
+    $out=Join-Path $env:RUNNER_TEMP 'dwarfs-distribution'
+    & 'C:\Program Files\7-Zip\7z.exe' x $zip "-o$out" -y
+    if($LASTEXITCODE){throw 'DwarFS extraction failed'}
+    $mk=Get-ChildItem $out -Recurse -Filter mkdwarfs.exe | Select-Object -First 1
+    if(!$mk){throw 'Missing mkdwarfs.exe'}
+    Remove-Item $exe -Force
+    Copy-Item $mk.FullName artifacts/native/tools/mkdwarfs.exe -Force
+}
 Invoke-WebRequest 'https://raw.githubusercontent.com/mhx/dwarfs/v0.12.4/LICENSE' -OutFile artifacts/native/licenses/dwarfs.txt

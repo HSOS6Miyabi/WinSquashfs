@@ -53,13 +53,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new Windows.Graphics.SizeInt32(Math.Min(area.Width, (int)(1200 * scale)), Math.Min(area.Height, (int)(780 * scale))));
         try { SystemBackdrop = new MicaBackdrop(); } catch { }
         MountedList.ItemsSource = mounts;
-        CodecBox.ItemsSource = new[] { "zstd", "gzip", "xz", "lz4", "lzo" };
-        BlockBox.ItemsSource = new[] { "4 KiB", "8 KiB", "16 KiB", "32 KiB", "64 KiB", "128 KiB", "256 KiB", "512 KiB", "1024 KiB" };
-        LzoAlgorithm.ItemsSource = new[] { Localization.T("Default"), "lzo1x_1", "lzo1x_1_11", "lzo1x_1_12", "lzo1x_1_15", "lzo1x_999" };
-        CodecBox.SelectionChanged += (_,_) => { if (ready) LevelBox.Value = double.NaN; UpdateCodec(); };
-        LzoAlgorithm.SelectionChanged += (_,_) => UpdateLzoLevel();
-        NoFragments.Checked += (_,_) => AlwaysFragments.IsChecked = false;
-        AlwaysFragments.Checked += (_,_) => NoFragments.IsChecked = false;
+        InitializeCreation();
         ready = true;
         LoadUncSettings();
         RefreshRecent();
@@ -98,8 +92,14 @@ public sealed partial class MainWindow : Window
         try
         {
             if (args.Length == 0) return;
-            if (args is ["--pack", var folder])
-            { SourceBox.Text = Path.GetFullPath(folder); OutputBox.Text = Path.TrimEndingDirectorySeparator(SourceBox.Text) + ".squashfs"; Navigation.SelectedItem = PackNav; return; }
+            if (args.Length >= 2 && args[0] == "--pack")
+            { AddSources(args.Skip(1)); Navigation.SelectedItem = PackNav; return; }
+            if (args is ["--pack-list", var selectionFile])
+            {
+                try { AddSources((await File.ReadAllTextAsync(selectionFile, Encoding.Unicode)).TrimStart('\uFEFF').Split('\0', StringSplitOptions.RemoveEmptyEntries)); }
+                finally { File.Delete(selectionFile); }
+                Navigation.SelectedItem = PackNav; return;
+            }
             string mode = args.Length == 1 ? "--open" : args[0];
             string path = args.Length == 1 ? args[0] : args[1];
             if (mode is not ("--open" or "--mount" or "--extract") || args.Length > 2)
@@ -156,6 +156,7 @@ public sealed partial class MainWindow : Window
         OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = MountButton.IsEnabled = ExtractButton.IsEnabled = ExtractAllButton.IsEnabled = VerifyButton.IsEnabled = CloseImageButton.IsEnabled = false;
         StartUncButton.IsEnabled = StopUncButton.IsEnabled = UncApplyButton.IsEnabled = CopyUncButton.IsEnabled = OpenUncButton.IsEnabled = false;
         ResetPackButton.IsEnabled = SaveLanguageButton.IsEnabled = LanguageBox.IsEnabled = false;
+        PackScroll.IsEnabled = false;
         UpdateMountButtons();
         StatusText.Text = title;
         try { await action(cts.Token); StatusText.Text = Localization.T("Completed"); return true; }
@@ -165,6 +166,7 @@ public sealed partial class MainWindow : Window
         {
             operation = null; BusyRing.IsActive = false; CancelButton.IsEnabled = false;
             OpenButton.IsEnabled = RecentButton.IsEnabled = CreateButton.IsEnabled = ResetPackButton.IsEnabled = SaveLanguageButton.IsEnabled = LanguageBox.IsEnabled = true;
+            PackScroll.IsEnabled = true;
             UpdateButtons();
             if (UncPage.Visibility == Visibility.Visible) RefreshUncStatus();
             if (closing) DispatcherQueue.TryEnqueue(() => Close());
@@ -210,7 +212,7 @@ public sealed partial class MainWindow : Window
             current = next.Root;
             RecentImages.Add(next.Path);
             RefreshRecent();
-            ImageSummary.Text = Localization.T("{0} · {1} · {2} · {3} blocks", Path.GetFileName(next.Path), next.Codec.ToUpperInvariant(), FormatSize(next.ImageSize), FormatSize(next.BlockSize));
+            ImageSummary.Text = $"{Path.GetFileName(next.Path)} · {next.Format} · {next.Codec.ToUpperInvariant()} · {FormatSize(next.ImageSize)}" + (next.BlockSize > 0 ? " · " + FormatSize(next.BlockSize) : "");
             SearchBox.Text = "";
             Navigation.SelectedItem = BrowseNav;
             RefreshEntries();
@@ -238,7 +240,7 @@ public sealed partial class MainWindow : Window
         ++previewGeneration;
         Preview.Text = "";
         Details.Text = current == null ? Localization.T("Open an image and select an entry.") : Localization.T("{0} entries in {1}", current.Children.Count, current.ArchivePath);
-        BrowserEmpty.Text = current == null ? Localization.T("Open or drop a SquashFS image to begin.") : Localization.T("No matching entries.");
+        BrowserEmpty.Text = current == null ? Localization.T("Open or drop an image to begin.") : Localization.T("No matching entries.");
         BrowserEmpty.Visibility = Entries.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdateButtons();
     }
@@ -269,7 +271,7 @@ public sealed partial class MainWindow : Window
         archive = null;
         current = null;
         uncTargetPath = null;
-        ImageSummary.Text = Localization.T("Open a SquashFS image to explore its contents.");
+        ImageSummary.Text = Localization.T("Open an image to explore its contents.");
         SearchBox.Text = "";
         RefreshEntries();
         StatusText.Text = Localization.T("Image closed");
@@ -375,102 +377,11 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { await ShowErrorAsync(ex); }
     }
 
-    private async void SourceClicked(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            string? path = await PickFolderAsync();
-            if (path == null) return;
-            SourceBox.Text = path;
-            if (string.IsNullOrWhiteSpace(OutputBox.Text)) OutputBox.Text = Path.TrimEndingDirectorySeparator(path) + ".squashfs";
-        }
-        catch (Exception ex) { await ShowErrorAsync(ex); }
-    }
-    private async void OutputClicked(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            string? folder = await PickFolderAsync();
-            if (folder == null) return;
-            string name = string.IsNullOrWhiteSpace(OutputBox.Text) ? "image.squashfs" : Path.GetFileName(OutputBox.Text);
-            OutputBox.Text = Path.Combine(folder,name);
-        }
-        catch (Exception ex) { await ShowErrorAsync(ex); }
-    }
-
-    private void ResetClicked(object sender, RoutedEventArgs e) { if (operation == null) Reset(); }
-    private void Reset()
-    {
-        CodecBox.SelectedIndex = 0; BlockBox.SelectedIndex = 5;
-        LevelBox.Value = MemoryBox.Value = GzipWindow.Value = double.NaN;
-        ThreadsBox.Value = 0;
-        TimestampBox.Text = ExcludeBox.Text = XzDict.Text = XzFilters.Text = "";
-        LzoAlgorithm.SelectedIndex = 0;
-        foreach (var box in new[] { NoFragments,AlwaysFragments,NoDuplicates,NoSparse,NoXattrs,AllRoot,NoExports,NoDataCompression,NoInodeCompression,NoFragmentCompression,Lz4Hc,KeepDirectory })
-            box.IsChecked = false;
-        UpdateCodec();
-    }
-    private void UpdateCodec()
-    {
-        if (!ready) return;
-        string codec = CodecBox.SelectedItem as string ?? "zstd";
-        CodecHelp.Text = codec switch
-        {
-            "zstd" => Localization.T("Balanced compression ratio and fast random reads. Levels 1–22 or negative fast levels."),
-            "gzip" => Localization.T("Broad Linux compatibility. Levels 1–9."),
-            "xz" => Localization.T("High compression ratio; larger decompression cost."),
-            "lz4" => Localization.T("Prioritizes decompression speed."),
-            "lzo" => Localization.T("Fast decompression with broad compatibility."),
-            _ => ""
-        };
-        LevelBox.Minimum = codec == "zstd" ? -131072 : 1;
-        LevelBox.Maximum = codec == "zstd" ? 22 : 9;
-        LevelBox.IsEnabled = codec is "zstd" or "gzip" or "lzo";
-        if (!LevelBox.IsEnabled) LevelBox.Value = double.NaN;
-        Lz4Hc.IsEnabled = codec == "lz4"; if (!Lz4Hc.IsEnabled) Lz4Hc.IsChecked = false;
-        XzDict.IsEnabled = XzFilters.IsEnabled = codec == "xz"; if (!XzDict.IsEnabled) XzDict.Text = XzFilters.Text = "";
-        GzipWindow.IsEnabled = codec == "gzip"; if (!GzipWindow.IsEnabled) GzipWindow.Value = double.NaN;
-        LzoAlgorithm.IsEnabled = codec == "lzo"; if (!LzoAlgorithm.IsEnabled) LzoAlgorithm.SelectedIndex = 0;
-        UpdateLzoLevel();
-    }
-
-    private void UpdateLzoLevel()
-    {
-        if (!ready || !Equals(CodecBox.SelectedItem, "lzo")) return;
-        LevelBox.IsEnabled = LzoAlgorithm.SelectedIndex <= 0 || Equals(LzoAlgorithm.SelectedItem, "lzo1x_999");
-        if (!LevelBox.IsEnabled) LevelBox.Value = double.NaN;
-    }
-
     private static int? OptionalInt(NumberBox b)
     {
         if (double.IsNaN(b.Value)) return null;
         if (b.Value != Math.Truncate(b.Value) || b.Value > int.MaxValue || b.Value < int.MinValue) throw new ArgumentException(Localization.T("{0} must be an integer.", b.Header));
         return (int)b.Value;
-    }
-    private async void CreateClicked(object sender, RoutedEventArgs e)
-    {
-        if (operation != null) return;
-        try
-        {
-            string source = SourceBox.Text.Trim(), output = OutputBox.Text.Trim();
-            if (source.Length == 0 || output.Length == 0) throw new ArgumentException(Localization.T("Choose a source directory and output image."));
-            var options = new PackOptions(Codec: (string)CodecBox.SelectedItem, BlockSize: 4096 << BlockBox.SelectedIndex,
-                Threads: OptionalInt(ThreadsBox) ?? 0, Level: OptionalInt(LevelBox),
-                NoFragments: NoFragments.IsChecked == true, NoDuplicates: NoDuplicates.IsChecked == true,
-                NoXattrs: NoXattrs.IsChecked == true, AllRoot: AllRoot.IsChecked == true, NoExports: NoExports.IsChecked == true,
-                NoSparse: NoSparse.IsChecked == true, NoCompression: NoDataCompression.IsChecked == true,
-                AlwaysFragments: AlwaysFragments.IsChecked == true, NoInodeCompression: NoInodeCompression.IsChecked == true,
-                NoFragmentCompression: NoFragmentCompression.IsChecked == true, MemoryMiB: OptionalInt(MemoryBox),
-                Timestamp: string.IsNullOrWhiteSpace(TimestampBox.Text) ? null : uint.Parse(TimestampBox.Text.Trim()),
-                ExcludeFile: ExcludeBox.Text.Trim(), Lz4HighCompression: Lz4Hc.IsChecked == true, KeepDirectory: KeepDirectory.IsChecked == true,
-                XzDictionary: XzDict.Text.Trim(), XzFilters: XzFilters.Text.Trim(), GzipWindow: OptionalInt(GzipWindow),
-                LzoAlgorithm: LzoAlgorithm.SelectedIndex <= 0 ? null : (string)LzoAlgorithm.SelectedItem);
-            OperationLog.Text = "";
-            LogExpander.IsExpanded = true;
-            if (await RunAsync(Localization.T("Creating SquashFS image…"), token => SquashTools.PackAsync(source,output,options, line => AppendLog(OperationLog,line), token)))
-                StatusText.Text = Localization.T("Created {0}", output);
-        }
-        catch (Exception ex) { await ShowErrorAsync(ex); }
     }
     private void AppendLog(TextBox box, string message)
     {

@@ -19,7 +19,7 @@ internal static class LocalizationResources
         resources["L_UNC_access"] = Localization.T("UNC access");
         resources["L_Tools_about"] = Localization.T("Tools & about");
         resources["L_Image_browser"] = Localization.T("Image browser");
-        resources["L_Open_a_SquashFS_image_to_explore_its_contents"] = Localization.T("Open a SquashFS image to explore its contents.");
+        resources["L_Open_a_SquashFS_image_to_explore_its_contents"] = Localization.T("Open an image to explore its contents.");
         resources["L_Close"] = Localization.T("Close");
         resources["L_Close_current_image"] = Localization.T("Close current image");
         resources["L_Recent"] = Localization.T("Recent");
@@ -36,7 +36,7 @@ internal static class LocalizationResources
         resources["L_Name"] = Localization.T("Name");
         resources["L_Type"] = Localization.T("Type");
         resources["L_Size"] = Localization.T("Size");
-        resources["L_Open_or_drop_a_SquashFS_image_to_begin"] = Localization.T("Open or drop a SquashFS image to begin.");
+        resources["L_Open_or_drop_a_SquashFS_image_to_begin"] = Localization.T("Open or drop an image to begin.");
         resources["L_File_details"] = Localization.T("File details");
         resources["L_Select_an_entry_to_view_its_properties"] = Localization.T("Select an entry to view its properties.");
         resources["L_Preview_first_16_KiB"] = Localization.T("Preview · first 16 KiB");
@@ -117,6 +117,23 @@ internal static class LocalizationResources
         resources["L_About_WinSquashfs"] = Localization.T("About WinSquashfs");
         resources["L_Windows_x64_Mounting_and_previewing_use_in_memory_block_decompression_Linux_specific_file_types_appear_in_th"] = Localization.T("Windows x64. Mounting and previewing use in-memory block decompression. Linux-specific file types appear in the browser; only regular files and directories are projected onto Windows drives.");
         resources["L_Project_on_GitHub"] = Localization.T("Project on GitHub");
+        resources["L_Create_archive_image"] = Localization.T("Create archive image");
+        resources["L_Creation_intro"] = Localization.T("Choose files or folders, a filesystem format, and compression settings.");
+        resources["L_Image_format"] = Localization.T("Image format");
+        resources["L_Add_files"] = Localization.T("Add files");
+        resources["L_Add_folder"] = Localization.T("Add folder");
+        resources["L_Remove_selected"] = Localization.T("Remove selected");
+        resources["L_Clear_sources"] = Localization.T("Clear");
+        resources["L_Drop_sources"] = Localization.T("Drop files or folders here");
+        resources["L_Source_path_hint"] = Localization.T("Paste a source path");
+        resources["L_Add_path"] = Localization.T("Add path");
+        resources["L_Compression_preset"] = Localization.T("Compression preset");
+        resources["L_Fixed_timestamp"] = Localization.T("Use a fixed timestamp (local time)");
+        resources["L_Lzma_extreme"] = Localization.T("LZMA extreme mode");
+        resources["L_Dwarfs_advanced_help"] = Localization.T("DwarFS uses similarity ordering and block deduplication according to the selected preset.");
+        resources["L_Erofs_fragments"] = Localization.T("Pack fragments and file tails");
+        resources["L_Erofs_dedupe"] = Localization.T("Deduplicate compressed extents");
+        resources["L_Erofs_advanced_help"] = Localization.T("EROFS uses 4 KiB filesystem blocks. The physical cluster size controls the compressed extent size.");
         resources["L_Ready"] = Localization.T("Ready");
         resources["L_Cancel"] = Localization.T("Cancel");
     }

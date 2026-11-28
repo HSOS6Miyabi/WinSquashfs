@@ -24,7 +24,8 @@ public sealed record CreationOptions(ImageFormat Format, CompressionPreset Prese
                 BlockSize: new[]{131072,65536,131072,131072,262144,1048576,1048576,1048576}[i],
                 Level: new int?[]{null,null,1,3,9,19,null,null}[i],
                 NoCompression: i==0, NoInodeCompression: i==0, NoFragmentCompression: i==0,
-                AlwaysFragments: i>=6, XzDictionary: i>=6 ? "100%" : null),
+                AlwaysFragments: i>=6, XzDictionary: i>=6 ? "100%" : null,
+                XzFilters: i==7 ? "x86,arm,armthumb,powerpc,sparc,ia64" : null),
                 Extreme:i==7),
             ImageFormat.DwarFS => new(format,preset, Codec: new[]{"null","lz4","zstd","zstd","zstd","zstd","lzma","lzma"}[i],
                 Level:new int?[]{null,null,1,5,12,19,8,9}[i],
@@ -68,7 +69,7 @@ public sealed record CreationOptions(ImageFormat Format, CompressionPreset Prese
         var a=new List<string>{"--tar=f","-b","4096"};
         if(codec!="none")
         {
-            a.Add("-z"+codec+(Level.HasValue?",level="+Level.Value:""));
+            a.Add("-z"+codec+(Level.HasValue?",level="+Level.Value:"")+(Extreme&&codec=="lzma"?",dictsize=8388608":""));
             a.AddRange(new[]{"-C",cluster.ToString()});
             if(Fragments) a.Add(Extreme?"-Eall-fragments,ztailpacking":"-Efragments,ztailpacking");
             if(Deduplicate) a.Add("-Ededupe");
@@ -135,7 +136,9 @@ public static class ImageCreator
                             await StageAsync(item,Path.Combine(stage,Name(item)),token);
                         source=stage;
                     }
-                    await SquashTools.RunAsync("dwarfs-universal",options.DwarfsArguments().Concat(new[]{"-i",source,"-o",temporary}),log,token);
+                    bool universal=File.Exists(Path.Combine(AppContext.BaseDirectory,"tools","dwarfs-universal.exe"));
+                    var args=options.DwarfsArguments();
+                    await SquashTools.RunAsync(universal?"dwarfs-universal":"mkdwarfs",(universal?args:args.Skip(1)).Concat(new[]{"-i",source,"-o",temporary}),log,token);
                     break;
                 case ImageFormat.EROFS:
                     await SquashTools.RunAsync("mkfs.erofs",options.ErofsArguments().Concat(new[]{temporary,"-"}),log,token,
@@ -188,7 +191,8 @@ public static class ImageCreator
             using var input=new FileStream(source,FileMode.Open,FileAccess.Read,FileShare.Read,1048576,FileOptions.Asynchronous|FileOptions.SequentialScan);
             using var output=new FileStream(destination,FileMode.CreateNew,FileAccess.Write,FileShare.None,1048576,FileOptions.Asynchronous);
             await input.CopyToAsync(output,1048576,token);
-            File.SetLastWriteTimeUtc(destination,File.GetLastWriteTimeUtc(source));
+            await output.FlushAsync(token);
+            File.SetLastWriteTimeUtc(output.SafeFileHandle,File.GetLastWriteTimeUtc(source));
         }
     }
 

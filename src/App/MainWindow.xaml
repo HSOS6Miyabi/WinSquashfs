@@ -96,15 +96,38 @@
      <ScrollViewer x:Name="PackScroll" VerticalScrollBarVisibility="Visible" AutomationProperties.AutomationId="PackScroll">
      <StackPanel Spacing="8" Padding="0,0,8,10">
       <StackPanel Spacing="3">
-       <TextBlock Text="{StaticResource L_Create_a_SquashFS_image}" Style="{StaticResource SubtitleTextBlockStyle}"/>
-       <TextBlock Text="{StaticResource L_Choose_a_source_folder_and_compression_settings_The_image_is_written_to_a_new_file}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+       <TextBlock Text="{StaticResource L_Create_archive_image}" Style="{StaticResource SubtitleTextBlockStyle}"/>
+       <TextBlock Text="{StaticResource L_Creation_intro}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
       </StackPanel>
       <Border CornerRadius="8" Padding="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="8">
         <TextBlock Text="{StaticResource L_Source_and_destination}" FontWeight="SemiBold"/>
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-         <TextBox x:Name="SourceBox" Header="{StaticResource L_Source_directory}" AutomationProperties.AutomationId="PackSource"/>
-         <Button Grid.Column="1" Content="{StaticResource L_Browse}" Click="SourceClicked" VerticalAlignment="Bottom"/>
+         <ComboBox x:Name="FormatBox" Header="{StaticResource L_Image_format}" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="ImageFormat"/>
+         <TextBlock Grid.Column="1" x:Name="FormatExtension" VerticalAlignment="Bottom" Margin="0,0,0,7" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        </Grid>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+         <TextBlock x:Name="SourceCount" FontWeight="SemiBold" VerticalAlignment="Center"/>
+         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+          <Button Click="AddFilesClicked" Content="{StaticResource L_Add_files}" AutomationProperties.AutomationId="AddFiles"/>
+          <Button Click="SourceClicked" Content="{StaticResource L_Add_folder}" AutomationProperties.AutomationId="AddFolder"/>
+          <Button Click="RemoveSourcesClicked" Content="{StaticResource L_Remove_selected}" AutomationProperties.AutomationId="RemoveSources"/>
+          <Button Click="ClearSourcesClicked" Content="{StaticResource L_Clear_sources}"/>
+         </StackPanel>
+        </Grid>
+        <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="6" AllowDrop="True" DragOver="ImageDragOver" Drop="SourcesDropped">
+         <Grid>
+          <ListView x:Name="SourceList" SelectionMode="Multiple" MinHeight="66" MaxHeight="150" AutomationProperties.AutomationId="SourceList">
+           <ListView.ItemTemplate><DataTemplate>
+            <TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding}" Margin="0,4"/>
+           </DataTemplate></ListView.ItemTemplate>
+          </ListView>
+          <TextBlock x:Name="SourceEmpty" Text="{StaticResource L_Drop_sources}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+         </Grid>
+        </Border>
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+         <TextBox x:Name="SourceBox" PlaceholderText="{StaticResource L_Source_path_hint}" AutomationProperties.AutomationId="PackSource" KeyDown="SourcePathKeyDown"/>
+         <Button Grid.Column="1" Content="{StaticResource L_Add_path}" Click="AddSourcePathClicked"/>
         </Grid>
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
          <TextBox x:Name="OutputBox" Header="{StaticResource L_Output_image}" AutomationProperties.AutomationId="PackOutput"/>
@@ -115,6 +138,9 @@
       <Border CornerRadius="8" Padding="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
        <StackPanel Spacing="8">
         <TextBlock Text="{StaticResource L_Compression}" FontWeight="SemiBold"/>
+        <ComboBox x:Name="PresetBox" Header="{StaticResource L_Compression_preset}" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="CompressionPreset"/>
+        <TextBlock x:Name="PresetHelp" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <ProgressBar x:Name="PresetScale" Minimum="0" Maximum="8" Value="4" Height="4"/>
         <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
          <ComboBox x:Name="CodecBox" Header="{StaticResource L_Algorithm}" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="CompressionCodec"/>
          <ComboBox Grid.Column="1" x:Name="BlockBox" Header="{StaticResource L_Data_block_size}" HorizontalAlignment="Stretch" AutomationProperties.AutomationId="BlockSize"/>
@@ -128,10 +154,17 @@
       </Border>
       <Expander Header="{StaticResource L_Advanced_parameters}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="False" AutomationProperties.AutomationId="AdvancedParameters">
        <StackPanel Spacing="8" Padding="0,6,0,6">
-        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
+        <StackPanel x:Name="ResourceOptions" Spacing="8">
          <NumberBox x:Name="MemoryBox" PlaceholderText="{StaticResource L_Automatic}" Header="{StaticResource L_Memory_limit_MiB_optional}" Minimum="64" Maximum="1048576" SpinButtonPlacementMode="Compact"/>
-         <TextBox Grid.Column="1" x:Name="TimestampBox" Header="{StaticResource L_Reproducible_timestamp_Unix_seconds}" PlaceholderText="{StaticResource L_Optional}"/>
-        </Grid>
+        </StackPanel>
+        <StackPanel x:Name="TimestampOptions" Spacing="6">
+         <CheckBox x:Name="FixedTimestamp" Content="{StaticResource L_Fixed_timestamp}"/>
+         <StackPanel Orientation="Horizontal" Spacing="8">
+          <DatePicker x:Name="TimestampDate" IsEnabled="{Binding IsChecked, ElementName=FixedTimestamp}" AutomationProperties.AutomationId="TimestampDate"/>
+          <TimePicker x:Name="TimestampTime" IsEnabled="{Binding IsChecked, ElementName=FixedTimestamp}" ClockIdentifier="24HourClock" AutomationProperties.AutomationId="TimestampTime"/>
+         </StackPanel>
+        </StackPanel>
+        <StackPanel x:Name="SquashAdvancedPanel" Spacing="8">
         <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
          <StackPanel Spacing="3">
           <CheckBox x:Name="NoFragments" Content="{StaticResource L_Disable_fragments}"/>
@@ -150,15 +183,35 @@
           <CheckBox x:Name="KeepDirectory" Content="{StaticResource L_Keep_source_directory_as_root_child}"/>
          </StackPanel>
         </Grid>
-        <TextBox x:Name="ExcludeBox" Header="{StaticResource L_Exclude_list_file_optional}" PlaceholderText="{StaticResource L_Full_path_to_a_text_file}"/>
-        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <TextBox x:Name="XzDict" Header="{StaticResource L_XZ_dictionary_size_optional}" PlaceholderText="{StaticResource L_e_g_75_or_64K}"/>
-         <TextBox Grid.Column="1" x:Name="XzFilters" Header="{StaticResource L_XZ_BCJ_filters_optional}" PlaceholderText="{StaticResource L_e_g_x86_arm}"/>
+        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+         <TextBox x:Name="ExcludeBox" Header="{StaticResource L_Exclude_list_file_optional}" IsReadOnly="True" PlaceholderText="{StaticResource L_Optional}"/>
+         <Button Grid.Column="1" Content="{StaticResource L_Browse}" Click="ExcludeClicked" VerticalAlignment="Bottom"/>
+         <Button Grid.Column="2" Content="{StaticResource L_Clear_sources}" Click="ClearExcludeClicked" VerticalAlignment="Bottom"/>
         </Grid>
-        <Grid ColumnDefinitions="*,*" ColumnSpacing="16">
-         <NumberBox x:Name="GzipWindow" PlaceholderText="{StaticResource L_Default}" Header="{StaticResource L_GZIP_window_size_optional}" Minimum="8" Maximum="15" SpinButtonPlacementMode="Compact"/>
-         <ComboBox Grid.Column="1" x:Name="LzoAlgorithm" Header="{StaticResource L_LZO_algorithm}" HorizontalAlignment="Stretch"/>
-        </Grid>
+        <StackPanel x:Name="XzOptions" Spacing="6">
+         <ComboBox x:Name="XzDict" Header="{StaticResource L_XZ_dictionary_size_optional}" HorizontalAlignment="Stretch"/>
+         <TextBlock Text="{StaticResource L_XZ_BCJ_filters_optional}"/>
+         <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8">
+          <CheckBox x:Name="BcjX86" Content="x86"/>
+          <CheckBox x:Name="BcjArm" Grid.Column="1" Content="ARM"/>
+          <CheckBox x:Name="BcjThumb" Grid.Column="2" Content="ARM Thumb"/>
+          <CheckBox x:Name="BcjPpc" Grid.Row="1" Content="PowerPC"/>
+          <CheckBox x:Name="BcjSparc" Grid.Row="1" Grid.Column="1" Content="SPARC"/>
+          <CheckBox x:Name="BcjIa64" Grid.Row="1" Grid.Column="2" Content="IA-64"/>
+         </Grid>
+        </StackPanel>
+        <NumberBox x:Name="GzipWindow" PlaceholderText="{StaticResource L_Default}" Header="{StaticResource L_GZIP_window_size_optional}" Minimum="8" Maximum="15" SpinButtonPlacementMode="Compact"/>
+        <ComboBox x:Name="LzoAlgorithm" Header="{StaticResource L_LZO_algorithm}" HorizontalAlignment="Stretch"/>
+        </StackPanel>
+        <StackPanel x:Name="DwarfsAdvancedPanel" Spacing="6">
+         <CheckBox x:Name="DwarfsExtreme" Content="{StaticResource L_Lzma_extreme}"/>
+         <TextBlock Text="{StaticResource L_Dwarfs_advanced_help}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        </StackPanel>
+        <StackPanel x:Name="ErofsAdvancedPanel" Spacing="6">
+         <CheckBox x:Name="ErofsFragments" Content="{StaticResource L_Erofs_fragments}"/>
+         <CheckBox x:Name="ErofsDedupe" Content="{StaticResource L_Erofs_dedupe}"/>
+         <TextBlock Text="{StaticResource L_Erofs_advanced_help}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        </StackPanel>
        </StackPanel>
       </Expander>
       <Expander x:Name="LogExpander" Header="{StaticResource L_Operation_log}" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">

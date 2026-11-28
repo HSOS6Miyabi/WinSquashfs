@@ -74,7 +74,7 @@ public static class SquashTools
     public static string ToolPath(string path) => Path.GetFullPath(path).Replace('\\','/');
     public static async Task RunAsync(string tool, IEnumerable<string> args, Action<string>? log, CancellationToken token = default, Func<Stream,CancellationToken,Task>? input = null)
     {
-        if (tool is not ("mksquashfs" or "unsquashfs" or "sqfscat" or "dwarfs-universal" or "mkfs.erofs" or "fsck.erofs")) throw new ArgumentException(Localization.T("Unknown tool."));
+        if (tool is not ("mksquashfs" or "unsquashfs" or "sqfscat" or "dwarfs-universal" or "mkdwarfs" or "mkfs.erofs" or "fsck.erofs")) throw new ArgumentException(Localization.T("Unknown tool."));
         var exe = Path.Combine(AppContext.BaseDirectory, "tools", tool + ".exe");
         var si = new ProcessStartInfo(exe)
         {

@@ -53,7 +53,7 @@ public sealed partial class MainWindow
             var items = await e.DataView.GetStorageItemsAsync();
             if (items.Count == 1 && items[0] is StorageFile file)
                 await LoadAsync(file.Path);
-            else StatusText.Text = Localization.T("Drop one SquashFS image.");
+            else StatusText.Text = Localization.T("Drop one image.");
         }
         catch (Exception ex) { await ShowErrorAsync(ex); }
     }
