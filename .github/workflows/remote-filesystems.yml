@@ -1,0 +1,30 @@
+name: Remote filesystem protocol integration
+on:
+  push:
+    branches: ['refactor/native-cpp-validation', 'refactor/native-cpp', 'main']
+    paths: ['native/cpp/remote*', 'native/cpp/namespace_projection.cpp', 'native/cpp/tests/remote*', 'native/cpp/CMakeLists.txt', '.github/workflows/remote-filesystems.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  protocol-servers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install native libraries and protocol servers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libarchive-dev libssl-dev libcurl4-openssl-dev libxml2-dev libssh2-1-dev libzstd-dev libxxhash-dev liblzma-dev openssh-server
+          python -m pip install pyftpdlib pyopenssl 'moto[server]' boto3
+      - name: Build remote filesystem tests
+        run: |
+          cmake -S native/cpp -B build/remote -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/remote --target remote_server_tests remote_protocol_tests --parallel 2
+      - name: Test WebDAV PATCH and write cache
+        run: ctest --test-dir build/remote --output-on-failure -R remote_webdav
+      - name: Test FTP, FTPS, S3, SFTP and SCP servers
+        run: python -u native/cpp/tests/remote_servers.py build/remote/remote_server_tests
