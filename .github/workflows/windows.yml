@@ -12,7 +12,14 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+      - name: Cache native EROFS build
+        id: erofs-cache
+        uses: actions/cache@v4
+        with:
+          path: artifacts/erofs
+          key: erofs-native-v1-${{ hashFiles('native/erofs-reader.c', 'scripts/build-erofs.sh') }}
       - name: Cross-compile upstream EROFS tools and native reader
+        if: steps.erofs-cache.outputs.cache-hit != 'true'
         run: bash scripts/build-erofs.sh
       - uses: actions/upload-artifact@v4
         with:

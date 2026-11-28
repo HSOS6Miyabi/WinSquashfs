@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <cstdio>
+#include <cwchar>
 #include <vector>
 
 int wmain(int argc,wchar_t **argv)

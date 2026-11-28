@@ -23,7 +23,14 @@ impl Size for Source {
 }
 struct Image { index: ArchiveIndex, archive: Archive<Source> }
 fn guarded(f: impl FnOnce() -> Result<i32, Box<dyn std::error::Error>>) -> i32 {
-    match catch_unwind(AssertUnwindSafe(f)) { Ok(Ok(n)) => n, _ => -1 }
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(Ok(n)) => n,
+        Ok(Err(e)) => {
+            eprintln!("DwarFS: {e:?}");
+            -1
+        }
+        Err(_) => -1
+    }
 }
 #[no_mangle]
 pub unsafe extern "C" fn wa_open(length: u64, reader: SourceRead, out: *mut *mut c_void,
@@ -32,8 +39,35 @@ pub unsafe extern "C" fn wa_open(length: u64, reader: SourceRead, out: *mut *mut
     *out = ptr::null_mut();
     guarded(|| {
         let mut config = Config::default();
-        config.metadata_size_limit(usize::MAX).section_index_size_limit(usize::MAX);
-        let (index, archive) = Archive::new_with_config(Source { length, read: reader }, &config)?;
+        // The decoder allocates its configured metadata buffer eagerly.
+        // Start small and enlarge it only if the encoded metadata requires it.
+        config.block_cache_size_limit(1usize << 30);
+        let mut metadata_limit=64usize << 20;
+        let mut index_limit=2usize << 20;
+        let (index, archive)=loop {
+            config.metadata_size_limit(metadata_limit).section_index_size_limit(index_limit);
+            match Archive::new_with_config(Source { length, read: reader },&config) {
+                Ok(pair)=>break pair,
+                Err(e)=>{
+                    let mut detail=format!("{e:?}");
+                    let mut chain=std::error::Error::source(&e);
+                    while let Some(cause)=chain {
+                        detail.push_str(&format!(": {cause}"));
+                        chain=cause.source();
+                    }
+                    if !detail.contains("limit") && !detail.contains("PayloadTooLong") { return Err(e.into()); }
+                    if detail.contains("section index") && !detail.contains("metadata") {
+                        index_limit=index_limit.checked_mul(2).ok_or("section index too large")?;
+                    } else {
+                        metadata_limit=metadata_limit.checked_mul(2).ok_or("metadata too large")?;
+                    }
+                    // Vec cannot represent a buffer larger than isize::MAX.
+                    if metadata_limit>isize::MAX as usize || index_limit>isize::MAX as usize {
+                        return Err(e.into());
+                    }
+                }
+            }
+        };
         *root = 0;
         *block = 0; // DwarFS can use varying section/chunk sizes.
         *mtime = index.root().metadata().mtime();
