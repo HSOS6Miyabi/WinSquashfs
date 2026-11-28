@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{6BC5E709-405F-4BD6-96E1-32E7A05D557B}</ProjectGuid>
+    <RootNamespace>WinArchiveFSPro</RootNamespace><ProjectName>WinArchiveFSPro</ProjectName><TargetName>WinArchiveFSPro</TargetName>
+    <DefaultLanguage>en-US</DefaultLanguage><WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion><WindowsTargetPlatformMinVersion>10.0.17763.0</WindowsTargetPlatformMinVersion>
+    <AppContainerApplication>false</AppContainerApplication><ApplicationType>Windows Store</ApplicationType><ApplicationTypeRevision>10.0</ApplicationTypeRevision><AppxPackage>false</AppxPackage><WindowsPackageType>None</WindowsPackageType>
+    <UseWinUI>true</UseWinUI><EnableMsixTooling>true</EnableMsixTooling><WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <CppWinRTOptimized>true</CppWinRTOptimized><CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge><MinimalCoreWin>true</MinimalCoreWin>
+    <RestoreProjectStyle>PackageReference</RestoreProjectStyle><NuGetTargetMoniker>native,Version=v0.0</NuGetTargetMoniker><NuGetTargetPlatformIdentifier>Windows</NuGetTargetPlatformIdentifier><NuGetTargetPlatformVersion>$(WindowsTargetPlatformVersion)</NuGetTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType><PlatformToolset>v143</PlatformToolset><CharacterSet>Unicode</CharacterSet><DesktopCompatible>true</DesktopCompatible>
+    <UseDebugLibraries Condition="'$(Configuration)'=='Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)'!='Debug'">false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ItemDefinitionGroup>
+    <ClCompile><LanguageStandard>stdcpplatest</LanguageStandard><ConformanceMode>true</ConformanceMode><ExceptionHandling>Sync</ExceptionHandling><PrecompiledHeader>NotUsing</PrecompiledHeader><WarningLevel>Level4</WarningLevel><AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>..;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+    <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>$(ArchiveFSCoreLib);shell32.lib;ole32.lib;runtimeobject.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup><PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001"/><PackageReference Include="Microsoft.Windows.CppWinRT" Version="2.0.250303.1"/></ItemGroup>
+  <ItemGroup><ApplicationDefinition Include="App.xaml"/><Page Include="MainWindow.xaml"/><Midl Include="Project.idl"/><Manifest Include="app.manifest"/></ItemGroup>
+  <ItemGroup><ClCompile Include="App.xaml.cpp"/><ClCompile Include="MainWindow.xaml.cpp"/><ClCompile Include="$(GeneratedFilesDir)module.g.cpp"/></ItemGroup>
+  <ItemGroup><ClInclude Include="App.xaml.h"/><ClInclude Include="MainWindow.xaml.h"/><ClInclude Include="pch.h"/></ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
+  <Target Name="CheckCore" BeforeTargets="ClCompile"><Error Condition="!Exists('$(ArchiveFSCoreLib)')" Text="Specify ArchiveFSCoreLib as the full path to the native archivefs_core import library."/></Target>
+</Project>

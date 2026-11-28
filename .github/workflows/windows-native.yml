@@ -1,0 +1,102 @@
+name: WinArchiveFSPro native build and integration
+on:
+  push:
+    branches: ['refactor/native-cpp', 'refactor/native-cpp-validation']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  erofs-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 native/cpp/scripts/prepare_native.py .
+      - uses: actions/cache@v4
+        id: erofs
+        with:
+          path: artifacts/erofs
+          key: archivefs-erofs-${{ hashFiles('native/erofs-reader.c', 'scripts/build-erofs.sh', 'native/cpp/scripts/erofs_binary.py') }}
+      - if: steps.erofs.outputs.cache-hit != 'true'
+        run: bash scripts/build-erofs-cpp.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: erofs-native
+          path: artifacts/erofs/
+          if-no-files-found: error
+  windows:
+    needs: erofs-native
+    runs-on: windows-2025
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare native source builds and installer
+        run: python native/cpp/scripts/prepare_native.py .
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc squashfs-tools curl unzip
+      - name: Build SquashFS reader and Explorer extension
+        shell: msys2 {0}
+        run: bash scripts/build-native-cpp.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: erofs-native
+          path: artifacts/native
+      - name: Install WinFsp SDK and driver
+        shell: pwsh
+        run: ./scripts/install-winfsp.ps1
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .deps/vcpkg-installed
+            ~/AppData/Local/vcpkg/archives
+          key: archivefs-vcpkg-x64-static-md-dwarfs-v0.15.10-${{ runner.os }}
+      - name: Build official DwarFS reader and native applications
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1
+      - name: Test real archives and mounted filesystem
+        run: python native/cpp/scripts/windows_integration.py artifacts/dist
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $nsis=Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'NSIS\makensis.exe'
+          $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          $runtime=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.WinFspRuntimeVersion
+          & $nsis "/DPRODUCT_VERSION=$version" "/DWINFSP_MIN_VERSION=$runtime.0" installer/WinArchiveFSPro.nsi
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify installed application
+        shell: pwsh
+        run: |
+          $setup=Resolve-Path artifacts/WinArchiveFSPro-Setup-x64.exe
+          $p=Start-Process $setup -ArgumentList @('/S','/LANG=1033') -Wait -PassThru
+          if($p.ExitCode) { throw "Installer exit $($p.ExitCode)" }
+          $app=Join-Path $env:ProgramFiles 'WinArchiveFSPro/app'
+          if (!(Test-Path "$app/WinArchiveFSPro.exe")) { throw 'Missing GUI' }
+          if (!(Test-Path "$app/WinArchiveFSPro.Unc.exe")) { throw 'Missing UNC agent' }
+          if (!(Test-Path "$app/archivefs.exe")) { throw 'Missing native CLI' }
+          python native/cpp/scripts/windows_integration.py $app
+          if($LASTEXITCODE) { exit $LASTEXITCODE }
+          $gui=Start-Process "$app/WinArchiveFSPro.exe" -PassThru
+          try {
+            $null=$gui.WaitForInputIdle(30000)
+            Start-Sleep -Seconds 2
+            $gui.Refresh()
+            if ($gui.HasExited -or !$gui.MainWindowHandle) { throw 'WinUI startup failed' }
+          } finally { if (!$gui.HasExited) { $gui.CloseMainWindow() | Out-Null; if (!$gui.WaitForExit(5000)) { $gui.Kill() } } }
+          $p=Start-Process (Join-Path $env:ProgramFiles 'WinArchiveFSPro/Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode) { throw "Uninstaller exit $($p.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: |
+            artifacts/WinArchiveFSPro-Setup-x64.exe
+            artifacts/dist/
+          if-no-files-found: error

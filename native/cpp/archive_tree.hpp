@@ -1,0 +1,55 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#pragma once
+#include "archive_reader.hpp"
+#include <filesystem>
+#include <map>
+#include <mutex>
+#include <string_view>
+
+namespace archivefs {
+
+std::u16string to_utf16(std::string_view utf8);
+std::string to_utf8(std::u16string_view utf16);
+std::u16string encode_windows_name(std::string_view utf8);
+struct WindowsNameLess {
+    bool operator()(std::u16string_view a, std::u16string_view b) const;
+};
+
+class ArchiveTree {
+public:
+    struct Node {
+        std::string name;
+        std::u16string windows_name;
+        FileInfo info;
+        std::weak_ptr<const Node> parent;
+        std::shared_ptr<const void> owner;
+    };
+    using NodePtr = std::shared_ptr<const Node>;
+    struct VerifyReport { std::uint64_t files = 0, bytes = 0; };
+
+    explicit ArchiveTree(std::shared_ptr<ArchiveReader> reader);
+    NodePtr root() const { return root_; }
+    ArchiveInfo info() const { return reader_->info(); }
+    std::vector<NodePtr> children(const NodePtr& directory) const;
+    NodePtr find(std::u16string_view path) const;
+    std::size_t read(const NodePtr& node, std::uint64_t offset, std::span<std::byte> output,
+                     std::stop_token token = {}) const;
+    VerifyReport verify(std::stop_token token = {}) const;
+    void extract(const NodePtr& node, const std::filesystem::path& destination,
+                 std::stop_token token = {}) const;
+private:
+    struct Directory {
+        std::vector<NodePtr> nodes;
+        std::map<std::u16string, NodePtr, WindowsNameLess> names;
+    };
+    std::shared_ptr<const Directory> load(const NodePtr& directory) const;
+    void validate_node(const NodePtr& node) const;
+    void extract_file(const NodePtr& node, const std::filesystem::path& output, std::stop_token token) const;
+    const std::shared_ptr<const void> owner_ = std::make_shared<int>(0);
+    std::shared_ptr<ArchiveReader> reader_;
+    NodePtr root_;
+    mutable std::mutex directories_mutex_;
+    mutable std::map<const Node*, std::shared_ptr<const Directory>> directories_;
+};
+
+} // namespace archivefs

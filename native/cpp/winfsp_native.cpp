@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#include "winfsp_native.hpp"
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <winfsp/winfsp.h>
+#include <sddl.h>
+#include <array>
+#include <cstring>
+#include <mutex>
+#include <system_error>
+namespace archivefs {
+namespace {
+static_assert(sizeof(wchar_t)==sizeof(char16_t));
+std::wstring wide(std::u16string_view s){return {reinterpret_cast<const wchar_t*>(s.data()),s.size()};}
+std::u16string narrow(PWSTR s){return s?std::u16string(reinterpret_cast<const char16_t*>(s)):std::u16string{};}
+[[noreturn]] void fail(const char* message){throw std::system_error(static_cast<int>(GetLastError()),std::system_category(),message);}
+void status(NTSTATUS s,const char* message){if(s<0)throw std::runtime_error(std::string(message)+" (NTSTATUS "+std::to_string(static_cast<std::uint32_t>(s))+")");}
+struct Api {
+    HMODULE module=nullptr;
+    decltype(&FspFileSystemCreate) create=nullptr;
+    decltype(&FspFileSystemDelete) destroy=nullptr;
+    decltype(&FspFileSystemSetMountPointEx) mount=nullptr;
+    decltype(&FspFileSystemStartDispatcher) start=nullptr;
+    decltype(&FspFileSystemStopDispatcher) stop=nullptr;
+    decltype(&FspFileSystemAddDirInfo) add_dir=nullptr;
+    decltype(&FspNtStatusFromWin32) from_win32=nullptr;
+    template<class T>T get(const char* name){auto p=GetProcAddress(module,name);if(!p)throw std::runtime_error(std::string("WinFsp missing export: ")+name);T value;static_assert(sizeof(value)==sizeof(p));std::memcpy(&value,&p,sizeof(value));return value;}
+    Api(){
+        // Load the installed SDK/runtime, rather than any same-named DLL in
+        // the current working directory.
+        wchar_t path[32768]{};DWORD bytes=sizeof(path);
+        auto result=RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\WOW6432Node\\WinFsp",L"InstallDir",RRF_RT_REG_SZ,path,&bytes);
+        if(result!=ERROR_SUCCESS){bytes=sizeof(path);result=RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\WinFsp",L"InstallDir",RRF_RT_REG_SZ|RRF_SUBKEY_WOW6432KEY,path,&bytes);}
+        if(result!=ERROR_SUCCESS)throw std::system_error(static_cast<int>(result),std::system_category(),"WinFsp InstallDir");
+        auto dll=std::filesystem::path(path)/L"bin"/L"winfsp-" L"" FSP_FSCTL_PRODUCT_FILE_ARCH L".dll";
+        module=LoadLibraryExW(dll.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if(!module)fail("LoadLibraryExW WinFsp");
+        try{create=get<decltype(create)>("FspFileSystemCreate");destroy=get<decltype(destroy)>("FspFileSystemDelete");mount=get<decltype(mount)>("FspFileSystemSetMountPointEx");start=get<decltype(start)>("FspFileSystemStartDispatcher");stop=get<decltype(stop)>("FspFileSystemStopDispatcher");add_dir=get<decltype(add_dir)>("FspFileSystemAddDirInfo");from_win32=get<decltype(from_win32)>("FspNtStatusFromWin32");}catch(...){FreeLibrary(module);throw;}
+    }
+    ~Api(){if(module)FreeLibrary(module);}
+};
+Api& api(){static Api instance;return instance;}
+struct Security {
+    PSECURITY_DESCRIPTOR descriptor=nullptr;
+    Security(){
+        HANDLE token=nullptr;if(!OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&token))fail("OpenProcessToken");
+        struct Token{HANDLE h;~Token(){CloseHandle(h);}}owner{token};DWORD size=0;GetTokenInformation(token,TokenUser,nullptr,0,&size);if(!size)fail("GetTokenInformation");std::vector<std::byte> storage(size);if(!GetTokenInformation(token,TokenUser,storage.data(),size,&size))fail("GetTokenInformation");auto user=reinterpret_cast<TOKEN_USER*>(storage.data());LPWSTR sid=nullptr;if(!ConvertSidToStringSidW(user->User.Sid,&sid))fail("ConvertSidToStringSidW");struct Local{LPWSTR p;~Local(){LocalFree(p);}}sid_owner{sid};
+        std::wstring s=L"O:";s+=sid;s+=L"G:";s+=sid;s+=L"D:P(A;;0x1200A9;;;";s+=sid;s+=L")";
+        if(!ConvertStringSecurityDescriptorToSecurityDescriptorW(s.c_str(),SDDL_REVISION_1,&descriptor,nullptr))fail("ConvertStringSecurityDescriptorToSecurityDescriptorW");
+    }
+    ~Security(){if(descriptor)LocalFree(descriptor);}
+    NTSTATUS copy(PSECURITY_DESCRIPTOR out,SIZE_T* length)const noexcept{if(!length)return STATUS_SUCCESS;auto needed=static_cast<SIZE_T>(GetSecurityDescriptorLength(descriptor));if(*length<needed){*length=needed;return STATUS_BUFFER_OVERFLOW;}*length=needed;if(out)std::memcpy(out,descriptor,needed);return STATUS_SUCCESS;}
+};
+UINT64 time_value(std::int64_t seconds)noexcept{constexpr auto epoch=11644473600LL;return static_cast<UINT64>(std::clamp<std::int64_t>(seconds,-epoch,253402300799LL)+epoch)*10000000ULL;}
+void fill_info(const ProjectionInfo& info,FSP_FSCTL_FILE_INFO& result){result={};result.FileAttributes=FILE_ATTRIBUTE_READONLY|(info.directory?FILE_ATTRIBUTE_DIRECTORY:FILE_ATTRIBUTE_ARCHIVE);result.FileSize=info.directory?0:info.size;result.AllocationSize=result.FileSize>UINT64_MAX-4095?result.FileSize:((result.FileSize+4095)/4096)*4096;result.CreationTime=result.LastAccessTime=result.LastWriteTime=result.ChangeTime=time_value(info.modified);result.IndexNumber=info.index;}
+NTSTATUS exception_status()noexcept{try{throw;}catch(const std::bad_alloc&){return STATUS_INSUFFICIENT_RESOURCES;}catch(const std::invalid_argument&){return STATUS_INVALID_PARAMETER;}catch(const std::system_error& e){return api().from_win32(static_cast<ULONG>(e.code().value()));}catch(...){return STATUS_FILE_INVALID;}}
+template<class F>NTSTATUS protect(F&& f)noexcept{try{return f();}catch(...){return exception_status();}}
+constexpr UINT32 forbidden=FILE_WRITE_DATA|FILE_APPEND_DATA|FILE_WRITE_EA|FILE_WRITE_ATTRIBUTES|DELETE|WRITE_DAC|WRITE_OWNER;
+}
+struct NativeMount::Impl {
+    struct Context {ProjectedNodePtr node;std::mutex mutex;std::vector<ProjectedNodePtr> enumeration;bool loaded=false;};
+    std::shared_ptr<Projection> projection;Security security;FSP_FILE_SYSTEM* fs=nullptr;std::u16string point;std::mutex mutex;bool started=false;
+    static Impl& self(FSP_FILE_SYSTEM* fs){return *static_cast<Impl*>(fs->UserContext);}
+    static Context& context(PVOID raw){return *static_cast<Context*>(raw);}
+    static NTSTATUS volume(FSP_FILE_SYSTEM* fs,FSP_FSCTL_VOLUME_INFO* info)noexcept{return protect([&]()->NTSTATUS{*info={};info->TotalSize=self(fs).projection->capacity();constexpr wchar_t label[]=L"WinArchiveFSPro";std::copy_n(label,std::size(label)-1,info->VolumeLabel);info->VolumeLabelLength=static_cast<UINT16>((std::size(label)-1)*sizeof(wchar_t));return STATUS_SUCCESS;});}
+    static NTSTATUS security_name(FSP_FILE_SYSTEM* fs,PWSTR name,PUINT32 attrs,PSECURITY_DESCRIPTOR sd,SIZE_T* size)noexcept{return protect([&]()->NTSTATUS{auto& s=self(fs);auto node=s.projection->open(narrow(name));if(!node)return STATUS_OBJECT_NAME_NOT_FOUND;if(attrs)*attrs=FILE_ATTRIBUTE_READONLY|(node->info.directory?FILE_ATTRIBUTE_DIRECTORY:FILE_ATTRIBUTE_ARCHIVE);return s.security.copy(sd,size);});}
+    static NTSTATUS open(FSP_FILE_SYSTEM* fs,PWSTR name,UINT32 options,UINT32 access,PVOID* out,FSP_FSCTL_FILE_INFO* info)noexcept{return protect([&]()->NTSTATUS{if(access&forbidden)return STATUS_MEDIA_WRITE_PROTECTED;auto node=self(fs).projection->open(narrow(name));if(!node)return STATUS_OBJECT_NAME_NOT_FOUND;if((options&FILE_DIRECTORY_FILE)&&!node->info.directory)return STATUS_NOT_A_DIRECTORY;if((options&FILE_NON_DIRECTORY_FILE)&&node->info.directory)return STATUS_FILE_IS_A_DIRECTORY;auto holder=std::make_unique<Context>();holder->node=std::move(node);fill_info(holder->node->info,*info);*out=holder.release();return STATUS_SUCCESS;});}
+    static void close(FSP_FILE_SYSTEM*,PVOID raw)noexcept{delete static_cast<Context*>(raw);}
+    static NTSTATUS read(FSP_FILE_SYSTEM* fs,PVOID raw,PVOID buffer,UINT64 offset,ULONG length,PULONG transferred)noexcept{return protect([&]()->NTSTATUS{*transferred=0;auto& c=context(raw);if(c.node->info.directory)return STATUS_FILE_IS_A_DIRECTORY;if(offset>=c.node->info.size&&length)return STATUS_END_OF_FILE;*transferred=static_cast<ULONG>(self(fs).projection->read(c.node,offset,std::span(static_cast<std::byte*>(buffer),length)));return STATUS_SUCCESS;});}
+    static NTSTATUS info(FSP_FILE_SYSTEM* fs,PVOID raw,FSP_FSCTL_FILE_INFO* result)noexcept{return protect([&]()->NTSTATUS{auto& node=context(raw).node;self(fs).projection->validate(node);fill_info(node->info,*result);return STATUS_SUCCESS;});}
+    static NTSTATUS get_security(FSP_FILE_SYSTEM* fs,PVOID raw,PSECURITY_DESCRIPTOR sd,SIZE_T* size)noexcept{return protect([&]()->NTSTATUS{self(fs).projection->validate(context(raw).node);return self(fs).security.copy(sd,size);});}
+    static bool add(const ProjectedNode& node,std::u16string_view name,PVOID buffer,ULONG length,PULONG transferred){
+        if(name.size()>255)return false;alignas(FSP_FSCTL_DIR_INFO) std::array<std::byte,sizeof(FSP_FSCTL_DIR_INFO)+255*sizeof(wchar_t)> storage{};auto row=reinterpret_cast<FSP_FSCTL_DIR_INFO*>(storage.data());row->Size=static_cast<UINT16>(sizeof(FSP_FSCTL_DIR_INFO)+name.size()*sizeof(wchar_t));fill_info(node.info,row->FileInfo);std::memcpy(row->FileNameBuf,name.data(),name.size()*sizeof(char16_t));return api().add_dir(row,buffer,length,transferred)!=FALSE;
+    }
+    static NTSTATUS directory(FSP_FILE_SYSTEM* fs,PVOID raw,PWSTR,PWSTR marker,PVOID buffer,ULONG length,PULONG transferred)noexcept{return protect([&]()->NTSTATUS{
+        *transferred=0;auto& c=context(raw);auto& p=*self(fs).projection;if(!c.node->info.directory)return STATUS_NOT_A_DIRECTORY;p.validate(c.node);std::lock_guard lock(c.mutex);
+        if(!marker||!c.loaded){c.enumeration=p.list(c.node);std::sort(c.enumeration.begin(),c.enumeration.end(),[](auto& a,auto& b){return WindowsNameLess{}(a->name,b->name);});c.loaded=true;}
+        auto m=narrow(marker);if(c.node->path!=u"\\"){
+            if(m.empty()&&!add(*c.node,u".",buffer,length,transferred))return STATUS_SUCCESS;
+            if(m.empty()||m==u"."){auto parent=c.node->path.substr(0,c.node->path.find_last_of(u'\\'));if(parent.empty())parent=u"\\";auto node=p.open(parent);if(node&&!add(*node,u"..",buffer,length,transferred))return STATUS_SUCCESS;}
+        }
+        auto it=c.enumeration.begin();if(!m.empty()&&m!=u"."&&m!=u"..")it=std::upper_bound(it,c.enumeration.end(),m,[](std::u16string_view key,const ProjectedNodePtr& n){return WindowsNameLess{}(key,n->name);});
+        for(;it!=c.enumeration.end();++it)if(!add(**it,(*it)->name,buffer,length,transferred))return STATUS_SUCCESS;api().add_dir(nullptr,buffer,length,transferred);return STATUS_SUCCESS;
+    });}
+    static NTSTATUS create(FSP_FILE_SYSTEM*,PWSTR,UINT32,UINT32,UINT32,PSECURITY_DESCRIPTOR,UINT64,PVOID*,FSP_FSCTL_FILE_INFO*)noexcept{return STATUS_MEDIA_WRITE_PROTECTED;}
+    static NTSTATUS overwrite(FSP_FILE_SYSTEM*,PVOID,UINT32,BOOLEAN,UINT64,FSP_FSCTL_FILE_INFO*)noexcept{return STATUS_MEDIA_WRITE_PROTECTED;}
+    static NTSTATUS write(FSP_FILE_SYSTEM*,PVOID,PVOID,UINT64,ULONG,BOOLEAN,BOOLEAN,PULONG,FSP_FSCTL_FILE_INFO*)noexcept{return STATUS_MEDIA_WRITE_PROTECTED;}
+    static const FSP_FILE_SYSTEM_INTERFACE& interface(){static const auto table=[] {FSP_FILE_SYSTEM_INTERFACE t{};t.GetVolumeInfo=volume;t.GetSecurityByName=security_name;t.Create=create;t.Open=open;t.Overwrite=overwrite;t.Close=close;t.Read=read;t.Write=write;t.GetFileInfo=info;t.GetSecurity=get_security;t.ReadDirectory=directory;return t;}();return table;}
+    Impl(std::shared_ptr<Projection> p,std::u16string mount,std::u16string prefix):projection(std::move(p)){
+        if(!projection)throw std::invalid_argument("missing mount projection");if(!prefix.empty()&&!mount.empty())throw std::invalid_argument("UNC mount cannot assign a drive");auto& lib=api();FSP_FSCTL_VOLUME_PARAMS params{};params.Version=sizeof(params);params.SectorSize=4096;params.SectorsPerAllocationUnit=1;params.MaxComponentLength=255*sizeof(wchar_t);params.VolumeCreationTime=time_value(0);params.VolumeSerialNumber=GetTickCount();params.FileInfoTimeout=prefix.empty()?1000:0;params.CasePreservedNames=1;params.UnicodeOnDisk=1;params.PersistentAcls=1;params.ReadOnlyVolume=1;params.UmFileContextIsUserContext2=1;params.FlushAndPurgeOnCleanup=!prefix.empty();
+        auto name=wide(prefix);if(name.size()>=std::size(params.Prefix))throw std::invalid_argument("UNC prefix too long");std::copy(name.begin(),name.end(),params.Prefix);constexpr wchar_t format[]=L"ArchiveFS";std::copy_n(format,std::size(format),params.FileSystemName);auto device=prefix.empty()?L"" FSP_FSCTL_DISK_DEVICE_NAME:L"" FSP_FSCTL_NET_DEVICE_NAME;
+        status(lib.create(const_cast<PWSTR>(device),&params,&interface(),&fs),"create WinFsp file system");fs->UserContext=this;fs->OpGuardStrategy=FSP_FILE_SYSTEM_OPERATION_GUARD_STRATEGY_FINE;
+        try{if(prefix.empty()){auto m=wide(mount);status(lib.mount(fs,m.empty()?nullptr:m.data(),nullptr),"assign mount point");point=narrow(fs->MountPoint);}else point=u"\\"+prefix;status(lib.start(fs,0),"start WinFsp dispatcher");started=true;}catch(...){lib.destroy(fs);fs=nullptr;throw;}
+    }
+    ~Impl(){unmount();}
+    void unmount(){std::lock_guard lock(mutex);if(fs){if(started)api().stop(fs);api().destroy(fs);fs=nullptr;started=false;}}
+};
+NativeMount::NativeMount(std::shared_ptr<Projection> projection,std::u16string mount,std::u16string prefix):impl_(std::make_unique<Impl>(std::move(projection),std::move(mount),std::move(prefix))){}
+NativeMount::~NativeMount()=default;
+std::u16string NativeMount::mount_point()const{return impl_->point;}
+void NativeMount::unmount(){impl_->unmount();}
+std::string winfsp_runtime_info(){api();return "WinFsp native runtime loaded";}
+}
