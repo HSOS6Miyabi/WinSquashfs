@@ -1,108 +1,44 @@
-# WinSquashfs
+# WinArchiveFSPro
 
-[简体中文](README.zh-CN.md) | English
+[简体中文](README.zh-CN.md)
 
-A WinUI 3 desktop application for SquashFS, DwarFS and EROFS images on Windows x64. Browse image contents, preview files, build new images, extract files or mount a read-only drive using WinFsp.
+A native Windows application for browsing, creating, extracting, verifying and mounting SquashFS, DwarFS and EROFS images.
 
 ## Features
 
-- In-process archive browser with directory navigation, filename filtering, file metadata, text and hexadecimal previews.
-- Direct UNC access without assigning drive letters: configured directory aliases and local drives, image caching and login startup.
-- Recent images, drag-and-drop opening, image readability verification, and selected file or directory extraction.
-- WinFsp read-only drive mounting with automatic or explicit drive-letter selection and multiple concurrent mounts.
-- Direct random reads from compressed images through native filesystem readers. Data and fragment blocks are decompressed in memory. No temporary extraction directory is created by browsing or mounting.
-- SquashFS 4.0 reading: gzip, XZ, LZO, LZ4, Zstandard and legacy LZMA where supported by the bundled decoder.
-- Linux squashfs-tools Windows ports: mksquashfs, unsquashfs, sqfscat and sqfstar. Image creation uses mksquashfs; Windows-safe extraction uses the archive reader.
-- Advanced image creation: compressor, compression level, block size, worker count, memory limit, timestamps, exclusions, fragments, duplicate detection, sparse detection, ownership, export table, and compressor-specific parameters.
-- NSIS installation, file associations for .squashfs, .sqfs, .sfs, .dwarfs and .erofs, and Explorer commands to browse, mount, extract or create an image.
+- WinUI 3 interface in English and Simplified Chinese, previews, file filtering, recent images and drag and drop.
+- Multi-file and directory selection, eight compression presets and format-specific advanced settings.
+- Native WinFsp read-only drive mounts and UNC access, with parallel random reads and no temporary extracted file tree.
+- Shared image caching, configurable per-image cache capacity and idle expiration.
+- Explorer Open/Edit, multi-selection archive creation and eject commands.
 
-## Image formats
-
-| Format | Creation engine | Reading |
+| Format | Reader | Creator |
 | --- | --- | --- |
-| SquashFS 4.0 | mksquashfs | libsquashfs |
-| DwarFS | mkdwarfs 0.12.4 | native Rust reader, filesystem versions 2.3–2.5, null/Zstandard/LZ4/LZMA |
-| EROFS | mkfs.erofs | native liberofs, single-device raw filesystem images |
+| SquashFS | libsquashfs, parallel read contexts | mksquashfs |
+| DwarFS | official C++ DwarFS 0.15.10 | mkdwarfs |
+| EROFS | liberofs, single-device raw images | mkfs.erofs |
 
-All three use the same browser, preview, verification, extraction, WinFsp and UNC interface. Multi-source DwarFS creation assembles a temporary source tree using hard links where possible and copies across filesystems; EROFS streams a TAR representation to its creation tool. Browsing and mounting do not extract the image to disk.
-
-The eighth preset tries XZ with and without BCJ, Zstandard level 22 and gzip level 9 for SquashFS, retaining the smallest result. DwarFS uses LZMA preset 9 extreme and a dictionary matching the largest useful data block (up to 1 GiB). EROFS uses LZMA preset 9 extreme, maximum physical clusters and deduplication. Compression ratio varies with input data.
-
-Example: `winsqfs create DwarFS 8 output.dwarfs file1.txt file2.txt folder`.
+Regular files and directories are projected into Windows. Symbolic links and special files are displayed as metadata. Incompatible Windows names are encoded deterministically. Extreme compression uses format-specific high-ratio settings.
 
 ## Installation
 
-Download the x64 installer from [Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) or the Windows build artifact from [Actions](https://github.com/HSOS6Miyabi/WinSquashfs/actions). The installer includes the WinFsp runtime and a self-contained Windows App SDK/.NET application. Windows 10 version 1809 or newer is required. Mounting and UNC access require WinFsp 2.2.26323 (WinFsp 2026) or a later compatible 2.x version. The installer installs or upgrades the runtime when necessary. The portable distribution includes prerequisites/WinFsp.msi for offline installation. Use `winsqfs doctor` or **Tools & about → Check WinFsp runtime** to inspect the installed native runtime.
+Windows x64, Windows 10 1809 or newer. Mounting and UNC access require WinFsp 2.2.26323 or a compatible newer 2.x version. The installer installs or upgrades WinFsp; the portable distribution includes its MSI in prerequisites. No .NET runtime is required.
 
-## Language
+[Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) · [Builds](https://github.com/HSOS6Miyabi/WinSquashfs/actions)
 
-WinSquashfs supports English and Simplified Chinese. The interface follows the Windows display language by default. Select a language in **Tools & about → Interface language**, save it, and restart the application. The UNC background process is independent of the main window.
+## UNC access
 
-The installer supports English and Simplified Chinese and registers Explorer menu labels in the selected installer language. The CLI uses English by default to preserve script compatibility; use `winsqfs --lang zh-CN` or `winsqfs --lang system` to change the language for a command. Output from the upstream squashfs-tools binaries is preserved as originally emitted.
+Start the independent UNC agent in the application. It stays running when the GUI closes and can start at login.
 
-## Usage
+    \\sfs$\C\images\linux.squashfs\etc\os-release
+    \\sfs.localhost\C\images\linux.squashfs
+    \\sfs$\path\archive.dwarfs
+    \\sfs$\UNC\NAS\backup\archive.erofs
 
-Open an image from the browser or Explorer. Select files for previews or extraction, double-click a folder to navigate, and choose Mount image to expose it as a read-only drive. Mounted images remain active while the application instance is open. Unmount them from the Mounted images page or use **Eject (WinSquashfs)** in the drive's Explorer context menu (Show more options on Windows 11). The installed shell command is scoped to SquashFS volumes. `winsqfs eject X:` also works with portable installations.
+Both server names expose enabled drive mappings, the configured directory alias, and network shares. Double-click a remote image or run `archivefs unc-alias IMAGE` to register an exact host/share alias such as `\\sfs.NAS.localhost\backup`. Registered aliases are restored at agent startup; `\\sfs$\UNC` remains the direct entry point for a new host or share. Explicit image paths are recognized by content. Source reads use the hosting process's Windows credentials. Transient local sources use opportunistic locks where available, with short-lived reads and identity checks otherwise. Changed sources invalidate their cached generations. Explicit drive mounts protect the source until ejected.
 
-Create image accepts multiple files and folders, including drag-and-drop, and a new output path. A single source directory contributes its contents; multiple inputs retain their names at the image root. Select SquashFS, DwarFS or EROFS, then choose one of eight compression presets from Store to Extreme or customize the format-specific controls. Extreme prioritizes compression ratio and does not impose an additional memory budget. Right-click multiple items in Explorer and choose **Create archive with WinSquashfs** (Show more options on Windows 11). Files with Windows-incompatible names receive deterministic Windows-safe names; the browser preserves the original names for display. Linux symbolic links, sockets and devices are listed as metadata; they are omitted from the mounted filesystem and Windows-safe extraction. The original unsquashfs executable is available for Linux-oriented extraction behavior.
+## Command line and development
 
-## File associations
+Run archivefs --help for commands. Use --lang zh-CN for Chinese output. See [native build instructions](native/cpp/README.md) for CMake, MSVC, vcpkg and Windows integration tests.
 
-Double-click an associated image to open its UNC directory directly in Explorer. The **Edit with WinSquashfs** verb opens the graphical image browser. Mounting a drive letter remains available in the GUI and Explorer context menu.
-
-## Direct UNC access
-
-Open **UNC access** in WinSquashfs and start the background application. The default configuration exposes the current user's profile as **path** and available local drives by their letter. For example:
-
-    C:\images\linux.squashfs
-    \\sfs$\C\images\linux.squashfs
-    \\sfs$\C\images\linux.squashfs\usr\bin\example
-
-To use a custom root, set the local directory to C:\images and the share name to path, then open \\sfs$\path\linux.squashfs. The sfs$ server component is a local virtual UNC namespace chosen to reduce conflicts with DNS hostnames. The UNC paths are normal Windows paths; Explorer and other applications can read them directly. A single network filesystem per share dynamically opens images as directories. No drive letter is reserved. Ordinary host files are not exposed. The source directory can be local, mapped or UNC. Directory junctions, symbolic links and other filesystem redirections are resolved by Windows. Explicit paths may refer to images with any filename extension. File access uses the credentials and access token of the hosting process; the application does not substitute a restricted token. UNC volumes are available to the Windows account running the background application.
-
-Network source images are accessed through the built-in UNC share. For example, \\nas\backup\rootfs.squashfs becomes \\sfs$\UNC\nas\backup\rootfs.squashfs. The background process uses the current Windows user's network credentials; use an already accessible share.
-
-For UNC access and the image browser, local files use a read-handle opportunistic lock when supported. A conflicting operation breaks the lock and releases the source handle. SMB and filesystems without this lock use short-lived read handles and verify file identity and modification information. Asynchronous directory notifications invalidate removed, renamed, replaced or changed images, including active cached entries. Other images and the UNC shares remain available. Directory watches are shared across images in the same directory, including ancestor name changes. There is no periodic source polling. If notifications are unavailable or stop working, identity is checked on access using the metadata available from the source server. An idle cache schedules a single wakeup at the earliest expiration. On servers that do not provide a stable file identifier, the reader uses the available size and timestamp information and releases the idle cache immediately. Explicit drive-letter mounts continue to protect their source images while mounted.
-
-The background application remains available after the GUI closes. Start-at-login is optional. Idle images are closed after the configured time (default 60 seconds); the maximum number of idle images defaults to 8. Active handles retain their image. Changing settings restarts the background application if it is running; close open UNC files before stopping or applying settings. Restart UNC access to discover newly attached drives. Only one process can own a particular sfs$ share name at a time.
-
-The image browser can copy the current image's UNC path or open it in Explorer. Explorer's image context menu also offers Open via SquashFS UNC path. Windows 11 displays traditional shell verbs in Show more options.
-
-## Command line
-
-    winsqfs --version
-    winsqfs doctor
-    winsqfs info image.squashfs
-    winsqfs list image.squashfs
-    winsqfs list image.squashfs /directory
-    winsqfs read image.squashfs /file.bin 65536 4096
-    winsqfs mount image.squashfs X:
-    winsqfs eject X:
-    winsqfs verify image.squashfs
-    winsqfs serve path C:\images 60
-    winsqfs unc-start
-    winsqfs unc-status
-    winsqfs unc-path C:\images\linux.squashfs
-    winsqfs unc-stop
-    winsqfs pack C:\source C:\output.squashfs zstd
-    winsqfs unpack image.squashfs C:\new-directory
-
-The read command writes hexadecimal bytes. The verify command reads each distinct regular-file inode without extracting data. Ctrl+C stops a command-line mount or foreground UNC share. Native tools are located in the tools subdirectory.
-
-## Build
-
-On Windows x64, install .NET 8, Visual Studio with Windows SDK and desktop development components, MSYS2 MINGW64 with mingw-w64-x86_64-gcc, squashfs-tools, curl and unzip, and NSIS. From the repository root:
-
-    bash scripts/build-native.sh
-    pwsh scripts/install-winfsp.ps1
-    pwsh scripts/publish.ps1
-
-The distribution is written to artifacts/dist. The project version is defined in Directory.Build.props. Build the installer with `makensis /DPRODUCT_VERSION=<version> /DWINFSP_MIN_VERSION=<runtime-version>.0 installer/WinSquashfs.nsi`, using the versions from Directory.Build.props. After the Windows workflow completes all tests, the release job publishes a new version as a GitHub Release, including an installer, portable ZIP and SHA-256 checksums. Existing published versions are retained. Version tags must match Directory.Build.props.
-
-## Architecture
-
-A C adapter opens SquashFS images through libsquashfs 1.3.2 and connects LZO decoding where required. The managed Core builds a directory index from inode metadata, translates Windows names and handles image lifetime. WinFsp callbacks supply uncompressed offsets and buffers to the reader. WinUI uses the same Core API. The bundled mksquashfs process builds new images with user-selected parameters and publishes completed images atomically.
-
-## License
-
-GPL-3.0-only. See LICENSE and THIRD-PARTY.md for dependency information.
+GPL-3.0-only. See [THIRD-PARTY.md](THIRD-PARTY.md).

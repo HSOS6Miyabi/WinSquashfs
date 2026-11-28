@@ -1,0 +1,268 @@
+name: WinArchiveFSPro native build and integration
+on:
+  push:
+    branches: ['main', 'refactor/native-cpp', 'refactor/native-cpp-validation']
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  erofs-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: erofs
+        with:
+          path: artifacts/erofs
+          key: archivefs-erofs-${{ hashFiles('native/erofs-reader.c', 'scripts/build-erofs.sh', 'native/cpp/scripts/erofs_binary.py', 'native/cpp/erofs_abi.c') }}
+      - if: steps.erofs.outputs.cache-hit != 'true'
+        run: bash scripts/build-erofs.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: erofs-native
+          path: artifacts/erofs/
+          if-no-files-found: error
+  windows:
+    needs: erofs-native
+    runs-on: windows-2025
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc squashfs-tools curl unzip
+      - name: Build SquashFS reader and Explorer extension
+        shell: msys2 {0}
+        run: bash scripts/build-native.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: erofs-native
+          path: artifacts/native
+      - name: Install WinFsp SDK and driver
+        shell: pwsh
+        run: ./scripts/install-winfsp.ps1
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: actions/cache/restore@v4
+        id: dwarfs-cache
+        with:
+          path: |
+            .deps/dwarfs-install
+            .deps/vcpkg-installed
+          key: archivefs-dwarfs-v0.15.10-static-md-v2-${{ runner.os }}
+      - uses: actions/cache/restore@v4
+        id: dwarfs-ports
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true'
+        with:
+          path: .deps/vcpkg-installed
+          key: archivefs-dwarfs-ports-v0.15.10-static-md-v1-${{ runner.os }}
+      - name: Configure official DwarFS dependencies
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage ConfigureDependencies
+      - uses: actions/cache/save@v4
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true' && steps.dwarfs-ports.outputs.cache-hit != 'true'
+        with:
+          path: .deps/vcpkg-installed
+          key: ${{ steps.dwarfs-ports.outputs.cache-primary-key }}
+      - name: Build official DwarFS reader and tools
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage Dependencies
+      - uses: actions/cache/save@v4
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .deps/dwarfs-install
+            .deps/vcpkg-installed
+          key: ${{ steps.dwarfs-cache.outputs.cache-primary-key }}
+      - name: Build and test native applications
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage CoreDistribution
+      - name: Test real archives and mounted filesystem
+        run: python native/cpp/scripts/windows_integration.py artifacts/dist
+      - name: Benchmark real compressed images
+        run: python native/cpp/scripts/windows_benchmark.py artifacts/dist .deps/archivefs-build/archivefs-benchmark.exe artifacts/benchmarks/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WinArchiveFSPro-benchmarks
+          path: artifacts/benchmarks/
+          if-no-files-found: ignore
+      - name: Compile and package WinUI
+        if: success() || failure()
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage Gui
+      - name: WinUI interaction and localization tests
+        shell: powershell
+        run: |
+          ./native/cpp/scripts/windows_ui.ps1 -AppDirectory artifacts/dist -Language en-US
+          ./native/cpp/scripts/windows_ui.ps1 -AppDirectory artifacts/dist -Language zh-CN
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $nsis=Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'NSIS\makensis.exe'
+          $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          $runtime=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.WinFspRuntimeVersion
+          & $nsis "/DPRODUCT_VERSION=$version" "/DWINFSP_MIN_VERSION=$runtime.0" installer/WinArchiveFSPro.nsi
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify installed application
+        shell: pwsh
+        run: |
+          $setup=Resolve-Path artifacts/WinArchiveFSPro-Setup-x64.exe
+          $p=Start-Process $setup -ArgumentList @('/S','/LANG=1033') -Wait -PassThru
+          if($p.ExitCode) { throw "Installer exit $($p.ExitCode)" }
+          $app=Join-Path $env:ProgramFiles 'WinArchiveFSPro/app'
+          if (!(Test-Path "$app/WinArchiveFSPro.exe")) { throw 'Missing GUI' }
+          if (!(Test-Path "$app/WinArchiveFSPro.Unc.exe")) { throw 'Missing UNC agent' }
+          if (!(Test-Path "$app/archivefs.exe")) { throw 'Missing native CLI' }
+          & ./tests/distribution.ps1 -AppDirectory $app -Version ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version -ShellEject
+          python native/cpp/scripts/windows_integration.py $app
+          if($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./tests/association.ps1 -AppDirectory $app
+          if($LASTEXITCODE) { exit $LASTEXITCODE }
+          $harness=Resolve-Path artifacts/native-tests/pack-shell.exe
+          & ./tests/pack-shell.ps1 -AppDirectory $app -Harness $harness
+          if($LASTEXITCODE) { exit $LASTEXITCODE }
+          $gui=Start-Process "$app/WinArchiveFSPro.exe" -PassThru
+          try {
+            $null=$gui.WaitForInputIdle(30000)
+            Start-Sleep -Seconds 2
+            $gui.Refresh()
+            if ($gui.HasExited -or !$gui.MainWindowHandle) { throw 'WinUI startup failed' }
+          } finally { if (!$gui.HasExited) { $gui.CloseMainWindow() | Out-Null; if (!$gui.WaitForExit(5000)) { $gui.Kill() } } }
+          $p=Start-Process (Join-Path $env:ProgramFiles 'WinArchiveFSPro/Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode) { throw "Uninstaller exit $($p.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WinArchiveFSPro-UI-screenshots
+          path: artifacts/screenshots/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: |
+            artifacts/WinArchiveFSPro-Setup-x64.exe
+            artifacts/dist/
+          if-no-files-found: error
+  windows-core:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install WinFsp SDK
+        shell: pwsh
+        run: ./scripts/install-winfsp.ps1
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: actions/cache/restore@v4
+        id: core-cache
+        with:
+          path: .deps/vcpkg-installed
+          key: archivefs-core-static-md-v1-${{ runner.os }}
+      - name: Install core dependencies
+        if: steps.core-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $vcpkg=$env:VCPKG_INSTALLATION_ROOT
+          if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
+          $ports=Join-Path $PWD '.deps/vcpkg-installed'
+          & "$vcpkg/vcpkg.exe" install 'libarchive[core]' nlohmann-json --classic --triplet=x64-windows-static-md "--x-install-root=$ports"
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+      - uses: actions/cache/save@v4
+        if: steps.core-cache.outputs.cache-hit != 'true'
+        with:
+          path: .deps/vcpkg-installed
+          key: ${{ steps.core-cache.outputs.cache-primary-key }}
+      - name: Compile Windows core and run unit tests
+        env:
+          ARCHIVEFS_TRACE: '1'
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage Tests
+      - name: Compile WinUI application
+        if: always()
+        shell: pwsh
+        run: |
+          $core=Join-Path $PWD '.deps/archivefs-test/archivefs_core.lib'
+          $out=Join-Path $PWD 'artifacts/core-ui'
+          msbuild native/cpp/gui/WinArchiveFSPro.vcxproj /restore /m /p:Configuration=Release /p:Platform=x64 "/p:ArchiveFSCoreLib=$core" "/p:OutDir=$out/" /p:WindowsAppSDKSelfContained=true
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build libarchive-dev libssl-dev
+      - name: Configure sanitized core
+        run: >
+          cmake -S native/cpp -B build/sanitizers -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=clang++ -DARCHIVEFS_BUILD_FUZZERS=ON
+          "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer"
+          "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+          "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined"
+      - name: Build
+        run: cmake --build build/sanitizers --parallel 2
+      - name: Execute core and concurrent I/O tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build/sanitizers --output-on-failure --repeat until-fail:10
+      - name: Fuzz malformed names and image signatures
+        run: build/sanitizers/archivefs-fuzz -runs=30000 -max_len=4096
+  installer-runtime:
+    needs: windows
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [clean, upgrade]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: output
+      - name: Validate driver installation and Explorer integration
+        shell: pwsh
+        run: ./tests/runtime-install.ps1 -Scenario '${{ matrix.scenario }}' -Distribution output/dist -Setup output/WinArchiveFSPro-Setup-x64.exe
+  product-upgrade:
+    needs: windows
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: output
+      - name: Upgrade previous released product
+        shell: pwsh
+        run: ./tests/product-upgrade.ps1 -Setup output/WinArchiveFSPro-Setup-x64.exe
+  release:
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, windows-core, installer-runtime, product-upgrade, linux-sanitizers]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: output
+      - name: Package and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release.sh

@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-only
-if (-not ('WinSquashfsIconTest' -as [type])) {
+if (-not ('WinArchiveFSProIconTest' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 
-public static class WinSquashfsIconTest
+public static class WinArchiveFSProIconTest
 {
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     public static extern IntPtr LoadImageW(IntPtr instance, string name, uint type, int width, int height, uint flags);
@@ -124,18 +124,18 @@ function Assert-IconAssets {
             if($data[$entry] -ne $dimension -or $data[$entry+1] -ne $dimension -or [BitConverter]::ToUInt16($data,$entry+6) -ne 32){
                 throw "Missing $($size)px 32-bit image in $name"
             }
-            $icon=[WinSquashfsIconTest]::LoadImageW([IntPtr]::Zero,$path,1,$size,$size,0x10)
+            $icon=[WinArchiveFSProIconTest]::LoadImageW([IntPtr]::Zero,$path,1,$size,$size,0x10)
             if($icon -eq [IntPtr]::Zero){throw "Windows cannot load $($size)px icon from $path"}
-            [void][WinSquashfsIconTest]::DestroyIcon($icon)
+            [void][WinArchiveFSProIconTest]::DestroyIcon($icon)
         }
     }
-    Assert-ExecutableIcon -Path (Join-Path $AppDirectory 'WinSquashfs.exe') -IconPath (Join-Path $AppDirectory 'Assets/app-icon.ico')
+    Assert-ExecutableIcon -Path (Join-Path $AppDirectory 'WinArchiveFSPro.exe') -IconPath (Join-Path $AppDirectory 'Assets/app-icon.ico')
     Write-Host 'PASS packaged application and file icons'
 }
 
 function Assert-ExecutableIcon {
     param([Parameter(Mandatory=$true)][string]$Path,[Parameter(Mandatory=$true)][string]$IconPath)
-    if(![WinSquashfsIconTest]::HasIcon($Path,$IconPath)){
+    if(![WinArchiveFSProIconTest]::HasIcon($Path,$IconPath)){
         throw "Expected embedded application icon in $Path"
     }
 }
@@ -149,7 +149,7 @@ function Assert-InstalledIcons {
     $expected='"'+$fileIcon+'",0'
     $key=Get-Item 'HKLM:\Software\Classes\WinSquashfs.Image\DefaultIcon'
     if($key.GetValue('') -ne $expected){throw 'Incorrect SquashFS file association icon'}
-    foreach($extension in @('.squashfs','.sqfs','.sfs')){
+    foreach($extension in @('.squashfs','.sqfs','.sfs','.dwarfs','.erofs')){
         $registration=Get-Item "HKLM:\Software\Classes\$extension\OpenWithProgids"
         if($registration.GetValueNames() -notcontains 'WinSquashfs.Image'){throw "Missing file association for $extension"}
     }
