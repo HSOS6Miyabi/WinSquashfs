@@ -9,7 +9,7 @@ struct Settings {
     std::filesystem::path root;
     std::vector<LocalAlias> extra_shares;
     std::u16string alias=u"path";
-    bool include_drives=true,start_at_login=false;
+    bool include_drives=true,start_at_login=false,show_tray_icon=true;
     unsigned idle_seconds=60,max_idle_images=8,cache_mib=64;
     std::string language="system",theme="system";
     static Settings load();

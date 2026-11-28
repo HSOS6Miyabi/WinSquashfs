@@ -6,8 +6,8 @@ A native Windows application for browsing, creating, extracting, verifying and m
 
 ## Features
 
-- WinUI 3 interface in English and Simplified Chinese, previews, file filtering, recent images and drag and drop.
-- Multi-file and directory selection, eight compression presets and format-specific advanced settings.
+- WinUI 3 interface in English and Simplified Chinese, previews, recursive file search, recent images, appearance settings and drag and drop.
+- Multi-file and directory selection, eight compression presets, format-specific advanced settings, and batch creation and extraction.
 - Native WinFsp read-only drive mounts and UNC access, with parallel random reads and no temporary extracted file tree.
 - Shared image caching, configurable per-image cache capacity and idle expiration.
 - Explorer Open/Edit, multi-selection archive creation and eject commands.
@@ -28,14 +28,14 @@ Windows x64, Windows 10 1809 or newer. Mounting and UNC access require WinFsp 2.
 
 ## UNC access
 
-Start the independent UNC agent in the application. It stays running when the GUI closes and can start at login.
+Start the independent UNC agent in the application. It stays running when the GUI closes, can start at login, and can be managed from its notification area icon.
 
     \\sfs$\C\images\linux.squashfs\etc\os-release
     \\sfs.localhost\C\images\linux.squashfs
     \\sfs$\path\archive.dwarfs
     \\sfs$\UNC\NAS\backup\archive.erofs
 
-Both server names expose enabled drive mappings, the configured directory alias, and network shares. Double-click a remote image or run `archivefs unc-alias IMAGE` to register an exact host/share alias such as `\\sfs.NAS.localhost\backup`. Registered aliases are restored at agent startup; `\\sfs$\UNC` remains the direct entry point for a new host or share. Explicit image paths are recognized by content. Source reads use the hosting process's Windows credentials. Transient local sources use opportunistic locks where available, with short-lived reads and identity checks otherwise. Changed sources invalidate their cached generations. Explicit drive mounts protect the source until ejected.
+Both server names expose enabled drive mappings, the configured directory aliases, and network shares. New local or mapped drive letters are detected automatically. Double-click a remote image or run `archivefs unc-alias IMAGE` to register an exact host/share alias such as `\\sfs.NAS.localhost\backup`. Registered aliases are restored at agent startup; `\\sfs$\UNC` remains the direct entry point for a new host or share. Explicit image paths are recognized by content. Source reads use the hosting process's Windows credentials. Transient local sources use opportunistic locks where available, with short-lived reads and identity checks otherwise. Changed sources invalidate their cached generations. Explicit drive mounts protect the source until ejected.
 
 ## Command line and development
 

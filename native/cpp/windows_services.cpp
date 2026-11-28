@@ -79,8 +79,8 @@ void save_recent(const std::vector<fs::path>& paths){
 std::vector<fs::path> recent_images(){try{auto path=settings_directory()/L"recent.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"recent.json";if(!fs::exists(path)||fs::file_size(path)>1u<<20)return {};std::ifstream input(path,std::ios::binary);auto json=nlohmann::json::parse(input);std::vector<fs::path> paths;for(auto& value:json){if(paths.size()==15)break;paths.emplace_back(to_utf16(value.get<std::string>()));}return paths;}catch(...){return {};}}
 void remember_image(const fs::path& path){try{auto paths=recent_images();auto full=fs::absolute(path).lexically_normal();auto name=full.u16string();std::erase_if(paths,[&](auto& p){auto other=p.u16string();WindowsNameLess less;return !less(name,other)&&!less(other,name);});paths.insert(paths.begin(),full);if(paths.size()>15)paths.resize(15);save_recent(paths);}catch(...){}}
 void clear_recent_images(){save_recent({});}
-Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){std::ifstream in(path,std::ios::binary);auto j=nlohmann::json::parse(in);s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.language=j.value("Language",std::string("system"));s.theme=j.value("Theme",std::string("system"));for(auto const& item:j.value("ExtraShares",nlohmann::json::array()))s.extra_shares.push_back({to_utf16(item.at("Alias").get<std::string>()),fs::path(to_utf16(item.at("Root").get<std::string>()))});}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
-void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";auto temporary=path;temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";struct Cleanup{fs::path path;~Cleanup(){std::error_code ec;fs::remove(path,ec);}}cleanup{temporary};nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"Language",language},{"Theme",theme}};j["ExtraShares"]=nlohmann::json::array();for(auto const& extra:extra_shares)j["ExtraShares"].push_back({{"Alias",to_utf8(extra.name)},{"Root",to_utf8(extra.root.u16string())}});{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::badbit|std::ios::failbit);out<<j.dump(2)<<'\n';out.close();}if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save settings");autostart(start_at_login);}
+Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){std::ifstream in(path,std::ios::binary);auto j=nlohmann::json::parse(in);s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.show_tray_icon=j.value("ShowTrayIcon",true);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.language=j.value("Language",std::string("system"));s.theme=j.value("Theme",std::string("system"));for(auto const& item:j.value("ExtraShares",nlohmann::json::array()))s.extra_shares.push_back({to_utf16(item.at("Alias").get<std::string>()),fs::path(to_utf16(item.at("Root").get<std::string>()))});}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
+void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";auto temporary=path;temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";struct Cleanup{fs::path path;~Cleanup(){std::error_code ec;fs::remove(path,ec);}}cleanup{temporary};nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"ShowTrayIcon",show_tray_icon},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"Language",language},{"Theme",theme}};j["ExtraShares"]=nlohmann::json::array();for(auto const& extra:extra_shares)j["ExtraShares"].push_back({{"Alias",to_utf8(extra.name)},{"Root",to_utf8(extra.root.u16string())}});{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::badbit|std::ios::failbit);out<<j.dump(2)<<'\n';out.close();}if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save settings");autostart(start_at_login);}
 void migrate_settings(){
     auto current=settings_directory();
     auto legacy=current.parent_path()/L"WinSquashfs";
@@ -225,6 +225,61 @@ private:
 };
 }
 
+namespace {
+class AgentTray {
+public:
+    AgentTray(HANDLE stop,bool enabled,bool chinese)noexcept:stop_(stop),chinese_(chinese){
+        if(!enabled)return;
+        try{
+            HINSTANCE instance=GetModuleHandleW(nullptr);
+            WNDCLASSW cls{};cls.lpfnWndProc=&window_proc;cls.hInstance=instance;cls.lpszClassName=class_name;
+            if(!RegisterClassW(&cls)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)return;
+            taskbar_created_=RegisterWindowMessageW(L"TaskbarCreated");
+            auto path=application_directory()/L"Assets"/L"app-icon.ico";
+            icon_=static_cast<HICON>(LoadImageW(nullptr,path.c_str(),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_LOADFROMFILE));
+            owns_icon_=icon_!=nullptr;
+            if(!icon_)icon_=LoadIconW(nullptr,IDI_APPLICATION);
+            window_=CreateWindowExW(WS_EX_TOOLWINDOW,class_name,L"WinArchiveFSPro UNC",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,this);
+            if(window_)add_icon();
+        }catch(...){}
+    }
+    AgentTray(const AgentTray&)=delete;
+    AgentTray& operator=(const AgentTray&)=delete;
+    ~AgentTray(){if(window_){NOTIFYICONDATAW data{};data.cbSize=sizeof(data);data.hWnd=window_;data.uID=1;Shell_NotifyIconW(NIM_DELETE,&data);DestroyWindow(window_);}if(owns_icon_&&icon_)DestroyIcon(icon_);}
+    static void dispatch(){MSG msg{};while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
+private:
+    static constexpr wchar_t class_name[]=L"WinArchiveFSPro.Unc.Tray";
+    static constexpr UINT callback=WM_APP+1;
+    HANDLE stop_;bool chinese_,owns_icon_=false;HWND window_=nullptr;HICON icon_=nullptr;UINT taskbar_created_=0;
+    void add_icon()noexcept{
+        NOTIFYICONDATAW data{};data.cbSize=sizeof(data);data.hWnd=window_;data.uID=1;data.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;data.uCallbackMessage=callback;data.hIcon=icon_;
+        lstrcpynW(data.szTip,chinese_?L"WinArchiveFSPro — UNC 访问运行中":L"WinArchiveFSPro — UNC access running",static_cast<int>(std::size(data.szTip)));
+        Shell_NotifyIconW(NIM_ADD,&data);
+    }
+    void open_gui()noexcept{try{auto path=application_directory()/L"WinArchiveFSPro.exe";ShellExecuteW(window_,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL);}catch(...){}}
+    void menu()noexcept{
+        POINT cursor{};if(!GetCursorPos(&cursor))return;
+        HMENU menu=CreatePopupMenu();if(!menu)return;
+        AppendMenuW(menu,MF_STRING,1,chinese_?L"打开 WinArchiveFSPro":L"Open WinArchiveFSPro");
+        AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+        AppendMenuW(menu,MF_STRING,2,chinese_?L"停止 UNC 访问":L"Stop UNC access");
+        SetForegroundWindow(window_);
+        auto choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,window_,nullptr);
+        DestroyMenu(menu);PostMessageW(window_,WM_NULL,0,0);
+        if(choice==1)open_gui();else if(choice==2)SetEvent(stop_);
+    }
+    static LRESULT CALLBACK window_proc(HWND hwnd,UINT msg,WPARAM wparam,LPARAM lparam){
+        if(msg==WM_NCCREATE){auto create=reinterpret_cast<CREATESTRUCTW*>(lparam);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(create->lpCreateParams));}
+        auto self=reinterpret_cast<AgentTray*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+        if(self){
+            if(self->taskbar_created_&&msg==self->taskbar_created_){self->add_icon();return 0;}
+            if(msg==callback){if(lparam==WM_LBUTTONDBLCLK)self->open_gui();else if(lparam==WM_RBUTTONUP||lparam==WM_CONTEXTMENU)self->menu();return 0;}
+            if(msg==WM_CLOSE)return 0;
+        }
+        return DefWindowProcW(hwnd,msg,wparam,lparam);
+    }
+};
+}
 int run_agent(){
     winfsp_runtime_info();
     UserSecurity security;
@@ -262,13 +317,15 @@ int run_agent(){
     DWORD drive_mask=GetLogicalDrives();
     RemoteAliasMounts remote(pool,shares,settings.include_drives);
     try{remote.refresh();}catch(const std::exception&){}
+    AgentTray tray(stop.value,settings.show_tray_icon,settings.language=="zh-CN"||(settings.language=="system"&&PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_CHINESE));
     if(!SetEvent(ready.value))fail("SetEvent");
     struct ResetReady{HANDLE event;~ResetReady(){ResetEvent(event);}}reset_ready{ready.value};
     HANDLE events[]{stop.value,aliases.value};
     for(;;){
-        auto result=WaitForMultipleObjects(2,events,FALSE,settings.include_drives?1000:INFINITE);
+        auto result=MsgWaitForMultipleObjectsEx(2,events,settings.include_drives?1000:INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
         if(result==WAIT_OBJECT_0)break;
         if(result==WAIT_OBJECT_0+1){try{remote.refresh();}catch(const std::exception&){}}
+        else if(result==WAIT_OBJECT_0+2)AgentTray::dispatch();
         else if(result!=WAIT_TIMEOUT)fail("wait for UNC agent");
         if(settings.include_drives){
             auto mask=GetLogicalDrives();

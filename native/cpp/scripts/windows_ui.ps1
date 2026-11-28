@@ -113,8 +113,7 @@ try{
   if((Control $w 'OpenMountedImage' $false).Current.IsEnabled){throw 'Open mount enabled without selection'}
   Save-WindowScreenshot $p 'mount-empty'
   Navigate $w 'NavTools'
-  $darkName=if($Language -eq 'zh-CN'){'深色'}else{'Dark'}
-  Choose $w 'ThemeChoice' $darkName
+  Invoke-Control $w 'ThemeDark'
   $null=Wait-Until {(Get-Content $settings -Raw|ConvertFrom-Json).Theme -eq 'dark'} 'dark theme preference'
   Navigate $w 'NavBrowse'
   Save-WindowScreenshot $p 'browser-dark'
