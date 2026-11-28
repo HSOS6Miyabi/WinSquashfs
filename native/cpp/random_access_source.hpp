@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <span>
+#include <string>
 
 namespace archivefs {
 
@@ -26,6 +27,7 @@ class RandomAccessSource {
 public:
     virtual ~RandomAccessSource() = default;
     virtual std::uint64_t size() const noexcept = 0;
+    virtual std::string filename() const { return {}; }
     // Concurrent calls must be safe. A request outside the source is an error.
     void read_exact(std::uint64_t offset, std::span<std::byte> buffer) const {
         auto session = begin_read();

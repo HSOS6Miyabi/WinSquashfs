@@ -351,6 +351,7 @@ public:
 #endif
     }
     std::uint64_t size() const noexcept override { return original_.size; }
+    std::string filename()const override{auto name=path_.filename().u8string();return {reinterpret_cast<const char*>(name.data()),name.size()};}
     void validate() const override {
         ensure_valid();
         try {

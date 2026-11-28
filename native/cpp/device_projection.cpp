@@ -107,6 +107,7 @@ public:
     }
     void invalidate()const noexcept{invalid_.store(true);}
     std::uint64_t size()const noexcept override{return object_.size;}
+    std::string filename()const override{return object_.name;}
     std::unique_ptr<ReadSession> begin_read()const override{return std::make_unique<Session>(shared_from_this());}
     bool source_changed()const noexcept override{return invalid_.load()||!epoch_->load();}
     void validate_path()const override{validate();}

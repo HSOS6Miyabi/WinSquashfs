@@ -250,6 +250,7 @@ class NestedSource final:public RandomAccessSource {
 public:
     NestedSource(std::shared_ptr<ArchiveTree> tree,ArchiveTree::NodePtr node):tree_(std::move(tree)),node_(std::move(node)){}
     std::uint64_t size()const noexcept override{return node_->info.size;}
+    std::string filename()const override{return node_->name;}
     std::unique_ptr<ReadSession> begin_read()const override{return std::make_unique<Session>(tree_,node_);}
     void validate()const override{tree_->info();}
     void validate_path()const override{tree_->validate_path();}

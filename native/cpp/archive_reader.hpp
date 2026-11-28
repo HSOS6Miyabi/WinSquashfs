@@ -14,7 +14,7 @@
 
 namespace archivefs {
 
-enum class ArchiveFormat { squashfs, dwarfs, erofs, unknown, zip, seven_zip, rar, tar, cpio, cab, iso9660, ar, lha };
+enum class ArchiveFormat { squashfs, dwarfs, erofs, unknown, zip, seven_zip, rar, tar, cpio, cab, iso9660, ar, lha, compressed_stream };
 inline std::string_view archive_format_name(ArchiveFormat format) noexcept {
     switch(format){
     case ArchiveFormat::squashfs:return "SquashFS";
@@ -29,6 +29,7 @@ inline std::string_view archive_format_name(ArchiveFormat format) noexcept {
     case ArchiveFormat::iso9660:return "ISO9660";
     case ArchiveFormat::ar:return "AR";
     case ArchiveFormat::lha:return "LHA";
+    case ArchiveFormat::compressed_stream:return "Compressed stream";
     default:return "Unknown";
     }
 }

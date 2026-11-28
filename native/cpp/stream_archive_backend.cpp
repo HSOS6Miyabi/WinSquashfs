@@ -27,6 +27,7 @@ ArchiveFormat format_of(struct archive* a) {
     case ARCHIVE_FORMAT_ISO9660:return ArchiveFormat::iso9660;
     case ARCHIVE_FORMAT_AR:return ArchiveFormat::ar;
     case ARCHIVE_FORMAT_LHA:return ArchiveFormat::lha;
+    case ARCHIVE_FORMAT_RAW:return ArchiveFormat::compressed_stream;
     default:return ArchiveFormat::unknown;
     }
 }
@@ -53,7 +54,8 @@ public:
                           archive_read_support_format_7zip,archive_read_support_format_rar,
                           archive_read_support_format_rar5,archive_read_support_format_cpio,
                           archive_read_support_format_cab,archive_read_support_format_iso9660,
-                          archive_read_support_format_ar,archive_read_support_format_lha})
+                          archive_read_support_format_ar,archive_read_support_format_lha,
+                          archive_read_support_format_raw,archive_read_support_format_empty})
             if(support(a)!=ARCHIVE_OK)throw std::runtime_error(error_text(a));
         check(archive_read_set_callback_data(a,this));
         check(archive_read_set_read_callback(a,&read_source));
@@ -68,6 +70,7 @@ public:
         }
         finish();
     }
+    ~Cursor(){archive_.reset();}
     void begin(){failure_=nullptr;session_=source_->begin_read();}
     void finish(){
         if(failure_)std::rethrow_exception(failure_);
@@ -84,36 +87,60 @@ public:
                 throw UnknownArchiveFormat();
             throw std::runtime_error(error_text(handle()));
         }
-        ++ordinal;offset=0;
+        ++ordinal;offset=0;block_=nullptr;block_start_=block_end_=0;eof_=false;
         return e;
     }
-    void skip_entry(){check(archive_read_data_skip(handle()));}
-    void read(std::span<std::byte> output){
+    void skip_entry(){block_=nullptr;check(archive_read_data_skip(handle()));}
+    // Use data blocks rather than materializing holes in a sparse file.
+    // The returned buffer remains valid until the next libarchive call.
+    std::uint64_t scan_size(){
+        std::uint64_t size=0;
+        while(next_block()){
+            if(block_start_!=size)throw std::runtime_error("non-contiguous compressed stream");
+            size=block_end_;
+        }
+        return size;
+    }
+    void read_at(std::uint64_t position,std::span<std::byte> output,std::uint64_t size,bool holes){
+        if(position<offset||position>size||output.size()>size-position)
+            throw std::out_of_range("invalid decoder cursor position");
+        offset=position;
         while(!output.empty()){
-            const auto request=std::min<std::size_t>(output.size(),1u<<20);
-            auto n=archive_read_data(handle(),output.data(),request);
-            if(failure_)std::rethrow_exception(failure_);
-            if(n<0)throw std::runtime_error(error_text(handle()));
-            if(!n||static_cast<std::size_t>(n)>request)throw std::runtime_error("short archive entry read");
-            offset+=static_cast<std::uint64_t>(n);output=output.subspan(static_cast<std::size_t>(n));
+            while(!eof_&&(!block_||offset>=block_end_))next_block();
+            if(block_&&block_end_>size)throw std::runtime_error("archive entry exceeds declared size");
+            if(eof_||offset<block_start_){
+                if(!holes)throw std::runtime_error("short or discontinuous archive entry");
+                auto n=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),eof_?size-offset:block_start_-offset));
+                std::fill_n(output.data(),n,std::byte{0});offset+=n;output=output.subspan(n);
+            }else{
+                auto n=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),block_end_-offset));
+                std::copy_n(block_+static_cast<std::size_t>(offset-block_start_),n,output.data());
+                offset+=n;output=output.subspan(n);
+            }
         }
-    }
-    void advance(std::uint64_t position){
-        std::array<std::byte,65536> discard{};
-        while(offset<position){
-            auto n=static_cast<std::size_t>(std::min<std::uint64_t>(discard.size(),position-offset));
-            read(std::span(discard).first(n));
-        }
-    }
-    void end_entry(){
-        std::byte byte{};
-        auto rc=archive_read_data(handle(),&byte,1);
-        if(failure_)std::rethrow_exception(failure_);
-        if(rc<0)throw std::runtime_error(error_text(handle()));
-        if(rc!=0)throw std::runtime_error("archive entry exceeds declared size");
+        // A final decoder call validates checksums for formats such as ZIP.
+        if(offset==size&&!eof_&&next_block())throw std::runtime_error("archive entry exceeds declared size");
     }
     std::uint64_t ordinal=0,offset=0;
 private:
+    bool next_block(){
+        if(eof_)return false;
+        for(unsigned attempt=0;attempt<1024;++attempt){
+            const void* data=nullptr;size_t count=0;la_int64_t position=0;
+            auto rc=archive_read_data_block(handle(),&data,&count,&position);
+            if(failure_)std::rethrow_exception(failure_);
+            if(rc==ARCHIVE_EOF){eof_=true;block_=nullptr;return false;}
+            if(rc!=ARCHIVE_OK)throw std::runtime_error(error_text(handle()));
+            if(position<0||static_cast<std::uint64_t>(position)<block_end_||
+               count>static_cast<std::uint64_t>(INT64_MAX)-static_cast<std::uint64_t>(position))
+                throw std::runtime_error("invalid archive data block range");
+            if(!count)continue;
+            if(!data)throw std::runtime_error("missing archive data block");
+            block_=static_cast<const std::byte*>(data);block_start_=static_cast<std::uint64_t>(position);
+            block_end_=block_start_+count;return true;
+        }
+        throw std::runtime_error("archive decoder did not advance");
+    }
     void check(int rc){
         if(failure_)std::rethrow_exception(failure_);
         if(rc<ARCHIVE_OK)throw std::runtime_error(error_text(handle()));
@@ -158,7 +185,9 @@ private:
     std::unique_ptr<ReadSession> session_;
     std::exception_ptr failure_;
     std::array<std::byte,65536> buffer_{};
-    std::uint64_t position_=0;
+    std::uint64_t position_=0,block_start_=0,block_end_=0;
+    const std::byte* block_=nullptr;
+    bool eof_=false;
 };
 
 std::string entry_name(struct archive_entry* e) {
@@ -184,13 +213,26 @@ std::vector<std::string_view> path_parts(std::string_view path) {
     }
     return parts;
 }
+std::string raw_filename(const RandomAccessSource& source){
+    auto name=source.filename(),lower=name;
+    for(auto& c:lower)if(c>='A'&&c<='Z')c=static_cast<char>(c-'A'+'a');
+    constexpr std::string_view container_suffixes[]={".tgz",".tbz",".tbz2",".txz",".tzst",".tlz",".tar.gz",".tar.bz2",".tar.xz",".tar.zst",".tar.lz4",".tar.lz",".tar.lzma",".tar.z",".cpio.gz",".cpio.xz",".cpio.zst"};
+    for(auto suffix:container_suffixes)if(lower.ends_with(suffix))
+        throw std::runtime_error("compressed archive does not contain a supported archive container");
+    constexpr std::string_view suffixes[]={".gz",".bz2",".xz",".zst",".lz4",".lz",".lzma",".z"};
+    for(auto suffix:suffixes)if(lower.ends_with(suffix)){name.resize(name.size()-suffix.size());break;}
+    if(name.empty()||name=="."||name==".."||name.find_first_of("/\\")!=std::string::npos)return "data";
+    return name;
+}
+struct Extent {std::uint64_t logical,physical,length;};
 struct Node {
     FileInfo info{};
     std::map<std::string,InodeId,std::less<>> children;
     std::uint64_t ordinal=0;
     std::optional<std::uint64_t> direct;
+    std::shared_ptr<const std::vector<Extent>> sparse;
     std::string link;
-    bool hard=false,encrypted=false;
+    bool hard=false,encrypted=false,holes=false;
 };
 class StreamBackend final:public ArchiveBackend {
 public:
@@ -205,7 +247,9 @@ public:
             if(info_.format==ArchiveFormat::unknown)
                 info_={f,1,source_->size(),256u<<10,static_cast<std::uint32_t>(archive_filter_code(a,0))};
             if(f!=info_.format)throw std::runtime_error("archive format changed during scan");
-            auto name=entry_name(entry);
+            if(f==ArchiveFormat::compressed_stream&&(hint_!=ArchiveFormat::unknown||info_.compression==ARCHIVE_FILTER_NONE))
+                throw UnknownArchiveFormat();
+            auto name=f==ArchiveFormat::compressed_stream?raw_filename(*source_):entry_name(entry);
             if(f==ArchiveFormat::ar&&(name=="/"||name=="//"||name=="/SYM64/")){cursor.skip_entry();continue;}
             auto parts=path_parts(name);
             auto type=archive_entry_filetype(entry);
@@ -239,10 +283,12 @@ public:
             }
             auto& node=at(id);
             auto size=archive_entry_size(entry);
+            if(f==ArchiveFormat::compressed_stream)size=static_cast<la_int64_t>(cursor.scan_size());
             if(size<0)throw std::runtime_error("negative archive entry size");
             node.info={id,kind,kind==FileKind::regular?static_cast<std::uint64_t>(size):0,
                        std::clamp<std::int64_t>(archive_entry_mtime(entry),-11644473600LL,253402300799LL)};
-            node.ordinal=cursor.ordinal;node.direct.reset();node.link.clear();node.hard=hard!=nullptr;
+            node.ordinal=cursor.ordinal;node.direct.reset();node.sparse.reset();node.link.clear();node.hard=hard!=nullptr;
+            node.holes=archive_entry_sparse_count(entry)>0;
             node.encrypted=archive_entry_is_encrypted(entry)>0;
             if(hard)node.link=hard;
             else if(kind==FileKind::symlink){
@@ -250,31 +296,45 @@ public:
                 if(target)node.link=target;
                 node.info.size=node.link.size();
             }
-            if(node.link.size()>65536)throw std::length_error("archive link target too long");
-            // libarchive reports the consumed uncompressed offset immediately
-            // after the real TAR header, including preceding PAX/GNU records.
-            // Sparse files use the decoder to reconstruct zero-filled holes.
+            if(node.link.size()>65536||node.link.size()>64u*1024u*1024u-name_bytes_)
+                throw std::length_error("archive link metadata limit exceeded");
+            name_bytes_+=node.link.size();
+            // For an unfiltered TAR, the consumed offset after PAX/GNU
+            // extension records points at the packed file payload. Sparse
+            // maps translate logical ranges to the packed data on disk.
             if(f==ArchiveFormat::tar&&info_.compression==ARCHIVE_FILTER_NONE&&kind==FileKind::regular&&
-               !node.hard&&!node.encrypted&&archive_entry_sparse_count(entry)==0){
-                auto pos=archive_filter_bytes(a,0);
-                if(pos<0||static_cast<std::uint64_t>(pos)>source_->size()||
-                    node.info.size>source_->size()-static_cast<std::uint64_t>(pos))
-                    throw std::runtime_error("TAR entry exceeds source size");
-                node.direct=static_cast<std::uint64_t>(pos);
-            }
-            cursor.skip_entry();
+               !node.hard&&!node.encrypted)index_tar(cursor,entry,node);
+            if(f!=ArchiveFormat::compressed_stream)cursor.skip_entry();
         }
         if(info_.format==ArchiveFormat::unknown){
             auto f=format_of(cursor.handle());
+            auto filter=archive_filter_code(cursor.handle(),0);
+            if(archive_format(cursor.handle())==ARCHIVE_FORMAT_EMPTY&&filter!=ARCHIVE_FILTER_NONE&&hint_==ArchiveFormat::unknown){
+                auto name=raw_filename(*source_);
+                at(1).children.emplace(std::move(name),2);
+                nodes_.emplace_back();at(2).info={2,FileKind::regular,0,0};
+                f=ArchiveFormat::compressed_stream;
+            }
             if(f==ArchiveFormat::unknown)throw UnknownArchiveFormat();
-            info_={f,1,source_->size(),256u<<10,static_cast<std::uint32_t>(archive_filter_code(cursor.handle(),0))};
+            info_={f,1,source_->size(),256u<<10,static_cast<std::uint32_t>(filter)};
         }
         cursor.finish();
+        // In newc CPIO the last member of a hard-link group may carry
+        // the data while the first member only declares the inode.
+        if(info_.format==ArchiveFormat::cpio){
+            for(const auto& node:nodes_)if(node.hard&&node.info.size){
+                auto target=hard_target(node);
+                if(target){
+                    auto& first=at(*target);
+                    if(first.info.size&&first.info.size!=node.info.size)throw std::runtime_error("inconsistent CPIO hard-link sizes");
+                    if(!first.info.size)copy_payload(first,node);
+                }
+            }
+        }
         for(auto& node:nodes_)if(node.hard){
             auto target=hard_target(node);
             if(!target){node.info.kind=FileKind::special;node.info.size=0;continue;}
-            const auto& data=at(*target);
-            node.info.size=data.info.size;node.ordinal=data.ordinal;node.direct=data.direct;node.encrypted=data.encrypted;
+            copy_payload(node,at(*target));
         }
         source_->validate();
     }
@@ -298,7 +358,11 @@ public:
             throw std::out_of_range("archive entry read outside file");
         if(node.encrypted)throw std::runtime_error("encrypted archive entry requires a password");
         if(output.empty())return;
-        if(node.direct){source_->read_exact(*node.direct+offset,output);return;}
+        if(node.direct){
+            if(node.sparse)read_sparse(node,offset,output);
+            else source_->read_exact(*node.direct+offset,output);
+            return;
+        }
         // Keep a bounded set of decoder cursors. Forward sequential requests
         // reuse the existing decoder; backward requests reopen the source.
         // The common ArchiveReader caches decoded pages across cursors.
@@ -331,8 +395,7 @@ public:
                 if(cursor->ordinal)cursor->skip_entry();
                 if(!cursor->next(info_.format))throw std::runtime_error("archive entry disappeared");
             }
-            cursor->advance(offset);cursor->read(output);
-            if(cursor->offset==node.info.size)cursor->end_entry();
+            cursor->read_at(offset,output,node.info.size,node.holes);
             cursor->finish();release();
         }catch(...){cursor.reset();release();throw;}
     }
@@ -340,6 +403,49 @@ public:
     void validate_path()const override{source_->validate_path();}
     bool source_changed()const noexcept override{return source_->source_changed();}
 private:
+    static void copy_payload(Node& destination,const Node& data){
+        destination.info.size=data.info.size;destination.ordinal=data.ordinal;
+        destination.direct=data.direct;destination.sparse=data.sparse;destination.holes=data.holes;
+        destination.encrypted=data.encrypted;
+    }
+    void index_tar(Cursor& cursor,struct archive_entry* entry,Node& node){
+        auto position=archive_filter_bytes(cursor.handle(),0);
+        if(position<0||static_cast<std::uint64_t>(position)>source_->size())throw std::runtime_error("invalid TAR payload offset");
+        auto physical=static_cast<std::uint64_t>(position);
+        node.direct=physical;
+        if(!node.holes){
+            if(node.info.size>source_->size()-physical)throw std::runtime_error("TAR entry exceeds source size");
+            return;
+        }
+        auto count=archive_entry_sparse_reset(entry);
+        if(count<0||static_cast<std::size_t>(count)>1000000-extent_count_)throw std::length_error("TAR sparse metadata limit exceeded");
+        auto extents=std::make_shared<std::vector<Extent>>();extents->reserve(static_cast<std::size_t>(count));
+        std::uint64_t previous=0;
+        for(int i=0;i<count;++i){
+            la_int64_t offset=0,length=0;
+            if(archive_entry_sparse_next(entry,&offset,&length)!=ARCHIVE_OK||offset<0||length<0)
+                throw std::runtime_error("invalid TAR sparse map");
+            auto logical=static_cast<std::uint64_t>(offset),size=static_cast<std::uint64_t>(length);
+            if(logical<previous||logical>node.info.size||size>node.info.size-logical||size>source_->size()-physical)
+                throw std::runtime_error("TAR sparse range exceeds file size");
+            if(size)extents->push_back({logical,physical,size});
+            previous=logical+size;physical+=size;
+        }
+        extent_count_+=extents->size();node.sparse=std::move(extents);
+    }
+    void read_sparse(const Node& node,std::uint64_t offset,std::span<std::byte> output)const{
+        std::fill(output.begin(),output.end(),std::byte{0});
+        const auto end=offset+output.size();
+        const auto& extents=*node.sparse;
+        auto it=std::lower_bound(extents.begin(),extents.end(),offset,[](const Extent& e,std::uint64_t p){return e.logical+e.length<=p;});
+        if(it==extents.end()||it->logical>=end)return;
+        auto session=source_->begin_read();
+        for(;it!=extents.end()&&it->logical<end;++it){
+            auto first=std::max(offset,it->logical),last=std::min(end,it->logical+it->length);
+            session->read_exact(it->physical+first-it->logical,output.subspan(static_cast<std::size_t>(first-offset),static_cast<std::size_t>(last-first)));
+        }
+        session->finish();
+    }
     Node& at(InodeId id){return const_cast<Node&>(std::as_const(*this).at(id));}
     const Node& at(InodeId id)const{
         if(!id||id>nodes_.size())throw std::out_of_range("unknown archive inode");
@@ -367,7 +473,7 @@ private:
     ArchiveFormat hint_;
     ArchiveInfo info_{ArchiveFormat::unknown,1,0,0};
     std::vector<Node> nodes_;
-    std::size_t name_bytes_=0;
+    std::size_t name_bytes_=0,extent_count_=0;
     mutable std::mutex mutex_;
     mutable std::condition_variable ready_;
     mutable std::array<Slot,2> slots_;

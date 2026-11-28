@@ -42,6 +42,7 @@ public:
         if(progress)progress->size.store(source_->size(),std::memory_order_relaxed);
     }
     std::uint64_t size()const noexcept override{return source_->size();}
+    std::string filename()const override{return source_->filename();}
     std::unique_ptr<ReadSession> begin_read()const override{return std::make_unique<Session>(source_->begin_read(),progress_);}
     void validate()const override{source_->validate();}
     void validate_path()const override{source_->validate_path();}
