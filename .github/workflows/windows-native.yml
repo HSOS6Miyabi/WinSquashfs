@@ -203,6 +203,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Archive tested source
+        run: git archive --format=zip --output="$RUNNER_TEMP/WinArchiveFSPro-source.zip" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinArchiveFSPro-source
+          path: ${{ runner.temp }}/WinArchiveFSPro-source.zip
+          if-no-files-found: error
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y clang ninja-build libarchive-dev libssl-dev
       - name: Configure sanitized core

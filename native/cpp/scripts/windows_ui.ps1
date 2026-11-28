@@ -39,12 +39,25 @@ try{
     Choose $w 'ImageFormat' $format
     $image=Join-Path $root ('gui.'+$format.ToLowerInvariant())
     Set-Value $w 'PackOutput' $image
+    if($format -eq 'SquashFS'){
+      $advanced=(Control $w 'AdvancedParameters').GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+      $advanced.Expand()
+      (Control $w 'OverridePreset').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+      Choose $w 'PackCodec' 'xz'
+      Choose $w 'PackCodec' 'gzip'
+      Save-WindowScreenshot $p 'create-SquashFS-advanced'
+      $advanced.Collapse()
+    }
     Save-WindowScreenshot $p ('create-'+$format)
     $button=Control $w 'CreateImage';if($button.Current.IsOffscreen){throw 'Creation button is offscreen'}
     Invoke-Control $w 'CreateImage'
     $null=Wait-Until {Test-Path $image} "create $format" 180
     $null=Control $w 'CreateImage'
     & $cli verify $image;if($LASTEXITCODE){throw "Invalid GUI-created $format"}
+    if($format -eq 'SquashFS'){
+      $info=& $cli info $image
+      if($LASTEXITCODE -or $info -notmatch '^SquashFS gzip '){throw "Codec switch failed: $info"}
+    }
     $images+=$image
   }
   Close-Gui
@@ -64,6 +77,11 @@ try{
   $null=Control $w 'ExtractSelected'
   Save-WindowScreenshot $p 'browser-preview'
   if((Control $w 'FilePreview' $false).Current.IsOffscreen){throw 'Preview is offscreen at the default desktop resolution'}
+  Save-WindowScreenshot $p 'browser-compact' 820 560
+  foreach($id in @('MountImage','ExtractSelected','ExtractAll')){
+    if((Control $w $id).Current.IsOffscreen){throw "Compact window action is offscreen: $id"}
+  }
+  Save-WindowScreenshot $p 'browser-restored'
   $before=@([IO.DriveInfo]::GetDrives().Name)
   Invoke-Control $w 'MountImage'
   $drive=Wait-Until {foreach($d in [IO.DriveInfo]::GetDrives()){if($d.Name -notin $before -and [IO.File]::Exists($d.Name+'extra.txt')){return $d.Name}}} 'mounted drive'
@@ -74,21 +92,24 @@ try{
   Save-WindowScreenshot $p 'mounted'
   Invoke-Control $w 'UnmountImage'
   $null=Wait-Until {!([IO.Directory]::Exists($drive))} 'eject drive'
-  Navigate $w 'NavBrowse'
-  Invoke-Control $w 'CloseImage'
-  foreach($id in @('MountImage','CloseImage','VerifyImage','ExtractSelected','ExtractAll','OpenUnc','CopyUnc','UpDirectory')) {
-    if((Control $w $id $false).Current.IsEnabled){throw "Closed image action enabled: $id"}
-  }
   Navigate $w 'NavUnc'
   Invoke-Control $w 'StartUnc'
   $unc='\\sfs$\'+$alias+'\'+[IO.Path]::GetFileName($image)
   $null=Wait-Until {[IO.File]::Exists($unc+'\extra.txt')} 'UNC start'
   if([IO.File]::ReadAllText($unc+'\extra.txt') -ne 'second selected file'){throw 'Wrong UNC file data'}
   Save-WindowScreenshot $p 'unc'
+  foreach($id in @('UncImagePath','OpenUnc','CopyUnc','ApplyUnc','StartUnc','StopUnc')){
+    if((Control $w $id $false).Current.IsOffscreen){throw "UNC action is offscreen: $id"}
+  }
   Invoke-Control $w 'StopUnc'
   $null=Wait-Until {!([IO.Directory]::Exists($unc))} 'UNC stop'
   Invoke-Control $w 'StartUnc'
   $null=Wait-Until {[IO.File]::Exists($unc+'\extra.txt')} 'UNC restart'
+  Navigate $w 'NavBrowse'
+  Invoke-Control $w 'CloseImage'
+  foreach($id in @('MountImage','CloseImage','VerifyImage','ExtractSelected','ExtractAll','OpenUnc','CopyUnc','UpDirectory')) {
+    if((Control $w $id $false).Current.IsEnabled){throw "Closed image action enabled: $id"}
+  }
   Close-Gui
   if([IO.File]::ReadAllText($unc+'\extra.txt') -ne 'second selected file'){throw 'GUI exit stopped UNC service'}
   & $cli unc-stop;if($LASTEXITCODE){throw 'UNC stop failed'}
