@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
 import concurrent.futures
+import faulthandler
 import os
 from pathlib import Path
 import random
@@ -17,6 +18,8 @@ import io
 import tarfile
 from mock_adb import Server as MockAdb, COMPONENT as MOCK_COMPONENT
 
+faulthandler.enable()
+faulthandler.dump_traceback_later(180, repeat=True)
 app = Path(sys.argv[1]).resolve()
 cli = app / 'archivefs.exe'
 
@@ -63,6 +66,7 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             assert (output/'文件.bin').read_bytes() == data
             assert (output/'目录'/'hello.txt').read_bytes() == (other/'hello.txt').read_bytes()
             assert (output/'目录'/'empty.txt').stat().st_size == 0
+            print(f'PASS {fmt} preset {preset}', flush=True)
             if preset == 4:
                 images.append(image)
     # Real Linux metadata fixtures: preserve exact symlink targets in TAR
@@ -160,6 +164,7 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             if process.poll() is None:
                 process.terminate()
             process.communicate(timeout=30)
+    print('PASS mounted drive random reads and eject', flush=True)
     # A real SMB share exercises the redirector, including hidden shares.
     share_name = 'archivefs-' + uuid.uuid4().hex[:10] + '$'
     settings_path = Path(os.environ['LOCALAPPDATA']) / 'WinArchiveFSPro' / 'unc.json'
@@ -220,6 +225,7 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             settings_path.write_bytes(old_settings)
         else:
             settings_path.unlink(missing_ok=True)
+    print('PASS SMB share, alias and source removal', flush=True)
     # Recursive archive projection never opens the agent's own UNC filesystem
     # as a decoder source; the inner images are read through their outer reader.
     nested_source = root / 'nested-source'
@@ -316,4 +322,5 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             wait_until(lambda:not path.exists())
     finally:
         process.terminate();process.communicate(timeout=30)
-print('PASS real codec creation, Unicode extraction, malformed images, random access, WinFsp mounting, eject and UNC source removal')
+faulthandler.cancel_dump_traceback_later()
+print('PASS real codec creation, Unicode extraction, malformed images, random access, WinFsp mounting, eject and UNC source removal', flush=True)

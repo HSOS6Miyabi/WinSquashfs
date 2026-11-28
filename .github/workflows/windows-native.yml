@@ -85,7 +85,8 @@ jobs:
         shell: pwsh
         run: ./native/cpp/scripts/build.ps1 -Stage CoreDistribution
       - name: Test real archives and mounted filesystem
-        run: python native/cpp/scripts/windows_integration.py artifacts/dist
+        timeout-minutes: 35
+        run: python -u native/cpp/scripts/windows_integration.py artifacts/dist
       - name: Benchmark real compressed images
         run: python native/cpp/scripts/windows_benchmark.py artifacts/dist .deps/archivefs-build/archivefs-benchmark.exe artifacts/benchmarks/results.json
       - uses: actions/upload-artifact@v4
@@ -114,6 +115,7 @@ jobs:
           & $nsis "/DPRODUCT_VERSION=$version" "/DWINFSP_MIN_VERSION=$runtime.0" installer/WinArchiveFSPro.nsi
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify installed application
+        timeout-minutes: 50
         shell: pwsh
         run: |
           $setup=Resolve-Path artifacts/WinArchiveFSPro-Setup-x64.exe
@@ -124,7 +126,7 @@ jobs:
           if (!(Test-Path "$app/WinArchiveFSPro.Unc.exe")) { throw 'Missing UNC agent' }
           if (!(Test-Path "$app/archivefs.exe")) { throw 'Missing native CLI' }
           & ./tests/distribution.ps1 -AppDirectory $app -Version ([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version -ShellEject
-          python native/cpp/scripts/windows_integration.py $app
+          python -u native/cpp/scripts/windows_integration.py $app
           if($LASTEXITCODE) { exit $LASTEXITCODE }
           & ./tests/association.ps1 -AppDirectory $app
           if($LASTEXITCODE) { exit $LASTEXITCODE }
