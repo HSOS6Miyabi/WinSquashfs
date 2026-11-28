@@ -76,17 +76,17 @@ struct Stamp {
     }
 };
 
-Handle open_handle(const std::filesystem::path& path, SourcePolicy policy) {
+Handle open_handle(const std::filesystem::path& path, SourcePolicy policy, bool metadata_only = false) {
 #ifdef _WIN32
-    const auto share = policy == SourcePolicy::protected_handle ? FILE_SHARE_READ :
-        FILE_SHARE_READ | FILE_SHARE_DELETE;
+    const auto share = metadata_only ? FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE :
+        policy == SourcePolicy::protected_handle ? FILE_SHARE_READ : FILE_SHARE_READ | FILE_SHARE_DELETE;
     auto name=path.lexically_normal().wstring();
     if(!name.starts_with(L"\\\\?\\")){if(name.starts_with(L"\\\\"))name=L"\\\\?\\UNC\\"+name.substr(2);else name=L"\\\\?\\"+name;}
-    auto handle = CreateFileW(name.c_str(), GENERIC_READ, share, nullptr, OPEN_EXISTING,
-        FILE_FLAG_OVERLAPPED | FILE_FLAG_RANDOM_ACCESS, nullptr);
+    auto handle = CreateFileW(name.c_str(), metadata_only ? FILE_READ_ATTRIBUTES : GENERIC_READ, share, nullptr, OPEN_EXISTING,
+        metadata_only ? FILE_ATTRIBUTE_NORMAL : FILE_FLAG_OVERLAPPED | FILE_FLAG_RANDOM_ACCESS, nullptr);
     if (handle == invalid_handle) fail("CreateFileW");
 #else
-    (void)policy;
+    (void)policy; (void)metadata_only;
     auto handle = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
     if (handle == invalid_handle) fail("open");
 #endif
@@ -274,8 +274,7 @@ class FileSource final : public RandomAccessSource, public std::enable_shared_fr
                 if (temporary_) {
                     // Check the named file, not only the handle that may now
                     // refer to a file that has been renamed or removed.
-                    auto current = open_handle(owner_->path_, owner_->policy_);
-                    owner_->check(current.get());
+                    owner_->check_named_path();
                 }
                 owner_->ensure_valid();
             } catch (...) { owner_->invalidate(); temporary_.reset(); throw; }
@@ -327,12 +326,18 @@ public:
                 check_for_read(retained->get(),true);
 #endif
 #ifdef _WIN32
-                if(policy_==SourcePolicy::transient_handle){auto now=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();auto previous=last_probe_.load();if(now-previous>=500&&last_probe_.compare_exchange_strong(previous,now)){auto h=open_handle(path_,policy_);check(h.get());}}
+                if(policy_==SourcePolicy::transient_handle){auto now=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();auto previous=last_probe_.load();if(now-previous>=500&&last_probe_.compare_exchange_strong(previous,now)){check_named_path();}}
 #endif
             }
-            else { auto h = open_handle(path_, policy_); check(h.get()); }
+            else { check_named_path(); }
             ensure_valid();
         } catch (...) { invalidate(); throw; }
+    }
+    void validate_path() const override {
+        if(policy_ == SourcePolicy::protected_handle) { validate(); return; }
+        ensure_valid();
+        try { check_named_path(); ensure_valid(); }
+        catch (...) { invalidate(); throw; }
     }
     std::unique_ptr<ReadSession> begin_read() const override {
         return std::make_unique<Session>(shared_from_this());
@@ -354,6 +359,18 @@ private:
     }
     std::shared_ptr<Handle> retained_handle() const {
         std::lock_guard lock(retained_mutex_);return retained_;
+    }
+    void check_named_path() const {
+#ifdef _WIN32
+        // Attribute-only opens do not break a compatible read-handle oplock.
+        // Some redirectors require a data handle for identity information.
+        Stamp current;
+        try { auto probe = open_handle(path_, policy_, true); current = stamp(probe.get()); }
+        catch (...) { auto probe = open_handle(path_, policy_); current = stamp(probe.get()); }
+        if(!original_.matches(current)) throw std::runtime_error("source was modified or replaced");
+#else
+        auto probe = open_handle(path_, policy_); check(probe.get());
+#endif
     }
     void check(RawHandle handle) const {
         if (!original_.matches(stamp(handle))) throw std::runtime_error("source was modified or replaced");

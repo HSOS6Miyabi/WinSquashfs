@@ -36,7 +36,7 @@ struct ImagePool::State {
         {std::lock_guard lock(mutex);trim();for(auto& [key,entry]:images)if(entry->future.wait_for(std::chrono::seconds(0))==std::future_status::ready)check.push_back(entry);}
         // Active readers may retain their own generation. Drop the cache
         // entry if the named source has disappeared or been replaced.
-        for(auto& entry:check){try{entry->future.get()->info();}catch(...){std::lock_guard lock(mutex);erase_if_current(entry);}}
+        for(auto& entry:check){try{entry->future.get()->validate_path();}catch(...){std::lock_guard lock(mutex);erase_if_current(entry);}}
     }
 };
 ImagePool::Lease::~Lease(){state_->release(entry_);}
@@ -53,7 +53,7 @@ std::shared_ptr<ImagePool::Lease> ImagePool::acquire(const fs::path& path){
         {std::lock_guard lock(state_->mutex);auto it=state_->images.find(key);if(it!=state_->images.end())entry=it->second;else{promise=std::make_shared<std::promise<std::shared_ptr<ArchiveTree>>>();entry=std::make_shared<Entry>();entry->key=key;entry->future=promise->get_future().share();state_->images.emplace(key,entry);state_->wake.notify_all();}++entry->active;}
         try{
             if(promise){try{promise->set_value(state_->opener(absolute,SourcePolicy::transient_handle));}catch(...){promise->set_exception(std::current_exception());}}
-            auto tree=entry->future.get();if(!tree)throw std::runtime_error("archive opener returned no image");tree->info();return std::shared_ptr<Lease>(new Lease(state_,entry,std::move(tree)));
+            auto tree=entry->future.get();if(!tree)throw std::runtime_error("archive opener returned no image");tree->validate_path();return std::shared_ptr<Lease>(new Lease(state_,entry,std::move(tree)));
         }catch(...){state_->release(entry);{std::lock_guard lock(state_->mutex);state_->erase_if_current(entry);}if(promise||attempt)throw;}
     }throw std::runtime_error("cannot acquire image");
 }

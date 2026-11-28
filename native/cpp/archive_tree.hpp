@@ -30,6 +30,7 @@ public:
     explicit ArchiveTree(std::shared_ptr<ArchiveReader> reader);
     NodePtr root() const { return root_; }
     ArchiveInfo info() const { return reader_->info(); }
+    void validate_path() const { reader_->validate_path(); }
     std::vector<NodePtr> children(const NodePtr& directory) const;
     NodePtr find(std::u16string_view path) const;
     std::size_t read(const NodePtr& node, std::uint64_t offset, std::span<std::byte> output,

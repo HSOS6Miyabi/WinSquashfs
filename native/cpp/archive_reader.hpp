@@ -35,6 +35,7 @@ public:
     virtual std::vector<DirectoryEntry> list(InodeId directory) const = 0;
     virtual void read_exact(InodeId inode, std::uint64_t offset, std::span<std::byte> output) const = 0;
     virtual void validate_source() const = 0;
+    virtual void validate_path() const { validate_source(); }
 };
 
 ArchiveFormat detect_format(const RandomAccessSource& source);
@@ -61,6 +62,7 @@ public:
         if (!backend_ || page_size_ == 0) throw std::invalid_argument("invalid archive reader configuration");
     }
     ArchiveInfo info() const { backend_->validate_source(); return backend_->info(); }
+    void validate_path() const { backend_->validate_path(); }
     FileInfo stat(InodeId id) const { backend_->validate_source(); return backend_->stat(id); }
     std::vector<DirectoryEntry> list(InodeId id) const {
         backend_->validate_source();

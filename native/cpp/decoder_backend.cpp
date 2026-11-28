@@ -323,6 +323,7 @@ public:
         }
     }
     void validate_source() const override { source_->validate(); }
+    void validate_path() const override { source_->validate_path(); }
 private:
     void read_data(void* handle,const void* node,InodeId id,std::uint64_t offset,std::span<std::byte> output) const {
         ReadScope scope(*source_);

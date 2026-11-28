@@ -28,6 +28,7 @@ public:
     virtual std::unique_ptr<ReadSession> begin_read() const = 0;
     // Check whether a cached generation can still be used.
     virtual void validate() const = 0;
+    virtual void validate_path() const { validate(); }
 };
 
 enum class SourcePolicy { protected_handle, transient_handle };
