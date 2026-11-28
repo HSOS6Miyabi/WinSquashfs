@@ -21,14 +21,14 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ItemDefinitionGroup>
-    <ClCompile><LanguageStandard>stdcpplatest</LanguageStandard><ConformanceMode>true</ConformanceMode><ExceptionHandling>Sync</ExceptionHandling><PrecompiledHeader>NotUsing</PrecompiledHeader><ForcedIncludeFiles>$(ProjectDir)MainWindow.xaml.h;%(ForcedIncludeFiles)</ForcedIncludeFiles><WarningLevel>Level4</WarningLevel><AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>..;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+    <ClCompile><LanguageStandard>stdcpplatest</LanguageStandard><ConformanceMode>true</ConformanceMode><ExceptionHandling>Sync</ExceptionHandling><PrecompiledHeader>NotUsing</PrecompiledHeader><PreprocessorDefinitions>DISABLE_XAML_GENERATED_MAIN;%(PreprocessorDefinitions)</PreprocessorDefinitions><ForcedIncludeFiles>$(ProjectDir)MainWindow.xaml.h;%(ForcedIncludeFiles)</ForcedIncludeFiles><WarningLevel>Level4</WarningLevel><AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions><AdditionalIncludeDirectories>..;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
     <Link><SubSystem>Windows</SubSystem><AdditionalDependencies>$(ArchiveFSCoreLib);shell32.lib;ole32.lib;runtimeobject.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
   </ItemDefinitionGroup>
   <ItemGroup><PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001"/><PackageReference Include="Microsoft.Windows.CppWinRT" Version="2.0.250303.1"/></ItemGroup>
   <ItemGroup><ApplicationDefinition Include="App.xaml"/><Page Include="MainWindow.xaml"/><Midl Include="Project.idl"/><Manifest Include="app.manifest"/></ItemGroup>
-  <ItemGroup><ClCompile Include="App.xaml.cpp"/><ClCompile Include="MainWindow.xaml.cpp"/><ClCompile Include="$(GeneratedFilesDir)module.g.cpp"/></ItemGroup>
+  <ItemGroup><ClCompile Include="App.xaml.cpp"><DependentUpon>App.xaml</DependentUpon><SubType>Code</SubType></ClCompile><ClCompile Include="MainWindow.xaml.cpp"><DependentUpon>MainWindow.xaml</DependentUpon><SubType>Code</SubType></ClCompile><ClCompile Include="$(GeneratedFilesDir)module.g.cpp"/></ItemGroup>
   <ItemGroup><ResourceCompile Include="Resources.rc"/></ItemGroup>
-  <ItemGroup><ClInclude Include="App.xaml.h"/><ClInclude Include="MainWindow.xaml.h"/><ClInclude Include="pch.h"/></ItemGroup>
+  <ItemGroup><ClInclude Include="App.xaml.h"><DependentUpon>App.xaml</DependentUpon></ClInclude><ClInclude Include="MainWindow.xaml.h"><DependentUpon>MainWindow.xaml</DependentUpon></ClInclude><ClInclude Include="pch.h"/></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
   <Target Name="CheckCore" BeforeTargets="ClCompile"><Error Condition="!Exists('$(ArchiveFSCoreLib)')" Text="Specify ArchiveFSCoreLib as the full path to the native archivefs_core import library."/></Target>
 </Project>

@@ -11,3 +11,12 @@ void App::OnLaunched(Microsoft::UI::Xaml::LaunchActivatedEventArgs const&){
     window_.Activate();window->apply_command_line();
 }
 }
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int)
+{
+    winrt::init_apartment(winrt::apartment_type::single_threaded);
+    winrt::Microsoft::UI::Xaml::Application::Start([](auto&&) {
+        winrt::make<winrt::WinArchiveFSPro::implementation::App>();
+    });
+    return 0;
+}
