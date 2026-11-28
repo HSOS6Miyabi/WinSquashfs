@@ -121,6 +121,7 @@ int cli(std::vector<std::u16string> args) {
     if(args.empty()) throw UsageError("invalid command arguments");
     const auto command=args[0];
 #ifdef ARCHIVEFS_WITH_WINFSP
+    if(command==u"mtp-worker"&&args.size()==1)return run_mtp_worker();
     if(command==u"migrate-settings"&&args.size()==1){migrate_settings();return 0;}
     if(command==u"doctor"&&args.size()==1){std::cout<<winfsp_runtime_info()<<'\n';return 0;}
     if(command==u"unc-start"&&args.size()==1){ConsoleCancellation c;start_agent(c.stop.get_token());for(auto& s:Settings::load().shares())std::cout<<to_utf8(u"\\\\"+s.server+u"\\"+s.name)<<'\n';return 0;}

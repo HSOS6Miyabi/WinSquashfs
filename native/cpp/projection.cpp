@@ -232,7 +232,9 @@ ProjectedNodePtr project_archive(const std::shared_ptr<ImagePool>& pool,std::sha
     for(std::size_t i=0;i<parts.size();++i){
         if(node->info.kind!=FileKind::directory)return {};
         auto found=tree->children(node);
-        auto it=std::find_if(found.begin(),found.end(),[&](auto const& n){return equal(n->windows_name,parts[i]);});
+        auto it=std::lower_bound(found.begin(),found.end(),parts[i],[](auto const& n,std::u16string_view name){return WindowsNameLess{}(n->windows_name,name);});
+        // Directory order is archive-defined; use a name lookup if needed.
+        if(it==found.end()||!equal((*it)->windows_name,parts[i]))it=std::find_if(found.begin(),found.end(),[&](auto const& n){return equal(n->windows_name,parts[i]);});
         if(it==found.end()||!supported(*it))return {};
         node=*it;path=child_path(path,node->windows_name);
         if(node->info.kind==FileKind::regular&&is_image_extension(node->windows_name)){
