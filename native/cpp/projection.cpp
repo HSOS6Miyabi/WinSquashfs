@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "projection.hpp"
 #include "decoder_backend.hpp"
+#include "file_time.hpp"
 #include <condition_variable>
 #include <future>
 #include <map>
 #include <set>
 #include <thread>
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #endif
 namespace archivefs {
@@ -59,7 +64,7 @@ std::vector<std::u16string> components(std::u16string_view path){std::vector<std
 std::u16string join(const std::vector<std::u16string>& parts,std::size_t from,std::size_t to){std::u16string result;for(auto i=from;i<to;++i){if(!result.empty())result+=u'\\';result+=parts[i];}return result;}
 std::u16string child_path(std::u16string_view path,std::u16string_view child){std::u16string result(path);if(result.empty()||result.back()!=u'\\')result+=u'\\';result+=child;return result;}
 std::uint64_t index_for(std::u16string_view text,std::uint64_t inode){std::uint64_t value=14695981039346656037ULL;for(auto c:text){if(c>=u'a'&&c<=u'z')c=static_cast<char16_t>(c-u'a'+u'A');value^=c;value*=1099511628211ULL;}value^=inode;return value?value:1;}
-std::int64_t modified(const fs::path& path){std::error_code ec;auto t=fs::last_write_time(path,ec);if(ec)return 0;return std::chrono::duration_cast<std::chrono::seconds>(fs::file_time_type::clock::to_sys(t).time_since_epoch()).count();}
+std::int64_t modified(const fs::path& path){std::error_code ec;auto t=fs::last_write_time(path,ec);if(ec)return 0;return std::chrono::duration_cast<std::chrono::seconds>(file_time_to_system(t).time_since_epoch()).count();}
 bool supported(const ArchiveTree::NodePtr& n){return n&& (n->info.kind==FileKind::directory||n->info.kind==FileKind::regular);}
 ProjectedNodePtr archive_node(std::shared_ptr<ArchiveTree> archive,ArchiveTree::NodePtr entry,const fs::path& physical,std::u16string path,std::u16string name,std::shared_ptr<ImagePool::Lease> lease={}){
     if(!supported(entry))return {};

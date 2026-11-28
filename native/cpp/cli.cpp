@@ -11,8 +11,12 @@
 #include <memory>
 #include <string_view>
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -67,6 +71,7 @@ std::string_view codec_name(const ArchiveInfo& info) {
     case 5:return "lz4";case 6:return "zstd";default:return "Unknown";
     }
 }
+struct UsageError:std::runtime_error {using std::runtime_error::runtime_error;};
 struct Language {
     bool chinese=false;
     std::string_view tr(std::string_view en,std::string_view zh) const {return chinese?zh:en;}
@@ -108,11 +113,11 @@ int cli(std::vector<std::u16string> args) {
         } else break;
     }
     if(args.size()==1&&(args[0]==u"--help"||args[0]==u"help")) {
-        std::cout<<language.tr("Usage: archivefs-read [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-open|unc-status|serve|doctor ...\n",
-            "用法：archivefs-read [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-open|unc-status|serve|doctor ...\n");return 0;
+        std::cout<<language.tr("Usage: archivefs [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-open|unc-status|serve|doctor ...\n",
+            "用法：archivefs [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-open|unc-status|serve|doctor ...\n");return 0;
     }
-    if(args.size()==1&&(args[0]==u"--version"||args[0]==u"version")) {std::cout<<"0.2.0\n";return 0;}
-    if(args.empty()) throw std::invalid_argument("invalid command arguments");
+    if(args.size()==1&&(args[0]==u"--version"||args[0]==u"version")) {std::cout<<ARCHIVEFS_VERSION<<'\n';return 0;}
+    if(args.empty()) throw UsageError("invalid command arguments");
     const auto command=args[0];
 #ifdef ARCHIVEFS_WITH_WINFSP
     if(command==u"doctor"&&args.size()==1){std::cout<<winfsp_runtime_info()<<'\n';return 0;}
@@ -125,13 +130,13 @@ int cli(std::vector<std::u16string> args) {
     if(command==u"mount"&&(args.size()==2||args.size()==3)){ConsoleCancellation c;MountedVolume mount(args[1],modules,args.size()==3?args[2]:u"");std::cout<<to_utf8(mount.drive())<<std::endl;mount.wait(c.stop.get_token());return 0;}
     if(command==u"serve"&&(args.size()==3||args.size()==4)){auto idle=args.size()==4?number(args[3]):60;if(idle>86400)throw std::invalid_argument("invalid idle timeout");ConsoleCancellation c;serve_share({args[1],args[2]},modules,static_cast<unsigned>(idle),c.stop.get_token());return 0;}
 #endif
-    if(args.size()<2)throw std::invalid_argument("invalid command arguments");
+    if(args.size()<2)throw UsageError("invalid command arguments");
     if(command==u"create"||command==u"pack") {
         CreationOptions options;
         std::vector<std::filesystem::path> inputs;
         std::filesystem::path output;
         if(command==u"create") {
-            if(args.size()<5)throw std::invalid_argument("create FORMAT PRESET OUTPUT SOURCE...");
+            if(args.size()<5)throw UsageError("create FORMAT PRESET OUTPUT SOURCE...");
             auto format=args[1]==u"SquashFS"||args[1]==u"squashfs"?ArchiveFormat::squashfs:
                 args[1]==u"DwarFS"||args[1]==u"dwarfs"?ArchiveFormat::dwarfs:
                 args[1]==u"EROFS"||args[1]==u"erofs"?ArchiveFormat::erofs:ArchiveFormat::unknown;
@@ -139,7 +144,7 @@ int cli(std::vector<std::u16string> args) {
             options=CreationOptions::for_preset(format,static_cast<CompressionPreset>(preset));
             output=args[3];for(std::size_t i=4;i<args.size();++i)inputs.emplace_back(args[i]);
         }else{
-            if(args.size()!=3&&args.size()!=4)throw std::invalid_argument("pack SOURCE OUTPUT [CODEC]");
+            if(args.size()!=3&&args.size()!=4)throw UsageError("pack SOURCE OUTPUT [CODEC]");
             inputs.emplace_back(args[1]);output=args[2];if(args.size()==4)options.codec=to_utf8(args[3]);
         }
         ImageCreator(tools,modules).create(inputs,output,options,[](std::string_view line){std::cout<<line<<'\n';});
@@ -148,7 +153,7 @@ int cli(std::vector<std::u16string> args) {
     if(!((command==u"info"||command==u"verify")&&args.size()==2) &&
        !(command==u"list"&&(args.size()==2||args.size()==3)) &&
        !(command==u"read"&&args.size()==5) && !(command==u"unpack"&&args.size()==3))
-        throw std::invalid_argument("invalid command arguments");
+        throw UsageError("invalid command arguments");
     ArchiveTree tree(open_archive(std::filesystem::path(args[1]),modules));
     if(command==u"info") {
         auto info=tree.info();std::cout<<format_name(info.format)<<' '<<codec_name(info)<<' '<<info.block_size<<' '<<info.image_size<<'\n';
@@ -190,7 +195,7 @@ int wmain(int argc,wchar_t** argv) {
         static_assert(sizeof(wchar_t)==sizeof(char16_t));
         for(int i=1;i<argc;++i) args.emplace_back(reinterpret_cast<const char16_t*>(argv[i]));
         return cli(std::move(args));
-    } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+    } catch(const UsageError& error) {std::cerr<<error.what()<<'\n';return 2;} catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
 #else
 int main(int argc,char** argv) {
@@ -199,6 +204,6 @@ int main(int argc,char** argv) {
         std::vector<std::u16string> args;
         for(int i=1;i<argc;++i) args.push_back(to_utf16(argv[i]));
         return cli(std::move(args));
-    } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+    } catch(const UsageError& error) {std::cerr<<error.what()<<'\n';return 2;} catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
 #endif

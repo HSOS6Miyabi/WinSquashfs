@@ -139,7 +139,13 @@ jobs:
         shell: pwsh
         run: ./scripts/install-winfsp.ps1
       - uses: ilammy/msvc-dev-cmd@v1
+      - uses: actions/cache/restore@v4
+        id: core-cache
+        with:
+          path: .deps/vcpkg-installed
+          key: archivefs-core-static-md-v1-${{ runner.os }}
       - name: Install core dependencies
+        if: steps.core-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $vcpkg=$env:VCPKG_INSTALLATION_ROOT
@@ -147,6 +153,11 @@ jobs:
           $ports=Join-Path $PWD '.deps/vcpkg-installed'
           & "$vcpkg/vcpkg.exe" install 'libarchive[core]' nlohmann-json --classic --triplet=x64-windows-static-md "--x-install-root=$ports"
           if($LASTEXITCODE){exit $LASTEXITCODE}
+      - uses: actions/cache/save@v4
+        if: steps.core-cache.outputs.cache-hit != 'true'
+        with:
+          path: .deps/vcpkg-installed
+          key: ${{ steps.core-cache.outputs.cache-primary-key }}
       - name: Compile Windows core and run unit tests
         shell: pwsh
         run: ./native/cpp/scripts/build.ps1 -Stage Tests

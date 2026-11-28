@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#endif
 #include "image_creation.hpp"
 #include "archive_tree.hpp"
 #include "decoder_backend.hpp"
+#include "file_time.hpp"
 #include <archive.h>
 #include <archive_entry.h>
 #include <array>
@@ -12,8 +21,6 @@
 #include <random>
 #include <set>
 #ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <windows.h>
 #else
 #include <cerrno>
@@ -88,7 +95,7 @@ struct TarWriter {
     static la_ssize_t output(struct archive*,void* data,const void* buffer,std::size_t size) noexcept {auto& self=*static_cast<TarWriter*>(data);try{self.sink(buffer,size);return static_cast<la_ssize_t>(size);}catch(...){self.error=std::current_exception();return -1;}}
 };
 struct TarEntry {struct archive_entry* value=archive_entry_new();TarEntry(){if(!value)throw std::bad_alloc();}~TarEntry(){archive_entry_free(value);}};
-void set_tar_time(struct archive_entry* entry,const fs::path& path){const auto time=std::chrono::time_point_cast<std::chrono::nanoseconds>(fs::file_time_type::clock::to_sys(fs::last_write_time(path)));const auto seconds=std::chrono::floor<std::chrono::seconds>(time);archive_entry_set_mtime(entry,static_cast<time_t>(seconds.time_since_epoch().count()),static_cast<long>((time-seconds).count()));}
+void set_tar_time(struct archive_entry* entry,const fs::path& path){const auto time=std::chrono::time_point_cast<std::chrono::nanoseconds>(file_time_to_system(fs::last_write_time(path)));const auto seconds=std::chrono::floor<std::chrono::seconds>(time);archive_entry_set_mtime(entry,static_cast<time_t>(seconds.time_since_epoch().count()),static_cast<long>((time-seconds).count()));}
 }
 CreationOptions CreationOptions::for_preset(ArchiveFormat format,CompressionPreset preset){
     const auto index=static_cast<unsigned>(preset)-1;require(index<8,"invalid compression preset");CreationOptions o;o.format=format;o.preset=preset;o.extreme=index==7;
