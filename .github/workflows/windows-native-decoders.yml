@@ -56,11 +56,12 @@ jobs:
         run: |
           set -euo pipefail
           cd "$(mktemp -d)"
+          sed -E '/^[[:space:]#]*LocalFileSigLevel[[:space:]]*=/d; /^\[options\][[:space:]]*$/a LocalFileSigLevel = Required TrustedOnly' /etc/pacman.conf > pacman.conf
+          grep -Fx "LocalFileSigLevel = Required TrustedOnly" pacman.conf
           for package in mingw-w64-i686-lzo2-2.10-3-any.pkg.tar.zst mingw-w64-i686-libdeflate-1.26-1-any.pkg.tar.zst; do
             curl --fail --location --retry 3 -O "https://repo.msys2.org/mingw/mingw32/$package"
             curl --fail --location --retry 3 -O "https://repo.msys2.org/mingw/mingw32/$package.sig"
-            pacman-key --verify "$package.sig" "$package"
-            pacman -U --noconfirm "$package"
+            pacman --config "$PWD/pacman.conf" -U --noconfirm "$package"
           done
       - name: Build native SquashFS and EROFS libraries
         shell: msys2 {0}
