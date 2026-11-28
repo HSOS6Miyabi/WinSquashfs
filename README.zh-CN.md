@@ -80,10 +80,10 @@
 
 通过 \\$sfs\root 浏览统一目录；安装经过签名的可选 UNC 过滤驱动后，可直接访问 \\$sfs\。原有 sfs$ 和 sfs.localhost 主机名继续可用。
 
-WebDAV 支持 HTTP Range 读取以及服务器声明的 SabreDAV PATCH 部分更新扩展。服务器特有的部分 PUT 需要手动启用。FTP 和 FTPS 使用 MLSD 列目录、REST 定位读取及 APPE 追加写入。S3 使用 Signature V4、路径形式的存储桶地址、ListObjectsV2、Range 读取、PUT 和 CopyObject。S3 文件重命名通过复制后删除实现，暂不支持分段上传及目录重命名。
+WebDAV 支持 HTTP Range 读取以及服务器声明的 SabreDAV PATCH 部分更新扩展。服务器特有的部分 PUT 需要手动启用。FTP 和 FTPS 使用 MLSD 列目录、REST 定位读取及 APPE 追加写入。S3 使用 Signature V4、路径形式的存储桶地址、ListObjectsV2、Range 读取、PUT 和 CopyObject。S3 对不小于 64 MiB 的对象采用分段上传，独占复制及大对象复制采用服务器端分段复制，并在完成时检查目标对象的写入条件。目录重命名先复制全部对象，再检查源对象版本并按条件删除原对象；此操作不具备原子性。
 
 SFTP 使用原生偏移量读写，服务器本机复制优先使用协商得到的 copy-data 扩展，必要时使用可配置的 SSH 命令。SCP 通过 SSH 命令进行偏移量读写，通过 SCP 上传文件，并可启用服务器已授权的非交互式 sudo。SSH 命令根目录可与 SFTP 可见根目录分别配置。
 
-每个连接可配置只读模式、超时、读取缓存容量、元数据缓存有效期和写入缓存容量。自动模式优先直接写入；写回模式在本地保存完整文件，在刷新时上传；直接模式拒绝需要缓存的操作。上传失败时保留待上传文件，可从恢复目录取回。执行服务器本机复制前，请关闭并刷新相关文件。GUI 的“在服务器上复制”及 archivefs remote-copy 命令可使用服务器提供的复制能力。Windows 特有的文件属性和 ACL 修改存在限制；远程卷显示的容量为虚拟值，不代表服务器剩余配额。
+每个连接可配置只读模式、超时、读取缓存容量、元数据缓存有效期和写入缓存容量。自动模式优先直接写入；写回模式在本地保存完整文件，在刷新时上传；直接模式拒绝需要缓存的操作。写回缓存的数据及恢复记录在返回写入成功前刷新至本地存储。进程重启或上传响应异常时，可重新读取完整的待上传文件，使用 GUI 的“重试待上传文件”或 archivefs remote-retry PROTOCOL CONNECTION /path 显式重试。恢复时核对连接身份和源文件版本；若此前可能已成功上传，则比较服务器与缓存的完整内容。使用 archivefs remote-discard PROTOCOL CONNECTION /path --confirm 可显式放弃完整的待上传数据。“在服务器上复制”及 archivefs remote-copy 命令通过正在运行的 UNC 后台进程执行，共用文件状态及缓存。相关命令的路径使用挂载目录中显示的 Windows 名称，以斜杠分隔。Windows 特有的文件属性和 ACL 修改存在限制；远程卷显示的容量为虚拟值，不代表服务器剩余配额。
 
 密码及令牌通过 Windows DPAPI 加密保存。SSH 需要核对可信的 SHA256 主机指纹。TLS 校验证书和主机名，可指定私有 CA 证书文件。请在不可信网络中使用 HTTPS 或 FTPS。

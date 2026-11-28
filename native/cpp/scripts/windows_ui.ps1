@@ -8,6 +8,9 @@ $AppDirectory=(Resolve-Path $AppDirectory).Path
 $root=Join-Path $env:TEMP ('ArchiveFSUI-'+[guid]::NewGuid().ToString('N'))
 $settings=Join-Path $env:LOCALAPPDATA 'WinArchiveFSPro\unc.json'
 $backup=if(Test-Path $settings){[IO.File]::ReadAllBytes($settings)}else{$null}
+$remoteSettings=Join-Path (Split-Path -Parent $settings) 'remote-connections.json'
+$remoteBackup=if(Test-Path $remoteSettings){[IO.File]::ReadAllBytes($remoteSettings)}else{$null}
+$remoteServer=$null
 $cli=Join-Path $AppDirectory 'archivefs.exe'
 $gui=Join-Path $AppDirectory 'WinArchiveFSPro.exe'
 $alias='ui-'+[guid]::NewGuid().ToString('N').Substring(0,8)
@@ -192,6 +195,66 @@ try{
     $null=Control $w $id $false
   }
   Save-WindowScreenshot $p 'devices'
+  Navigate $w 'NavRemote'
+  $null=Control $w 'RemoteName'
+  $remoteName='ui-remote-'+[guid]::NewGuid().ToString('N').Substring(0,8)
+  $remotePassword='ui-test-'+[guid]::NewGuid().ToString('N')
+  $portFile=Join-Path $root 'dav-port.txt'
+  $serverScript=(Resolve-Path (Join-Path $PSScriptRoot '../tests/remote_webdav.py')).Path
+  $remoteServer=Start-Process python -ArgumentList @(('"' + $serverScript + '"'),'--serve',('"' + $portFile + '"'),$remotePassword) -WindowStyle Hidden -PassThru
+  $null=Wait-Until {Test-Path $portFile} 'WebDAV test server'
+  $remoteEndpoint='http://127.0.0.1:'+(Get-Content $portFile -Raw)
+  Invoke-Control $w 'RemoteNew'
+  Set-Value $w 'RemoteName' $remoteName
+  Set-Value $w 'RemoteEndpoint' $remoteEndpoint
+  Set-Value $w 'RemoteRoot' '/dav'
+  Set-Value $w 'RemoteUser' 'ui'
+  $password=Control $w 'RemoteSecret'
+  $valuePattern=$null
+  if($password.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$valuePattern)){
+    $valuePattern.SetValue($remotePassword)
+  }else{
+    $scrollItem=$null
+    if($password.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern,[ref]$scrollItem)){$scrollItem.ScrollIntoView()}
+    $password.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait($remotePassword)
+  }
+  Choose $w 'RemoteCacheMode' 'writeback'
+  Invoke-Control $w 'RemoteTest'
+  $null=Wait-Until {(Control $w 'RemoteTest' $false).Current.IsEnabled} 'remote connection test'
+  $expectedComplete=if($Language -eq 'zh-CN'){'已完成'}else{'Completed'}
+  if((Control $w 'StatusText' $false).Current.Name -ne $expectedComplete){throw 'WebDAV connection test failed'}
+  Save-WindowScreenshot $p 'remote-connection'
+  if((Control $w 'RemoteSave' $false).Current.IsOffscreen){throw 'Remote save action is offscreen'}
+  Invoke-Control $w 'RemoteSave'
+  $null=Wait-Until {
+    if(Test-Path $remoteSettings){
+      $row=@((Get-Content $remoteSettings -Raw|ConvertFrom-Json)|Where-Object {$_.name -eq $remoteName})
+      $row.Count -eq 1 -and $row[0].cache_mode -eq 'writeback'
+    }
+  } 'saved remote connection'
+  $stored=Get-Content $remoteSettings -Raw
+  if($stored.Contains($remotePassword)){throw 'Remote password persisted in plaintext'}
+  $remotePath='\\$sfs\dav\'+$remoteName
+  $null=Wait-Until {[IO.File]::Exists($remotePath+'\a.txt')} 'saved connection mounted'
+  if([IO.File]::ReadAllText($remotePath+'\a.txt') -ne '0123456789'){throw 'Saved credential or mounted remote data incorrect'}
+  if(![IO.Directory]::Exists('\\$sfs\root\dav\'+$remoteName)){throw 'Missing remote connection in unified namespace'}
+  & $cli remote-copy dav $remoteName /a.txt /copied.txt
+  if($LASTEXITCODE -or [IO.File]::ReadAllText($remotePath+'\copied.txt') -ne '0123456789'){throw 'Mounted server-side copy failed'}
+  $item=Wait-Until {foreach($i in (Items $w 'RemoteConnections')){if($i.Current.Name -like "*$remoteName*"){return $i}}} 'remote profile list'
+  $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+  $null=Wait-Until {(Value $w 'RemoteName') -eq $remoteName} 'edit saved connection'
+  Choose $w 'RemoteProtocol' 'scp'
+  $null=Control $w 'RemoteHostKey' $false
+  $null=Control $w 'RemoteShellRoot' $false
+  $null=Control $w 'RemoteSudo' $false
+  Save-WindowScreenshot $p 'remote-ssh-options'
+  Invoke-Control $w 'RemoteRemove'
+  $null=Wait-Until {
+    @((Get-Content $remoteSettings -Raw|ConvertFrom-Json)|Where-Object {$_.name -eq $remoteName}).Count -eq 0
+  } 'removed remote connection'
+  $null=Wait-Until {!([IO.Directory]::Exists($remotePath))} 'removed mounted profile'
+  Write-Host 'PASS saved remote connection, DPAPI credentials, actual UNC reads, server copy and SSH options'
   Navigate $w 'NavBrowse'
   Invoke-Control $w 'CloseImage'
   foreach($id in @('MountImage','CloseImage','VerifyImage','ExtractSelected','ExtractAll','OpenUnc','CopyUnc','UpDirectory')) {
@@ -205,6 +268,8 @@ try{
 }finally{
   if($p -and !$p.HasExited){$p.CloseMainWindow()|Out-Null;if(!$p.WaitForExit(5000)){$p.Kill()}}
   & $cli unc-stop
+  if($remoteServer -and !$remoteServer.HasExited){$remoteServer.Kill();$remoteServer.WaitForExit()}
+  if($null -ne $remoteBackup){[IO.File]::WriteAllBytes($remoteSettings,$remoteBackup)}elseif(Test-Path $remoteSettings){Remove-Item -LiteralPath $remoteSettings -Force}
   if($null -ne $backup){[IO.File]::WriteAllBytes($settings,$backup)}elseif(Test-Path $settings){Remove-Item -LiteralPath $settings -Force}
   Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }

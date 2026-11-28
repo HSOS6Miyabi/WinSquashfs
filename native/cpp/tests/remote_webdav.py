@@ -19,6 +19,7 @@ class Server(ThreadingHTTPServer):
         self.patches = 0
         self.copies = 0
         self.lose_response = False
+        self.expected_auth = None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -48,6 +49,12 @@ class Handler(BaseHTTPRequestHandler):
             except (ConnectionResetError, BrokenPipeError):
                 pass
 
+    def authorized(self):
+        if self.server.expected_auth is None or self.headers.get("Authorization") == self.server.expected_auth:
+            return True
+        self.response(401, WWW_Authenticate='Basic realm="ArchiveFS test"')
+        return False
+
     def condition(self, path):
         if path in self.server.files:
             return self.headers.get("If-Match") in (None, self.etag(path))
@@ -58,6 +65,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PROPFIND(self):
         self.body()
+        if not self.authorized():
+            return
         path = self.path_value()
         fs = self.server.files
         if path != "/dav" and path not in fs:
@@ -75,6 +84,8 @@ class Handler(BaseHTTPRequestHandler):
         self.response(207, ('<d:multistatus xmlns:d="DAV:">' + "".join(rows) + "</d:multistatus>").encode(), Content_Type="application/xml")
 
     def do_GET(self):
+        if not self.authorized():
+            return
         path = self.path_value()
         if path not in self.server.files:
             return self.response(404)
@@ -167,6 +178,15 @@ def recovery(mode, expected):
         server.shutdown()
         server.server_close()
         worker.join()
+
+if len(sys.argv) == 4 and sys.argv[1] == "--serve":
+    import base64
+    from pathlib import Path
+    server = Server(True)
+    server.expected_auth = "Basic " + base64.b64encode(("ui:" + sys.argv[3]).encode()).decode()
+    Path(sys.argv[2]).write_text(str(server.server_port), encoding="ascii")
+    server.serve_forever()
+    sys.exit(0)
 
 recovery("recover", b"012AB56789")
 recovery("conflict", b"XXXXXXXXXX")

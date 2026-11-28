@@ -249,9 +249,9 @@ struct RemoteMount:std::enable_shared_from_this<RemoteMount>{
             write_remote_recovery(dir,{remote_recovery_identity(config),s->path,s->meta.revision,
                 "ready",s->meta.size,size});
             s->base_size=s->meta.size;
+            pending[s->path]=s;
             s->stage=dir;s->reserved=size;s->dirty=true;
             if(!preserve)s->meta.size=0;
-            pending[s->path]=s;
         }catch(...){
             used-=size;if(!dir.empty()){std::error_code ec;fs::remove_all(dir,ec);}throw;
         }
@@ -468,6 +468,9 @@ public:
             if(size==0){m->transport->replace(s.path,0,{},s.meta.revision);m->changed(s,0);return;}
         }
         if(m->config.cache_mode=="direct")fail(RemoteError::unsupported,"Server lacks direct resize support");
+        auto needed=s.dirty?(size>s.reserved?size-s.reserved:0):std::max(size,size?s.meta.size:0);
+        if(needed&&(m->used>m->limit||needed>m->limit-m->used))
+            fail(RemoteError::no_space,"Remote write cache capacity exceeded");
         m->prepare(node->remote,size!=0);m->edit_begin(s);m->cache_resize(s,size);m->edit_end(s);
     }
     void flush(const ProjectedNodePtr& node)override{

@@ -539,7 +539,7 @@ private:
         curl_easy_reset(easy_);
         Transfer t{req,{},0,0,0,false,{}};
         List headers,quote;
-        set(CURLOPT_URL,req.url.c_str());set(CURLOPT_NOSIGNAL,1L);set(CURLOPT_PATH_AS_IS,1L);
+        set(CURLOPT_URL,req.url.c_str());set(CURLOPT_NOSIGNAL,1L);if(!is_s3())set(CURLOPT_PATH_AS_IS,1L);
         set(CURLOPT_PROTOCOLS_STR,is_ftp()?"ftp,ftps":"http,https");
         set(CURLOPT_FOLLOWLOCATION,0L);set(CURLOPT_CONNECTTIMEOUT,static_cast<long>(std::min(c_.timeout_seconds,30u)));
         set(CURLOPT_TIMEOUT,static_cast<long>(c_.timeout_seconds));
