@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+﻿# SPDX-License-Identifier: GPL-3.0-only
 param([Parameter(Mandatory=$true)][string]$AppDirectory,[ValidateSet('en-US','zh-CN')][string]$Language='en-US')
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
@@ -33,7 +33,7 @@ try{
   $w=Window $p 'SourceList'
   $null=Wait-Until {(Items $w 'SourceList').Count -eq 2} 'two selected sources'
   $expected=if($Language -eq 'zh-CN'){'创建镜像'}else{'Create image'}
-  if((Control $w 'CreateImage').Current.Name -ne $expected){throw 'Incorrect localized creation label'}
+  if((Control $w 'CreateImage').Current.Name -ne $expected){throw ('Incorrect localized creation label: expected {0}; actual {1}' -f $expected,(Control $w 'CreateImage').Current.Name)}
   $images=@()
   foreach($format in @('SquashFS','DwarFS','EROFS')){
     Choose $w 'ImageFormat' $format
