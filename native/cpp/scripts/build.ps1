@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
+param([ValidateSet('All','Dependencies','Application','Tests')][string]$Stage='All')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 Set-Location $root
@@ -15,10 +16,17 @@ $build = Join-Path $deps 'archivefs-build'
 $test = Join-Path $deps 'archivefs-test'
 $dist = Join-Path $root 'artifacts/dist'
 New-Item -ItemType Directory -Force $deps,$dist | Out-Null
-if (!(Test-Path "$dwarfs/CMakeLists.txt")) { Invoke-Checked git @('clone','--branch','v0.15.10','--depth','1','--recursive','https://github.com/mhx/dwarfs.git',$dwarfs) }
 $flags = @('-G','Ninja','-DCMAKE_BUILD_TYPE=Release',"-DCMAKE_TOOLCHAIN_FILE=$toolchain",'-DVCPKG_TARGET_TRIPLET=x64-windows-static-md',"-DVCPKG_INSTALLED_DIR=$ports",'-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL')
-Invoke-Checked cmake (@('-S',$dwarfs,'-B',"$deps/dwarfs-build","-DCMAKE_INSTALL_PREFIX=$prefix",'-DWITH_TOOLS=ON','-DWITH_FUSE_DRIVER=OFF','-DWITH_TESTS=OFF','-DWITH_BENCHMARKS=OFF','-DWITH_DESKTOP_INTEGRATION=OFF','-DWITH_MAN_OPTION=OFF','-DWITH_PXATTR=OFF','-DENABLE_STACKTRACE=OFF','-DBUILD_SHARED_LIBS=OFF')+$flags)
-Invoke-Checked cmake @('--build',"$deps/dwarfs-build",'--target','install','--parallel','2')
+if ($Stage -in @('All','Dependencies')) {
+    if (!(Test-Path "$prefix/bin/mkdwarfs.exe") -or !(Test-Path "$prefix/lib/cmake/dwarfs/dwarfs-config.cmake")) {
+        if (!(Test-Path "$dwarfs/CMakeLists.txt")) { Invoke-Checked git @('clone','--branch','v0.15.10','--depth','1','--recursive','https://github.com/mhx/dwarfs.git',$dwarfs) }
+        Invoke-Checked cmake (@('-S',$dwarfs,'-B',"$deps/dwarfs-build","-DCMAKE_INSTALL_PREFIX=$prefix",'-DWITH_TOOLS=ON','-DWITH_FUSE_DRIVER=OFF','-DWITH_TESTS=OFF','-DWITH_BENCHMARKS=OFF','-DWITH_DESKTOP_INTEGRATION=OFF','-DWITH_MAN_OPTION=OFF','-DWITH_PXATTR=OFF','-DENABLE_STACKTRACE=OFF','-DBUILD_SHARED_LIBS=OFF')+$flags)
+        Invoke-Checked cmake @('--build',"$deps/dwarfs-build",'--target','install','--parallel','2')
+        New-Item -ItemType Directory -Force "$prefix/licenses" | Out-Null
+        Copy-Item "$dwarfs/LICENSE" "$prefix/licenses/dwarfs.txt" -Force
+    }
+    if ($Stage -eq 'Dependencies') { return }
+}
 $env:PKG_CONFIG_PATH = "$ports/x64-windows-static-md/lib/pkgconfig"
 $env:PATH = "$ports/x64-windows-static-md/tools/pkgconf;$env:PATH"
 # The test build uses deterministic mock decoder libraries. The application
@@ -26,6 +34,7 @@ $env:PATH = "$ports/x64-windows-static-md/tools/pkgconf;$env:PATH"
 Invoke-Checked cmake (@('-S','native/cpp','-B',$test,'-DARCHIVEFS_WITH_DWARFS=OFF','-DBUILD_TESTING=ON','-DVCPKG_MANIFEST_MODE=OFF')+$flags)
 Invoke-Checked cmake @('--build',$test,'--parallel','2')
 Invoke-Checked ctest @('--test-dir',$test,'--output-on-failure')
+if ($Stage -eq 'Tests') { return }
 Invoke-Checked cmake (@('-S','native/cpp','-B',$build,'-DARCHIVEFS_WITH_DWARFS=ON','-DBUILD_TESTING=OFF','-DVCPKG_MANIFEST_MODE=OFF',"-DCMAKE_PREFIX_PATH=$prefix")+$flags)
 Invoke-Checked cmake @('--build',$build,'--parallel','2')
 Copy-Item "$build/archivefs_core.dll","$build/WinArchiveFSPro.Unc.exe" $dist -Force
@@ -34,7 +43,7 @@ Copy-Item "artifacts/native/*" $dist -Recurse -Force
 Copy-Item "$prefix/bin/mkdwarfs.exe" "$dist/tools/mkdwarfs.exe" -Force
 if (Test-Path "$prefix/bin/dwarfsck.exe") { Copy-Item "$prefix/bin/dwarfsck.exe" "$dist/tools/dwarfsck.exe" -Force }
 New-Item -ItemType Directory -Force "$dist/licenses","$dist/Assets" | Out-Null
-Copy-Item "$dwarfs/LICENSE" "$dist/licenses/dwarfs.txt" -Force
+Copy-Item "$prefix/licenses/dwarfs.txt" "$dist/licenses/dwarfs.txt" -Force
 Copy-Item 'src/App/Assets/app-icon.ico','src/App/Assets/file-icon.ico' "$dist/Assets" -Force
 Copy-Item LICENSE "$dist/LICENSE" -Force
 New-Item -ItemType Directory -Force "$dist/prerequisites" | Out-Null

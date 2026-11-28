@@ -111,5 +111,5 @@ NativeMount::NativeMount(std::shared_ptr<Projection> projection,std::u16string m
 NativeMount::~NativeMount()=default;
 std::u16string NativeMount::mount_point()const{return impl_->point;}
 void NativeMount::unmount(){impl_->unmount();}
-std::string winfsp_runtime_info(){try{return "WinFsp "+api().version+" native runtime loaded";}catch(const std::exception& e){throw std::runtime_error(std::string("WinFsp could not initialize: ")+e.what());}}
+std::string winfsp_runtime_info(){try{return "WinFsp runtime "+api().version+" (native)";}catch(const std::exception& e){throw std::runtime_error(std::string("WinFsp could not initialize: ")+e.what());}}
 }

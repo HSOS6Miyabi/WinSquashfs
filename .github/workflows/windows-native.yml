@@ -51,15 +51,26 @@ jobs:
         shell: pwsh
         run: ./scripts/install-winfsp.ps1
       - uses: ilammy/msvc-dev-cmd@v1
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: dwarfs-cache
         with:
           path: |
+            .deps/dwarfs-install
             .deps/vcpkg-installed
-            ~/AppData/Local/vcpkg/archives
-          key: archivefs-vcpkg-x64-static-md-dwarfs-v0.15.10-${{ runner.os }}
-      - name: Build official DwarFS reader and native applications
+          key: archivefs-dwarfs-v0.15.10-static-md-v1-${{ runner.os }}
+      - name: Build official DwarFS reader and tools
         shell: pwsh
-        run: ./native/cpp/scripts/build.ps1
+        run: ./native/cpp/scripts/build.ps1 -Stage Dependencies
+      - uses: actions/cache/save@v4
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .deps/dwarfs-install
+            .deps/vcpkg-installed
+          key: ${{ steps.dwarfs-cache.outputs.cache-primary-key }}
+      - name: Build and test native applications
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage Application
       - name: Test real archives and mounted filesystem
         run: python native/cpp/scripts/windows_integration.py artifacts/dist
       - name: WinUI interaction and localization tests
@@ -116,3 +127,33 @@ jobs:
             artifacts/WinArchiveFSPro-Setup-x64.exe
             artifacts/dist/
           if-no-files-found: error
+  windows-core:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install WinFsp SDK
+        shell: pwsh
+        run: ./scripts/install-winfsp.ps1
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Install core dependencies
+        shell: pwsh
+        run: |
+          $vcpkg=$env:VCPKG_INSTALLATION_ROOT
+          if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
+          $ports=Join-Path $PWD '.deps/vcpkg-installed'
+          & "$vcpkg/vcpkg.exe" install 'libarchive[core]' nlohmann-json --classic --triplet=x64-windows-static-md "--x-install-root=$ports"
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+      - name: Compile Windows core and run unit tests
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage Tests
+      - name: Compile WinUI application
+        shell: pwsh
+        run: |
+          $core=Join-Path $PWD '.deps/archivefs-test/archivefs_core.lib'
+          $out=Join-Path $PWD 'artifacts/core-ui'
+          msbuild native/cpp/gui/WinArchiveFSPro.vcxproj /restore /m /p:Configuration=Release /p:Platform=x64 "/p:ArchiveFSCoreLib=$core" "/p:OutDir=$out/" /p:WindowsAppSDKSelfContained=true
+          if($LASTEXITCODE){exit $LASTEXITCODE}

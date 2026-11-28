@@ -4,6 +4,7 @@
 #include <atomic>
 #include <limits>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <functional>
 #include <chrono>
@@ -46,7 +47,8 @@ public:
     Handle(Handle const&) = delete;
     Handle& operator=(Handle const&) = delete;
     Handle(Handle&& other) noexcept : value_(std::exchange(other.value_, invalid_handle)) {}
-    ~Handle() { if (value_ != invalid_handle) close_handle(value_); }
+    ~Handle() { close(); }
+    void close() noexcept { auto previous=std::exchange(value_,invalid_handle);if(previous!=invalid_handle)close_handle(previous); }
     RawHandle get() const noexcept { return value_; }
 private:
     RawHandle value_;
@@ -74,7 +76,9 @@ Handle open_handle(const std::filesystem::path& path, SourcePolicy policy) {
 #ifdef _WIN32
     const auto share = policy == SourcePolicy::protected_handle ? FILE_SHARE_READ :
         FILE_SHARE_READ | FILE_SHARE_DELETE;
-    auto handle = CreateFileW(path.c_str(), GENERIC_READ, share, nullptr, OPEN_EXISTING,
+    auto name=path.lexically_normal().wstring();
+    if(!name.starts_with(L"\\\\?\\")){if(name.starts_with(L"\\\\"))name=L"\\\\?\\UNC\\"+name.substr(2);else name=L"\\\\?\\"+name;}
+    auto handle = CreateFileW(name.c_str(), GENERIC_READ, share, nullptr, OPEN_EXISTING,
         FILE_FLAG_OVERLAPPED | FILE_FLAG_RANDOM_ACCESS, nullptr);
     if (handle == invalid_handle) fail("CreateFileW");
 #else
@@ -196,19 +200,23 @@ public:
     Oplock& operator=(Oplock const&)=delete;
     ~Oplock(){
         if(worker_.joinable()){SetEvent(stop_.get());worker_.join();}
-        else if(pending_){CancelIoEx(file_->get(),&request_);WaitForSingleObject(signal_.get(),INFINITE);}
+        else if(pending_&&file_){CancelIoEx(file_->get(),&request_);WaitForSingleObject(signal_.get(),INFINITE);}
     }
     bool pending()const noexcept{return pending_;}
     void request_stop()const noexcept{SetEvent(stop_.get());}
     bool broken()const noexcept{return WaitForSingleObject(signal_.get(),0)==WAIT_OBJECT_0;}
-    void monitor(std::function<void()> on_break){
-        worker_=std::thread([this,on_break=std::move(on_break)]{
+    void join(){if(worker_.joinable())worker_.join();}
+    void monitor(std::function<void()> invalidate,std::shared_mutex& io){
+        worker_=std::thread([this,invalidate=std::move(invalidate),&io]{
             HANDLE events[]{signal_.get(),stop_.get()};
             auto result=WaitForMultipleObjects(2,events,FALSE,INFINITE);
             if(result!=WAIT_OBJECT_0){CancelIoEx(file_->get(),&request_);WaitForSingleObject(signal_.get(),INFINITE);}
-            // The OVERLAPPED request has completed. Cancel any active reads
-            // before releasing the read handle to a conflicting writer.
-            if(result==WAIT_OBJECT_0){CancelIoEx(file_->get(),nullptr);on_break();}
+            // Prevent new reads, cancel outstanding I/O and wait for read
+            // operations to leave the handle. Closing the handle acknowledges
+            // the oplock break even when a read session still exists.
+            invalidate();
+            CancelIoEx(file_->get(),nullptr);
+            {std::unique_lock lock(io);file_->close();}
             file_.reset();
         });
     }
@@ -226,8 +234,13 @@ class FileSource final : public RandomAccessSource, public std::enable_shared_fr
             owner_->ensure_valid();
             try {
                 retained_=owner_->retained_handle();
-                if (retained_) handle_ = retained_->get();
-                else {
+                if (retained_) {
+#ifdef _WIN32
+                    std::shared_lock lock(owner_->retained_io_);
+                    owner_->ensure_valid();
+#endif
+                    handle_ = retained_->get();
+                } else {
                     temporary_ = std::make_unique<Handle>(open_handle(owner_->path_, owner_->policy_));
                     handle_ = temporary_->get();
                 }
@@ -240,6 +253,11 @@ class FileSource final : public RandomAccessSource, public std::enable_shared_fr
                 throw std::out_of_range("source read outside file");
             owner_->ensure_valid();
             try {
+#ifdef _WIN32
+                std::shared_lock lock(owner_->retained_io_,std::defer_lock);
+                if(retained_)lock.lock();
+                owner_->ensure_valid();
+#endif
                 positioned_read(handle_, offset, output);
                 owner_->ensure_valid();
             } catch (...) { owner_->invalidate(); throw; }
@@ -286,19 +304,24 @@ public:
     }
     ~FileSource() override {
 #ifdef _WIN32
-        oplock_.reset();
+        if(oplock_){oplock_->request_stop();oplock_->join();oplock_.reset();}
 #endif
     }
     void start_monitor(){
 #ifdef _WIN32
-        if(oplock_)oplock_->monitor([this]{invalidate();});
+        if(oplock_)oplock_->monitor([this]{invalidate();},retained_io_);
 #endif
     }
     std::uint64_t size() const noexcept override { return original_.size; }
     void validate() const override {
         ensure_valid();
         try {
-            if (auto retained=retained_handle()) {check_for_read(retained->get(),true);
+            if (auto retained=retained_handle()) {
+#ifdef _WIN32
+                {std::shared_lock lock(retained_io_);ensure_valid();check_for_read(retained->get(),true);}
+#else
+                check_for_read(retained->get(),true);
+#endif
 #ifdef _WIN32
                 if(policy_==SourcePolicy::transient_handle){auto now=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();auto previous=last_probe_.load();if(now-previous>=500&&last_probe_.compare_exchange_strong(previous,now)){auto h=open_handle(path_,policy_);check(h.get());}}
 #endif
@@ -347,6 +370,7 @@ private:
     mutable std::mutex retained_mutex_;
     mutable std::shared_ptr<Handle> retained_;
 #ifdef _WIN32
+    mutable std::shared_mutex retained_io_;
     mutable std::atomic<std::int64_t> last_probe_{0};
     std::unique_ptr<Oplock> oplock_;
 #endif
