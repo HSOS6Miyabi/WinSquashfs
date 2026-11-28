@@ -6,6 +6,9 @@
 #include <chrono>
 #include <cstring>
 #include <limits>
+#include <bit>
+#include <mutex>
+#include <map>
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -132,6 +135,36 @@ private:
 std::uint32_t little32(std::span<const std::byte> s){
     std::uint32_t n=0;for(unsigned i=0;i<4;++i)n|=std::to_integer<std::uint32_t>(s[i])<<(8*i);return n;
 }
+std::uint64_t little64(std::string_view s,std::size_t at){
+    std::uint64_t value=0;for(unsigned i=0;i<8;++i)value|=static_cast<std::uint64_t>(static_cast<unsigned char>(s[at+i]))<<(8*i);return value;
+}
+std::uint32_t number32(std::string_view s,std::size_t at){
+    return little32(std::as_bytes(std::span(s.data()+at,4)));
+}
+void sync_request(Connection& c,std::string_view command,std::string_view path){
+    if(path.size()>1024)throw DeviceFailure(DeviceError::unsupported,"Android sync path exceeds 1024 bytes");
+    std::string request(command);auto n=static_cast<std::uint32_t>(path.size());
+    for(unsigned i=0;i<4;++i)request+=static_cast<char>(n>>(8*i));
+    c.write(request);c.write(path);
+}
+std::string sync_header(Connection& c){
+    auto tag=c.read_string(4);
+    if(tag=="FAIL"){
+        auto length=number32(c.read_string(4),0);
+        if(length>65536)protocol("Invalid ADB sync error");
+        auto error=c.read_string(length);
+        throw DeviceFailure(error.find("Permission denied")!=error.npos?DeviceError::permission:DeviceError::protocol,"ADB sync: "+error);
+    }
+    return tag;
+}
+RemoteObject sync_metadata(std::string_view id,std::string_view name,std::string_view data){
+    auto error=number32(data,0);
+    if(error)throw DeviceFailure(error==2?DeviceError::missing:error==1||error==13?DeviceError::permission:DeviceError::protocol,"Android stat failed ("+std::to_string(error)+")");
+    auto mode=number32(data,20)&0170000u;
+    if(mode!=0040000u&&mode!=0100000u)throw DeviceFailure(DeviceError::unsupported,"Android object is not a regular file or directory");
+    return {std::string(id),std::string(name),mode==0040000u,mode==0040000u?0:little64(data,36),
+        std::bit_cast<std::int64_t>(little64(data,52)),std::to_string(little64(data,4))+" "+std::to_string(little64(data,12))+" "+std::to_string(std::bit_cast<std::int64_t>(little64(data,60)))};
+}
 std::string path_join(std::string_view base,std::string_view child){
     if(child.empty()||child=="."||child==".."||child.find('/')!=child.npos||child.find('\0')!=child.npos)protocol("Invalid device directory entry");
     auto path=std::string(base);if(path.empty()||path.back()!='/')path+='/';path+=child;return path;
@@ -149,10 +182,10 @@ std::vector<std::string_view> fields(std::string_view line,char sep){
 RemoteObject parse_stat(std::string_view id,std::string_view name,std::string_view metadata){
     while(!metadata.empty()&&(metadata.back()=='\r'||metadata.back()=='\n'))metadata.remove_suffix(1);
     auto parts=fields(metadata,' ');
-    if(parts.size()!=5)protocol("Invalid Android stat response");
+    if(parts.size()!=6)protocol("Invalid Android stat response");
     auto mode=integer<unsigned>(parts[0],16)&0170000u;
     if(mode!=0040000u&&mode!=0100000u)throw DeviceFailure(DeviceError::unsupported,"Android object is not a regular file or directory");
-    return {std::string(id),std::string(name),mode==0040000u,mode==0040000u?0:integer<std::uint64_t>(parts[1]),integer<std::int64_t>(parts[2]),std::string(parts[3])+" "+std::string(parts[4])};
+    return {std::string(id),std::string(name),mode==0040000u,mode==0040000u?0:integer<std::uint64_t>(parts[1]),integer<std::int64_t>(parts[2]),std::string(parts[3])+" "+std::string(parts[4])+" "+std::string(parts[5])};
 }
 class Adb final:public DeviceProvider {
 public:
@@ -173,16 +206,26 @@ public:
         return result;
     }
     RemoteObject stat(std::string_view device,std::string_view object)override{
-        check_path(object);auto cmd="stat -L -c '%f %s %Y %d %i' "+adb_shell_quote(object);
+        check_path(object);
+        if(object.size()<=1024&&binary_metadata(device)){
+            Connection c(options_);transport(c,device);c.service("sync:");return sync_stat(c,object);
+        }
+        auto cmd="stat -L -c '%f %s %Y %d %i %Z' "+adb_shell_quote(object);
         return parse_stat(object,name_of(object),shell(device,cmd,4096));
     }
     std::vector<RemoteObject> children(std::string_view device,std::string_view parent)override{
         check_path(parent);
+        if(parent.size()<=1024&&binary_metadata(device)){
+            auto result=sync_list(device,parent);
+            // Some adbd versions return DONE even when opendir fails. Verify an
+            // empty result using the shell so an inaccessible folder is not reported as empty.
+            if(!result.empty())return result;
+        }
         // NUL-delimited names and numeric metadata preserve all filename bytes.
         const auto command="p="+adb_shell_quote(parent)+"; [ -d \"$p\" ] && [ -r \"$p\" ] && [ -x \"$p\" ] || exit 77; "
             "for f in \"$p\"/* \"$p\"/.[!.]* \"$p\"/..?*; do "
             "[ -e \"$f\" ] || continue; "
-            "m=$(stat -L -c '%f %s %Y %d %i' \"$f\" 2>/dev/null) || continue; "
+            "m=$(stat -L -c '%f %s %Y %d %i %Z' \"$f\" 2>/dev/null) || continue; "
             "printf '%s\\000%s\\000' \"$" "{f##*/}\" \"$m\"; done";
         auto data=shell(device,command,32u<<20);
         auto parts=fields(data,'\0');if(parts.empty()||!parts.back().empty()||parts.size()%2!=1)protocol("Incomplete Android directory record");
@@ -206,6 +249,67 @@ public:
     }
 private:
     AdbOptions options_;
+    struct Features{bool binary;Clock::time_point expires;};
+    std::mutex features_mutex_;
+    std::map<std::string,Features> features_;
+    void transport(Connection& c,std::string_view device){
+        if(device.empty()||device.find_first_of("\r\n")!=device.npos||device.find('\0')!=device.npos)throw std::invalid_argument("Invalid ADB device serial");
+        c.service("host:transport:"+std::string(device));
+    }
+    bool binary_metadata(std::string_view device){
+        if(options_.root)return false;
+        {
+            std::lock_guard lock(features_mutex_);
+            if(auto i=features_.find(std::string(device));i!=features_.end()&&i->second.expires>Clock::now())return i->second.binary;
+        }
+        bool enabled=false;
+        try{
+            Connection c(options_);
+            c.service("host-serial:"+std::string(device)+":features");
+            auto data=c.message();auto parts=fields(data,',');
+            enabled=std::find(parts.begin(),parts.end(),"stat_v2")!=parts.end()&&std::find(parts.begin(),parts.end(),"ls_v2")!=parts.end();
+        }catch(const DeviceFailure& e){if(e.code()!=DeviceError::protocol)throw;}
+        {
+            std::lock_guard lock(features_mutex_);
+            if(features_.size()>=256)features_.clear();
+            features_.insert_or_assign(std::string(device),Features{enabled,Clock::now()+std::chrono::seconds(10)});
+        }
+        return enabled;
+    }
+    RemoteObject sync_stat(Connection& c,std::string_view path){
+        sync_request(c,"STA2",path);
+        if(sync_header(c)!="STA2")protocol("Invalid ADB stat packet");
+        return sync_metadata(path,name_of(path),c.read_string(68));
+    }
+    std::vector<RemoteObject> sync_list(std::string_view device,std::string_view path){
+        Connection c(options_);transport(c,device);c.service("sync:");
+        sync_request(c,"LIS2",path);
+        std::vector<RemoteObject> result;
+        std::vector<std::string> symlinks;
+        std::size_t total=0;
+        for(;;){
+            auto tag=sync_header(c);
+            if(tag!="DNT2"&&tag!="DONE")protocol("Invalid ADB directory packet");
+            auto metadata=c.read_string(72);
+            if(tag=="DONE")break;
+            auto length=number32(metadata,68);
+            if(!length||length>1024||total>32u<<20||result.size()+symlinks.size()>=100000)protocol("ADB directory exceeds protocol limits");
+            auto name=c.read_string(length);total+=length+72;
+            if(name=="."||name=="..")continue;
+            if(number32(metadata,0))continue;
+            auto child=path_join(path,name);
+            auto mode=number32(metadata,20)&0170000u;
+            if(mode==0120000u){symlinks.push_back(std::move(child));continue;}
+            try{result.push_back(sync_metadata(child,name,metadata));}
+            catch(const DeviceFailure& e){if(e.code()!=DeviceError::unsupported)throw;}
+        }
+        for(const auto& path:symlinks){
+            if(path.size()>1024)continue;
+            try{result.push_back(sync_stat(c,path));}
+            catch(const DeviceFailure& e){if(e.code()!=DeviceError::permission&&e.code()!=DeviceError::missing&&e.code()!=DeviceError::unsupported)throw;}
+        }
+        return result;
+    }
     std::string shell(std::string_view device,std::string command,std::size_t maximum){
         if(device.empty()||device.find_first_of("\r\n")!=device.npos||device.find('\0')!=device.npos)throw std::invalid_argument("Invalid ADB serial");
         if(options_.root)command="su -c "+adb_shell_quote("[ \"$(id -u)\" = 0 ] || exit 77; "+command);

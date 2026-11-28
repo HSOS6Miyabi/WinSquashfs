@@ -9,7 +9,7 @@ import time
 
 EXE = sys.argv[1]
 NAME = "中文 '文件\n😀.bin"
-META = b"81a4 4294967552 1700000000 1 99"
+META = b"81a4 4294967552 1700000000 1 99 1700000001"
 DEVICES = b"serial-1\tdevice product:p model:Phone transport_id:1\nserial-2\toffline transport_id:2\n"
 
 def exact(conn, n):
@@ -41,7 +41,7 @@ def test(mode):
     commands = []
     def server():
         try:
-            count = 1 if mode in ("empty", "timeout") else 2 if mode == "denied" else 4
+            count = 1 if mode in ("empty", "timeout") else 2 if mode == "denied" else 4 if mode == "root" else 5
             for n in range(count):
                 conn, _ = sock.accept()
                 with conn:
@@ -54,9 +54,32 @@ def test(mode):
                         payload = b"" if mode == "empty" else DEVICES
                         conn.sendall(b"OKAY" + f"{len(payload):04x}".encode() + payload)
                         continue
+                    if n == 1 and mode in ("normal", "sync"):
+                        assert service(conn) == "host-serial:serial-1:features"
+                        payload = b"stat_v2,ls_v2" if mode == "sync" else b""
+                        conn.sendall(b"OKAY" + f"{len(payload):04x}".encode() + payload)
+                        continue
+                    index = n - 1 if mode in ("normal", "sync") else n
                     assert service(conn) == "host:transport:serial-1"
                     conn.sendall(b"OKAY")
                     command = service(conn)
+                    if mode == "sync" and index in (1,2):
+                        assert command == "sync:"
+                        conn.sendall(b"OKAY")
+                        tag = exact(conn,4)
+                        path = exact(conn,struct.unpack("<I",exact(conn,4))[0]).decode("utf-8")
+                        def meta(mode,size,inode):
+                            return struct.pack("<IQQIIIIQqqq",0,1,inode,mode,1,0,0,size,0,1700000000,1700000001)
+                        if index == 1:
+                            assert tag == b"LIS2" and path == "/storage"
+                            for name,mode_bits,size,inode in [(NAME,0x81a4,4294967552,99),("dir",0x41ed,0,100)]:
+                                raw=name.encode("utf-8")
+                                conn.sendall(b"DNT2"+meta(mode_bits,size,inode)+struct.pack("<I",len(raw))+raw)
+                            conn.sendall(b"DONE"+bytes(72))
+                        else:
+                            assert tag == b"STA2" and path == "/storage/"+NAME
+                            conn.sendall(b"STA2"+meta(0x81a4,4294967552,99))
+                        continue
                     assert command.startswith("shell,v2,raw:")
                     command = command[len("shell,v2,raw:"):]
                     if mode in ("root", "denied"):
@@ -73,10 +96,10 @@ def test(mode):
                         packet(conn, 2, b"Permission denied")
                         packet(conn, 3, b"\x4d")
                         continue
-                    if n == 1:
+                    if index == 1:
                         assert "printf" in command and "/storage" in command
-                        data = NAME.encode() + b"\0" + META + b"\0dir\0" + b"41ed 0 1700000000 1 100\0"
-                    elif n == 2:
+                        data = NAME.encode() + b"\0" + META + b"\0dir\0" + b"41ed 0 1700000000 1 100 1700000001\0"
+                    elif index == 2:
                         assert "stat -L" in command
                         assert shlex.split(command)[-1] == "/storage/" + NAME
                         data = META + b"\n"
@@ -101,6 +124,6 @@ def test(mode):
         raise errors[0]
     assert not thread.is_alive()
 
-for mode in ("absent", "empty", "normal", "root", "denied", "timeout"):
+for mode in ("absent", "empty", "normal", "sync", "root", "denied", "timeout"):
     test(mode)
 print("PASS ADB server absence, empty list, UTF-8, binary range, Root authorization and deadlines")

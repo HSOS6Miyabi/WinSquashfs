@@ -132,7 +132,7 @@ try{
   Save-WindowScreenshot $p 'browser-dark'
   Navigate $w 'NavUnc'
   $scroll=(Control $w 'PageScroll').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
-  if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,100)}
+  if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,0)}
   $editor=Control $w 'ExtraShareEditor'
   $editor.SetFocus()
   $editor.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
@@ -161,6 +161,7 @@ try{
     Save-WindowScreenshot $p 'alias-save-error'
     throw "Directory alias save failed: $((Control $w 'StatusText' $false).Current.Name)"
   }
+  $editor.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
   $null=Control $w 'PageScroll'
   if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,0)}
   Invoke-Control $w 'StartUnc'
