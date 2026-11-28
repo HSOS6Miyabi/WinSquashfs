@@ -18,7 +18,7 @@ struct Temp{
 };
 class MockDevice final:public DeviceProvider{
 public:
-    std::atomic<unsigned> enumerations{0},listings{0},reads{0};
+    std::atomic<unsigned> enumerations{0},listings{0},reads{0},stats{0};
     bool absent=false,empty=false;
     std::vector<std::byte> content;
     MockDevice(){
@@ -38,6 +38,7 @@ public:
         return {stat(device,"/a"),stat(device,"/b"),stat(device,"/c")};
     }
     RemoteObject stat(std::string_view,std::string_view object)override{
+        ++stats;
         if(object=="/a")return {"/a","文件😀.bin",false,content.size(),1,"1"};
         if(object=="/b")return {"/b","镜像.squashfs",false,content.size(),1,"2"};
         if(object=="/c")return {"/c","目录",true,0,1,"3"};
@@ -99,6 +100,12 @@ int main(int argc,char** argv){try{
     });
     threads.clear();
     check(provider->reads==1,"concurrent device reads coalesced");
+    auto count=provider->stats.load();
+    auto reopened=projection->open(u"\\手机\\文件😀.bin");
+    check(reopened->source==file->source,"same active file generation reused across opens");
+    std::array<std::byte,1> cached{};
+    check(projection->read(reopened,1028,cached)==1&&provider->reads==1,"reopened file reuses data cache");
+    check(provider->stats==count,"reopened file reuses metadata validation");
     auto decoded=projection->open(u"\\手机\\镜像.squashfs\\data.bin");
     std::array<std::byte,128> bytes{};
     check(decoded&&!decoded->info.directory&&projection->read(decoded,17,bytes)==bytes.size(),"device archive read");
@@ -106,6 +113,21 @@ int main(int argc,char** argv){try{
     check(progress.size()==1&&progress.front()->done&&progress.front()->size==provider->content.size()&&progress.front()->offset>0,"archive opening progress lifecycle");
     check(projection->open(u"\\手机\\镜像.squashfs")->info.directory,"archive directory projection");
     check(progress.size()==1,"cached archive does not create notification");
+    // A disappearance observed by enumeration retires all sources belonging
+    // to that device, even when size and revision are unchanged on reconnection.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    provider->empty=true;
+    check(projection->list(projection->open(u"\\")).empty(),"device removal observed");
+    bool invalid=false;try{projection->read(file,1028,cached);}catch(const DeviceFailure&){invalid=true;}
+    check(invalid,"old file generation invalidated on disconnect");
+    provider->content[1028]=std::byte{177};
+    provider->empty=false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    auto connected=projection->open(u"\\手机\\文件😀.bin");
+    check(connected->source!=file->source,"reconnection starts new file generation");
+    check(projection->read(connected,1028,cached)==1&&cached[0]==std::byte{177},"reconnection does not reuse retired data");
+    auto new_image=projection->open(u"\\手机\\镜像.squashfs\\data.bin");
+    check(new_image&&projection->read(new_image,0,cached)==1&&cached[0]==std::byte{177},"reconnection opens fresh archive");
     bool denied=false;try{projection->open(u"\\离线");}catch(const DeviceFailure& e){denied=e.code()==DeviceError::offline;}
     check(denied,"offline status");
     auto empty=std::make_shared<MockDevice>();empty->empty=true;
