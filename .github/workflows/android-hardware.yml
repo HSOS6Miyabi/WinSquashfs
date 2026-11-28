@@ -1,0 +1,40 @@
+name: Physical Android device integration
+on:
+  workflow_dispatch:
+    inputs:
+      serial:
+        description: Serial of an authorized dedicated Android test device
+        required: true
+        type: string
+      manager:
+        description: Root management software installed on the test device
+        type: choice
+        required: true
+        options: [Magisk, KernelSU]
+      port:
+        description: Existing local ADB server port
+        type: number
+        default: 5037
+permissions:
+  contents: read
+concurrency:
+  group: archivefs-physical-android
+  cancel-in-progress: false
+jobs:
+  android-root:
+    runs-on: [self-hosted, linux, archivefs-android]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native client test
+        run: |
+          cmake -S native/cpp -B build/adb-hardware -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/adb-hardware --target adb_live_tests --parallel 2
+      - name: Verify authorized root access
+        env:
+          DEVICE_SERIAL: ${{ inputs.serial }}
+          ADB_PORT: ${{ inputs.port }}
+          ROOT_MANAGER: ${{ inputs.manager }}
+        run: |
+          printf 'Testing %s on the designated Android test device\n' "$ROOT_MANAGER"
+          python3 native/cpp/scripts/adb_live.py build/adb-hardware/adb_live_tests --serial "$DEVICE_SERIAL" --port "$ADB_PORT" --root

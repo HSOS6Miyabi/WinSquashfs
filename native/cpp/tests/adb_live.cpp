@@ -64,6 +64,21 @@ int main(int argc,char** argv) {
         constexpr std::string_view tail="ADB-large";
         for(unsigned i=0;i<3;++i)check(data[i]==std::byte{0},"Sparse prefix incorrect");
         for(std::size_t i=0;i<tail.size();++i)check(data[i+3]==std::byte(tail[i]),"64-bit offset data incorrect");
+        if(options.root) {
+            auto private_dir=lookup("private");
+            check(private_dir.directory,"Root fixture directory missing");
+            auto private_entries=provider->children(serial,private_dir.id);
+            auto marker=std::find_if(private_entries.begin(),private_entries.end(),[](const auto& o){return o.name=="marker.bin";});
+            check(marker!=private_entries.end()&&!marker->directory,"Root-only fixture missing");
+            constexpr std::string_view message="ArchiveFS-root-only";
+            check(marker->size==message.size(),"Root-only fixture size incorrect");
+            auto marker_stat=provider->stat(serial,marker->id);
+            check(marker_stat.size==message.size(),"Root-only stat failed");
+            std::array<std::byte,message.size()> bytes{};
+            provider->read_exact(serial,marker->id,0,bytes);
+            for(std::size_t i=0;i<message.size();++i)check(bytes[i]==std::byte(message[i]),"Root-only data mismatch");
+            std::cout<<"PASS root-only directory enumeration, stat and file read\n";
+        }
         std::cout<<"PASS actual adbd directory, stat, Unicode, concurrent reads and 64-bit file offset ("<<mode<<")\n";
         return 0;
     } catch(const std::exception& e) { std::cerr<<e.what()<<'\n';return 1; }
