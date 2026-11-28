@@ -57,7 +57,22 @@ jobs:
           path: |
             .deps/dwarfs-install
             .deps/vcpkg-installed
-          key: archivefs-dwarfs-v0.15.10-static-md-v1-${{ runner.os }}
+          key: archivefs-dwarfs-v0.15.10-static-md-v2-${{ runner.os }}
+      - uses: actions/cache/restore@v4
+        id: dwarfs-ports
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true'
+        with:
+          path: .deps/vcpkg-installed
+          key: archivefs-dwarfs-ports-v0.15.10-static-md-v1-${{ runner.os }}
+      - name: Configure official DwarFS dependencies
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage ConfigureDependencies
+      - uses: actions/cache/save@v4
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true' && steps.dwarfs-ports.outputs.cache-hit != 'true'
+        with:
+          path: .deps/vcpkg-installed
+          key: ${{ steps.dwarfs-ports.outputs.cache-primary-key }}
       - name: Build official DwarFS reader and tools
         shell: pwsh
         run: ./native/cpp/scripts/build.ps1 -Stage Dependencies

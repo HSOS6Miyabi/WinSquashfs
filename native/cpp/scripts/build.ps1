@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-param([ValidateSet('All','Dependencies','Application','Tests')][string]$Stage='All')
+param([ValidateSet('All','ConfigureDependencies','Dependencies','Application','Tests')][string]$Stage='All')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 Set-Location $root
@@ -17,15 +17,29 @@ $test = Join-Path $deps 'archivefs-test'
 $dist = Join-Path $root 'artifacts/dist'
 New-Item -ItemType Directory -Force $deps,$dist | Out-Null
 $flags = @('-G','Ninja','-DCMAKE_BUILD_TYPE=Release',"-DCMAKE_TOOLCHAIN_FILE=$toolchain",'-DVCPKG_TARGET_TRIPLET=x64-windows-static-md',"-DVCPKG_INSTALLED_DIR=$ports",'-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL')
-if ($Stage -in @('All','Dependencies')) {
+if ($Stage -in @('All','ConfigureDependencies','Dependencies')) {
     if (!(Test-Path "$prefix/bin/mkdwarfs.exe") -or !(Test-Path "$prefix/lib/cmake/dwarfs/dwarfs-config.cmake")) {
         if (!(Test-Path "$dwarfs/CMakeLists.txt")) { Invoke-Checked git @('clone','--branch','v0.15.10','--depth','1','--recursive','https://github.com/mhx/dwarfs.git',$dwarfs) }
+        # The C++ reader shares the application's CRT and allocator. Upstream's
+        # Windows defaults use the static CRT; set the two explicit overrides
+        # to match the x64-windows-static-md dependency triplet.
+        foreach ($relative in @('cmake/compile.cmake','ricepp/CMakeLists.txt')) {
+            $file=Join-Path $dwarfs $relative
+            $source=[IO.File]::ReadAllText($file)
+            $old='set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")'
+            $new='set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")'
+            if ($source.Contains($old)) { $source=$source.Replace($old,$new) }
+            elseif (!$source.Contains($new)) { throw "Unexpected DwarFS CRT configuration: $relative" }
+            $source=$source.Replace('set(MSVC_USE_STATIC_RUNTIME ON CACHE BOOL "static build")','set(MSVC_USE_STATIC_RUNTIME OFF CACHE BOOL "dynamic CRT" FORCE)')
+            [IO.File]::WriteAllText($file,$source,[Text.UTF8Encoding]::new($false))
+        }
         Invoke-Checked cmake (@('-S',$dwarfs,'-B',"$deps/dwarfs-build","-DCMAKE_INSTALL_PREFIX=$prefix",'-DWITH_TOOLS=ON','-DWITH_FUSE_DRIVER=OFF','-DWITH_TESTS=OFF','-DWITH_BENCHMARKS=OFF','-DWITH_DESKTOP_INTEGRATION=OFF','-DWITH_MAN_OPTION=OFF','-DWITH_PXATTR=OFF','-DENABLE_STACKTRACE=OFF','-DBUILD_SHARED_LIBS=OFF')+$flags)
-        Invoke-Checked cmake @('--build',"$deps/dwarfs-build",'--target','install','--parallel','2')
+        if ($Stage -eq 'ConfigureDependencies') { return }
+        Invoke-Checked cmake @('--build',"$deps/dwarfs-build",'--target','install','--parallel','4')
         New-Item -ItemType Directory -Force "$prefix/licenses" | Out-Null
         Copy-Item "$dwarfs/LICENSE" "$prefix/licenses/dwarfs.txt" -Force
     }
-    if ($Stage -eq 'Dependencies') { return }
+    if ($Stage -in @('ConfigureDependencies','Dependencies')) { return }
 }
 $env:PKG_CONFIG_PATH = "$ports/x64-windows-static-md/lib/pkgconfig"
 $env:PATH = "$ports/x64-windows-static-md/tools/pkgconf;$env:PATH"
