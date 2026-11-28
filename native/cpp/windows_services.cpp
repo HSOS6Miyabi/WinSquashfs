@@ -315,6 +315,8 @@ int run_agent(){
     auto pool=std::make_shared<ImagePool>([open_source](const fs::path& path,SourcePolicy policy){return open_source(open_file_source(path,policy));},
         ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images},open_source,std::move(progress));
     auto shares=settings.shares();
+    auto namespace_root=namespace_projection();
+    std::map<std::u16string,std::shared_ptr<Projection>,WindowsNameLess> local_routes,device_routes;
     std::map<std::u16string,std::unique_ptr<NativeMount>,WindowsNameLess> mounts;
     auto update_mounts=[&](const std::vector<Share>& current,bool initial){
         std::set<std::u16string,WindowsNameLess> wanted;
@@ -323,10 +325,18 @@ int run_agent(){
             auto prefix=u"\\"+share.server+u"\\"+share.name;
             wanted.insert(prefix);
             if(mounts.contains(prefix))continue;
-            try{mounts.emplace(prefix,std::make_unique<NativeMount>(unc_projection(share,pool),u"",prefix));}
+            try{
+                auto projection=unc_projection(share,pool);
+                mounts.emplace(prefix,std::make_unique<NativeMount>(projection,u"",prefix));
+                if(share.server==u"$sfs")local_routes.insert_or_assign(share.name,std::move(projection));
+            }
             catch(...){if(initial)throw;complete=false;}
         }
         std::erase_if(mounts,[&](const auto& entry){return !wanted.contains(entry.first);});
+        std::erase_if(local_routes,[&](const auto& entry){return !wanted.contains(u"\\$sfs\\"+entry.first);});
+        std::vector<std::pair<std::u16string,std::shared_ptr<Projection>>> routes(local_routes.begin(),local_routes.end());
+        routes.insert(routes.end(),device_routes.begin(),device_routes.end());
+        namespace_root->replace_routes(std::move(routes));
         return complete;
     };
     update_mounts(shares,true);
@@ -348,6 +358,7 @@ int run_agent(){
             else message=to_utf16(e.what());
             notifications->error(std::move(title),std::move(message));
         });
+        device_routes.insert_or_assign(kind,projection);
         for(auto server:{u"sfs$",u"$sfs",u"sfs.localhost"})
             device_mounts.push_back(std::make_unique<NativeMount>(projection,u"",std::u16string(u"\\")+server+u"\\"+kind));
     }
@@ -357,10 +368,16 @@ int run_agent(){
         auto kind=to_utf16(std::string(remote_protocol_name(protocol)));
         auto projection=remote_projection(protocol,remote_connections,settings_directory()/L"remote-cache",
             [notifications,kind](std::string_view error){notifications->error(kind+u" remote filesystem",to_utf16(error));});
+        device_routes.insert_or_assign(kind,projection);
         for(auto server:{u"sfs$",u"$sfs",u"sfs.localhost"}){
             reserved.push_back({kind,{},false,server});
             device_mounts.push_back(std::make_unique<NativeMount>(projection,u"",std::u16string(u"\\")+server+u"\\"+kind));
         }
+    }
+    if(!update_mounts(shares,true))throw std::runtime_error("Cannot update namespace root");
+    for(auto server:{u"sfs$",u"$sfs",u"sfs.localhost"}){
+        reserved.push_back({u"root",{},false,server});
+        device_mounts.push_back(std::make_unique<NativeMount>(namespace_root,u"",std::u16string(u"\\")+server+u"\\root"));
     }
     RemoteAliasMounts remote(pool,reserved,settings.include_drives);
     try{remote.refresh();}catch(const std::exception&){}

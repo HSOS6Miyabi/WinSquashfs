@@ -47,6 +47,7 @@ private:
     std::jthread worker_;
 };
 struct ProjectionInfo {bool directory;std::uint64_t size;std::int64_t modified;std::uint64_t index;bool unavailable=false;};
+class Projection;
 struct RemoteFileState;
 struct ProjectedNode {
     std::u16string name,path;
@@ -59,6 +60,8 @@ struct ProjectedNode {
     std::shared_ptr<const RandomAccessSource> source;
     std::string device_id,object_id;
     std::shared_ptr<RemoteFileState> remote;
+    std::shared_ptr<Projection> route;
+    std::shared_ptr<const ProjectedNode> routed;
 };
 using ProjectedNodePtr=std::shared_ptr<const ProjectedNode>;
 class Projection {
@@ -81,6 +84,11 @@ public:
     virtual void rename(const ProjectedNodePtr&,std::u16string_view,bool){throw std::runtime_error("read-only projection");}
     virtual void operation_error(std::string_view)noexcept{}
 };
+class NamespaceProjection : public Projection {
+public:
+    virtual void replace_routes(std::vector<std::pair<std::u16string,std::shared_ptr<Projection>>> routes)=0;
+};
+std::shared_ptr<NamespaceProjection> namespace_projection();
 std::shared_ptr<Projection> mount_projection(std::shared_ptr<ArchiveTree> tree);
 struct Share {std::u16string name;std::filesystem::path root;bool network=false;std::u16string server=u"sfs$";};
 std::shared_ptr<Projection> unc_projection(Share share,std::shared_ptr<ImagePool> pool);

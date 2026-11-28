@@ -267,6 +267,16 @@ public:
         if(response.status!=200&&response.status!=204)failure(RemoteError::protocol,"Unexpected partial update response");
         return true;
     }
+    bool resize(std::string_view path,std::uint64_t size)override{
+        writable();
+        if(!is_dav())return false;
+        auto old=stat(path);
+        if(size==old.size)return true;
+        if(!size){replace(path,0,{},old.revision,false);return true;}
+        if(size<old.size)return false;
+        const std::array<std::byte,1> zero{};
+        return write_at(path,size-1,zero,old.revision);
+    }
     void replace(std::string_view path,std::uint64_t size,const RemoteInput& input,std::string_view revision,bool exclusive)override{
         writable();if(path=="/")failure(RemoteError::permission,"Cannot replace connection root");
         if(is_ftp()&&exclusive){
@@ -453,7 +463,9 @@ private:
         std::vector<RemoteStat> result;
         std::string continuation;
         for(unsigned page=0;page<10000;++page){
-            auto request_url=base_+"/?list-type=2&delimiter=%2F&prefix="+remote_url_path(prefix);
+            auto encoded_prefix=remote_url_path(prefix);
+            for(std::size_t i=0;(i=encoded_prefix.find('/',i))!=encoded_prefix.npos;i+=3)encoded_prefix.replace(i,1,"%2F");
+            auto request_url=base_+"/?list-type=2&delimiter=%2F&prefix="+encoded_prefix;
             if(probe)request_url+="&max-keys=1";
             if(!continuation.empty()){
                 auto encoded=remote_url_path(continuation);

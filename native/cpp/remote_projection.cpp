@@ -383,9 +383,10 @@ public:
         m->transport->remove(s.path,s.meta.directory);m->discard(s);s.deleted=true;m->invalidate(s.path);m->states.erase(s.path);
     }
     void rename(const ProjectedNodePtr& node,std::u16string_view path,bool replace)override{
-        auto m=owner(node);std::lock_guard lock(m->mutex);auto& s=*node->remote;m->check_writable(s);
+        auto m=owner(node);
         auto [parent,name]=parent_of(path);auto dest=owner(parent);
         if(m!=dest)fail(RemoteError::unsupported,"Rename across connections requires a file copy");
+        std::lock_guard lock(m->mutex);auto& s=*node->remote;m->check_writable(s);
         auto target=remote_join(parent->remote->path,new_component(name));
         if(target==s.path)return;
         if(target.starts_with(s.path+"/"))throw std::invalid_argument("Cannot move a directory into itself");

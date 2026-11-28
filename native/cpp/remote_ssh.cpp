@@ -11,6 +11,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <utility>
 #ifdef _WIN32
@@ -384,8 +385,21 @@ public:
     bool copy(std::string_view from,std::string_view to,bool overwrite)override{
         writable(to);std::lock_guard lock(mutex_);ensure();auto info=stat_locked(from);
         if(info.directory)return false;
+        if(from==to)throw std::invalid_argument("Source and destination are identical");
         if(sftp_&&sftp_->supports("copy-data")){
-            sftp_->copy(physical(c_.root,from),physical(c_.root,to),info.size,overwrite);return true;
+            auto temporary=remote_join(remote_parent(to),".archivefs-copy-"+std::to_string(std::random_device{}())+"-"+std::to_string(std::random_device{}()));
+            auto path=physical(c_.root,temporary);
+            bool copied=false;
+            try{sftp_->copy(physical(c_.root,from),path,info.size,false);copied=true;}
+            catch(const RemoteFailure& e){
+                try{sftp_->remove(path,false);}catch(...){}
+                if(e.code()!=RemoteError::unsupported)throw;
+            }
+            if(copied){
+                try{sftp_->rename(path,physical(c_.root,to),overwrite);}
+                catch(...){try{sftp_->remove(path,false);}catch(...){}throw;}
+                return true;
+            }
         }
         if(sftp_&&!c_.ssh_helper)return false;
         auto a=remote_shell_quote(shell_path(from)),b=remote_shell_quote(shell_path(to));
