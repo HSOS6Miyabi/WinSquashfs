@@ -100,6 +100,60 @@ try
         Require(File.ReadAllBytes(Path.Combine(upstream,"large.bin")).SequenceEqual(data),"Upstream extraction mismatch");
         Console.WriteLine($"PASS {codec}");
     }
+    // Round-trip all eight compression presets for all supported formats.
+    var presetRoot=Path.Combine(root,"preset-input");
+    Directory.CreateDirectory(presetRoot);
+    string aPath=Path.Combine(presetRoot,"文件 A.txt"), bPath=Path.Combine(presetRoot,"B.bin");
+    byte[] sample=Enumerable.Range(0,131083).Select(i=>(byte)(i%71)).ToArray();
+    File.WriteAllBytes(aPath,sample);
+    File.WriteAllBytes(bPath,tiny);
+    string sub=Path.Combine(presetRoot,"nested");Directory.CreateDirectory(sub);
+    File.WriteAllText(Path.Combine(sub,"hello.txt"),"multi-source");
+    foreach(var format in Enum.GetValues<ImageFormat>())
+    {
+        foreach(var preset in Enum.GetValues<CompressionPreset>())
+        {
+            var options=CreationOptions.ForPreset(format,preset);
+            string path=Path.Combine(root,format+"-"+(int)preset+options.Extension);
+            await ImageCreator.CreateAsync(new[]{aPath,bPath,sub},path,options,Console.WriteLine);
+            using(var archive=new Archive(path))
+            {
+                Require(archive.Format==format,"Wrong image format");
+                Require(archive.Root.Children.Count==3,"Multi-source root mismatch");
+                var entry=archive.Find("文件 A.txt")??throw new Exception("Missing Unicode source");
+                Require(entry.Size==(ulong)sample.Length,"Multi-source file size mismatch");
+                foreach(int offset in new[]{0,4095,65535,131071,sample.Length})
+                {
+                    byte[] got=new byte[4097];
+                    int count=archive.Read(entry,(ulong)offset,got);
+                    Require(count==Math.Min(got.Length,sample.Length-offset) && got.AsSpan(0,count).SequenceEqual(sample.AsSpan(offset,count)),$"{format} {preset}: read mismatch");
+                }
+                Require(archive.Verify().Files==3,"Image verification mismatch");
+            }
+            if(preset==CompressionPreset.Balanced && format!=ImageFormat.SquashFS)
+            {
+                using(var mount=new MountedImage(path))
+                {
+                    string drive=mount.MountPoint.TrimEnd('\\')+"\\";
+                    var deadline=DateTime.UtcNow.AddSeconds(15);
+                    while(!Directory.Exists(drive)&&DateTime.UtcNow<deadline)await Task.Delay(100);
+                    Require(File.ReadAllBytes(Path.Combine(drive,"文件 A.txt")).SequenceEqual(sample),"Mounted format read mismatch");
+                }
+                var s=new UncShare("test-"+Guid.NewGuid().ToString("N")[..8],root);
+                using(var session=new UncSession(new[]{s},idleSeconds:1,maxIdleImages:2))
+                {
+                    string uncPath=Path.Combine(s.UncPath,Path.GetFileName(path),"文件 A.txt");
+                    var deadline=DateTime.UtcNow.AddSeconds(15);
+                    while(!File.Exists(uncPath)&&DateTime.UtcNow<deadline)await Task.Delay(100);
+                    Require(File.ReadAllBytes(uncPath).SequenceEqual(sample),"UNC format read mismatch");
+                }
+                string extracted=Path.Combine(root,format+"-extracted");
+                await SquashTools.UnpackAsync(path,extracted,Console.WriteLine);
+                Require(File.ReadAllBytes(Path.Combine(extracted,"文件 A.txt")).SequenceEqual(sample),"Extracted format mismatch");
+            }
+            Console.WriteLine($"PASS {format} / {preset}");
+        }
+    }
     // Mount one UNC namespace containing multiple images and directories. No drive is allocated.
     var imageDir=Path.Combine(root,"unc-source");
     Directory.CreateDirectory(Path.Combine(imageDir,"subdir"));

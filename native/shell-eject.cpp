@@ -12,10 +12,14 @@
 #include <cstddef>
 #include <cstring>
 #include <cwchar>
+#include <string>
+#include <vector>
 
 namespace {
 const CLSID EjectClass = {0x9b20352f,0x1bc4,0x48e6,{0xae,0x3b,0x14,0x6f,0x32,0x65,0x7d,0xa9}};
+const CLSID PackClass = {0x57ab2c11,0x7881,0x46eb,{0x9a,0xf8,0x33,0x19,0x4e,0xdf,0x60,0x71}};
 constexpr wchar_t Verb[] = L"WinSquashfs.Eject";
+constexpr wchar_t PackVerb[] = L"WinSquashfs.Pack";
 HINSTANCE module = nullptr;
 volatile LONG objects = 0;
 volatile LONG locks = 0;
@@ -138,6 +142,98 @@ bool DriveFromSelection(IDataObject *data, wchar_t (&drive)[4])
     return ok;
 }
 
+struct Medium {
+    STGMEDIUM value{};
+    ~Medium() { if (value.tymed != TYMED_NULL) ReleaseStgMedium(&value); }
+};
+struct GlobalView {
+    HGLOBAL handle;
+    const BYTE *bytes;
+    explicit GlobalView(HGLOBAL h) : handle(h), bytes(static_cast<const BYTE *>(GlobalLock(h))) {}
+    ~GlobalView() { if (bytes) GlobalUnlock(handle); }
+};
+
+bool FilesFromSelection(IDataObject *data, std::vector<std::wstring> &paths)
+{
+    paths.clear();
+    if (!data) return false;
+    FORMATETC format = {CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    {
+        Medium m;
+        if (SUCCEEDED(data->GetData(&format, &m.value)) && m.value.tymed == TYMED_HGLOBAL)
+        {
+            HDROP drop = static_cast<HDROP>(m.value.hGlobal);
+            UINT count = DragQueryFileW(drop, 0xffffffff, nullptr, 0);
+            for (UINT i=0; i<count; ++i)
+            {
+                UINT len=DragQueryFileW(drop,i,nullptr,0);
+                if (!len) { paths.clear(); break; }
+                std::wstring path(len+1,L'\0');
+                if (DragQueryFileW(drop,i,path.data(),len+1)!=len) { paths.clear(); break; }
+                path.resize(len); paths.push_back(std::move(path));
+            }
+            if (!paths.empty()) return true;
+        }
+    }
+    format.cfFormat=static_cast<CLIPFORMAT>(RegisterClipboardFormatW(CFSTR_SHELLIDLIST));
+    Medium m;
+    if (!format.cfFormat || FAILED(data->GetData(&format,&m.value)) || m.value.tymed!=TYMED_HGLOBAL)
+        return false;
+    SIZE_T size=GlobalSize(m.value.hGlobal);
+    GlobalView view(m.value.hGlobal);
+    if(!view.bytes || size<offsetof(CIDA,aoffset)+2*sizeof(UINT))return false;
+    auto *cida=reinterpret_cast<const CIDA *>(view.bytes);
+    if(!cida->cidl || cida->cidl>(size-offsetof(CIDA,aoffset))/sizeof(UINT)-1 ||
+        !ValidPidl(view.bytes,size,cida->aoffset[0]))return false;
+    for(UINT i=0;i<cida->cidl;++i)
+    {
+        if(!ValidPidl(view.bytes,size,cida->aoffset[i+1])){paths.clear();return false;}
+        PIDLIST_ABSOLUTE full=ILCombine(
+            reinterpret_cast<PCIDLIST_ABSOLUTE>(view.bytes+cida->aoffset[0]),
+            reinterpret_cast<PCUIDLIST_RELATIVE>(view.bytes+cida->aoffset[i+1]));
+        if(!full){paths.clear();return false;}
+        wchar_t path[32768]={};
+        BOOL ok=SHGetPathFromIDListEx(full,path,ARRAYSIZE(path),GPFIDL_DEFAULT);
+        ILFree(full);
+        if(!ok){paths.clear();return false;}
+        paths.emplace_back(path);
+    }
+    return !paths.empty();
+}
+
+HRESULT LaunchPack(const std::vector<std::wstring> &paths)
+{
+    if(paths.empty())return E_INVALIDARG;
+    wchar_t folder[MAX_PATH+1]={}, list[MAX_PATH+1]={};
+    DWORD len=GetTempPathW(ARRAYSIZE(folder),folder);
+    if(!len || len>=ARRAYSIZE(folder) || !GetTempFileNameW(folder,L"wsq",0,list))
+        return HRESULT_FROM_WIN32(GetLastError());
+    HANDLE file=CreateFileW(list,GENERIC_WRITE,0,nullptr,TRUNCATE_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE){DWORD error=GetLastError();DeleteFileW(list);return HRESULT_FROM_WIN32(error);}
+    DWORD written=0;
+    bool ok=true;
+    for(const auto &path:paths)
+    {
+        DWORD size=static_cast<DWORD>((path.size()+1)*sizeof(wchar_t));
+        if(!WriteFile(file,path.c_str(),size,&written,nullptr)||written!=size){ok=false;break;}
+    }
+    DWORD error=GetLastError();
+    CloseHandle(file);
+    if(!ok){DeleteFileW(list);return HRESULT_FROM_WIN32(error?error:ERROR_WRITE_FAULT);}
+    wchar_t exe[32768]={}, command[32768]={};
+    DWORD n=GetModuleFileNameW(module,exe,ARRAYSIZE(exe));
+    wchar_t *separator=wcsrchr(exe,L'\\');
+    if(!n || n>=ARRAYSIZE(exe) || !separator){DeleteFileW(list);return E_FAIL;}
+    separator[1]=0;
+    HRESULT hr=StringCchCatW(exe,ARRAYSIZE(exe),L"WinSquashfs.exe");
+    if(SUCCEEDED(hr))hr=StringCchPrintfW(command,ARRAYSIZE(command),L"\"%ls\" --pack-list \"%ls\"",exe,list);
+    STARTUPINFOW si={};si.cb=sizeof(si);PROCESS_INFORMATION pi={};
+    if(FAILED(hr)||!CreateProcessW(exe,command,nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))
+    { if(SUCCEEDED(hr))hr=HRESULT_FROM_WIN32(GetLastError());DeleteFileW(list);return hr; }
+    CloseHandle(pi.hThread);CloseHandle(pi.hProcess);
+    return S_OK;
+}
+
 HRESULT LaunchEject(const wchar_t (&drive)[4])
 {
     if (!ActiveMount(drive)) return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
@@ -166,8 +262,10 @@ class EjectMenu final : public IShellExtInit, public IContextMenu
 {
     volatile LONG refs = 1;
     wchar_t drive[4] = {};
+    bool pack;
+    std::vector<std::wstring> paths;
 public:
-    EjectMenu() { InterlockedIncrement(&objects); }
+    explicit EjectMenu(bool create) : pack(create) { InterlockedIncrement(&objects); }
     ~EjectMenu() { InterlockedDecrement(&objects); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **out) override
     {
@@ -190,14 +288,16 @@ public:
     HRESULT STDMETHODCALLTYPE Initialize(PCIDLIST_ABSOLUTE, IDataObject *data, HKEY) override
     {
         drive[0] = 0;
-        DriveFromSelection(data, drive);
+        try { if(pack) FilesFromSelection(data,paths); else DriveFromSelection(data,drive); }
+        catch (...) { paths.clear(); return E_OUTOFMEMORY; }
         return S_OK;
     }
     HRESULT STDMETHODCALLTYPE QueryContextMenu(HMENU menu, UINT index, UINT first, UINT last, UINT flags) override
     {
-        if ((flags & CMF_DEFAULTONLY) || first > last || !ActiveMount(drive))
+        if ((flags & CMF_DEFAULTONLY) || first > last || (pack ? paths.empty() : !ActiveMount(drive)))
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
-        const wchar_t *title = Chinese() ? L"弹出（WinSquashfs）" : L"Eject (WinSquashfs)";
+        const wchar_t *title = pack ? (Chinese() ? L"使用 WinSquashfs 创建存档" : L"Create archive with WinSquashfs") :
+            (Chinese() ? L"弹出（WinSquashfs）" : L"Eject (WinSquashfs)");
         if (!InsertMenuW(menu, index, MF_BYPOSITION | MF_STRING, first, title))
             return HRESULT_FROM_WIN32(GetLastError());
         return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 1);
@@ -212,21 +312,23 @@ public:
         else if (info->cbSize >= sizeof(CMINVOKECOMMANDINFOEX) && (info->fMask & CMIC_MASK_UNICODE))
         {
             auto *ex = reinterpret_cast<CMINVOKECOMMANDINFOEX *>(info);
-            if (!ex->lpVerbW || IS_INTRESOURCE(ex->lpVerbW) || _wcsicmp(ex->lpVerbW, Verb)) return E_INVALIDARG;
+            if (!ex->lpVerbW || IS_INTRESOURCE(ex->lpVerbW) || _wcsicmp(ex->lpVerbW, pack ? PackVerb : Verb)) return E_INVALIDARG;
         }
-        else if (_stricmp(info->lpVerb, "WinSquashfs.Eject")) return E_INVALIDARG;
-        return LaunchEject(drive);
+        else if (_stricmp(info->lpVerb, pack ? "WinSquashfs.Pack" : "WinSquashfs.Eject")) return E_INVALIDARG;
+        try { return pack ? LaunchPack(paths) : LaunchEject(drive); }
+        catch (...) { return E_FAIL; }
     }
     HRESULT STDMETHODCALLTYPE GetCommandString(UINT_PTR id, UINT type, UINT *, LPSTR text, UINT size) override
     {
         if (id != 0) return E_INVALIDARG;
         switch (type)
         {
-            case GCS_VERBW: return StringCchCopyW(reinterpret_cast<LPWSTR>(text), size, Verb);
-            case GCS_VERBA: return StringCchCopyA(text, size, "WinSquashfs.Eject");
+            case GCS_VERBW: return StringCchCopyW(reinterpret_cast<LPWSTR>(text), size, pack ? PackVerb : Verb);
+            case GCS_VERBA: return StringCchCopyA(text, size, pack ? "WinSquashfs.Pack" : "WinSquashfs.Eject");
             case GCS_HELPTEXTW: return StringCchCopyW(reinterpret_cast<LPWSTR>(text), size,
-                Chinese() ? L"卸载此 SquashFS 镜像并释放盘符" : L"Unmount this SquashFS image and release the drive letter");
-            case GCS_HELPTEXTA: return StringCchCopyA(text, size, "Unmount this SquashFS image");
+                pack ? (Chinese() ? L"将所选文件及文件夹创建为一个存档" : L"Create one archive from the selected files and folders") :
+                (Chinese() ? L"卸载此镜像并释放盘符" : L"Unmount this image and release the drive letter"));
+            case GCS_HELPTEXTA: return StringCchCopyA(text, size, pack ? "Create one archive from the selection" : "Unmount this image");
             case GCS_VALIDATEA: case GCS_VALIDATEW: return S_OK;
             default: return E_NOTIMPL;
         }
@@ -236,8 +338,9 @@ public:
 class Factory final : public IClassFactory
 {
     volatile LONG refs = 1;
+    bool pack;
 public:
-    Factory() { InterlockedIncrement(&objects); }
+    explicit Factory(bool create) : pack(create) { InterlockedIncrement(&objects); }
     ~Factory() { InterlockedDecrement(&objects); }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void **out) override
     {
@@ -260,7 +363,7 @@ public:
         if (!out) return E_POINTER;
         *out = nullptr;
         if (outer) return CLASS_E_NOAGGREGATION;
-        auto *object = new(std::nothrow) EjectMenu;
+        auto *object = new(std::nothrow) EjectMenu(pack);
         if (!object) return E_OUTOFMEMORY;
         HRESULT hr = object->QueryInterface(iid, out);
         object->Release();
@@ -293,8 +396,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI DllGetClassObject(REFCLSID clsid
 {
     if (!out) return E_POINTER;
     *out = nullptr;
-    if (!IsEqualCLSID(clsid, EjectClass)) return CLASS_E_CLASSNOTAVAILABLE;
-    auto *factory = new(std::nothrow) Factory;
+    bool pack=IsEqualCLSID(clsid,PackClass);
+    if (!pack && !IsEqualCLSID(clsid, EjectClass)) return CLASS_E_CLASSNOTAVAILABLE;
+    auto *factory = new(std::nothrow) Factory(pack);
     if (!factory) return E_OUTOFMEMORY;
     HRESULT hr = factory->QueryInterface(iid, out);
     factory->Release();
