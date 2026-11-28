@@ -18,8 +18,8 @@
 namespace {
 const CLSID EjectClass = {0x9b20352f,0x1bc4,0x48e6,{0xae,0x3b,0x14,0x6f,0x32,0x65,0x7d,0xa9}};
 const CLSID PackClass = {0x57ab2c11,0x7881,0x46eb,{0x9a,0xf8,0x33,0x19,0x4e,0xdf,0x60,0x71}};
-constexpr wchar_t Verb[] = L"WinSquashfs.Eject";
-constexpr wchar_t PackVerb[] = L"WinSquashfs.Pack";
+constexpr wchar_t Verb[] = L"WinArchiveFSPro.Eject";
+constexpr wchar_t PackVerb[] = L"WinArchiveFSPro.Pack";
 HINSTANCE module = nullptr;
 volatile LONG objects = 0;
 volatile LONG locks = 0;
@@ -28,7 +28,7 @@ bool Chinese()
 {
     DWORD language = 0, size = sizeof(language), type = 0;
     HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WinSquashfs", 0,
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WinArchiveFSPro", 0,
         KEY_QUERY_VALUE | KEY_WOW64_64KEY, &key) == ERROR_SUCCESS)
     {
         LONG result = RegQueryValueExW(key, L"InstallerLanguage", nullptr, &type,
@@ -67,11 +67,14 @@ bool ActiveMount(const wchar_t (&drive)[4])
         ConvertSidToStringSidW(static_cast<TOKEN_USER *>(buffer)->User.Sid, &sid))
     {
         DWORD session = 0;
-        wchar_t pipe[512];
+        wchar_t event[512];
         if (ProcessIdToSessionId(GetCurrentProcessId(), &session) &&
-            SUCCEEDED(StringCchPrintfW(pipe, ARRAYSIZE(pipe),
-                L"\\\\.\\pipe\\WinSquashfs.Eject.%ls.%lu.%lc", sid, session, drive[0])))
-            ready = WaitNamedPipeW(pipe, 1) != FALSE;
+            SUCCEEDED(StringCchPrintfW(event, ARRAYSIZE(event),
+                L"Local\\WinArchiveFSPro.Eject.%ls.%lu.%lc.Stop", sid, session, drive[0])))
+        {
+            HANDLE handle = OpenEventW(EVENT_MODIFY_STATE, FALSE, event);
+            if (handle) { ready = true; CloseHandle(handle); }
+        }
     }
     if (sid) LocalFree(sid);
     if (buffer) LocalFree(buffer);
@@ -79,7 +82,7 @@ bool ActiveMount(const wchar_t (&drive)[4])
     if (!ready) return false;
     wchar_t fs[64] = {};
     return GetVolumeInformationW(drive, nullptr, 0, nullptr, nullptr, nullptr, fs, ARRAYSIZE(fs)) &&
-        _wcsicmp(fs, L"SquashFS") == 0;
+        _wcsicmp(fs, L"ArchiveFS") == 0;
 }
 
 bool ValidPidl(const BYTE *bytes, SIZE_T size, UINT offset)
@@ -225,7 +228,7 @@ HRESULT LaunchPack(const std::vector<std::wstring> &paths)
     wchar_t *separator=wcsrchr(exe,L'\\');
     if(!n || n>=ARRAYSIZE(exe) || !separator){DeleteFileW(list);return E_FAIL;}
     separator[1]=0;
-    HRESULT hr=StringCchCatW(exe,ARRAYSIZE(exe),L"WinSquashfs.exe");
+    HRESULT hr=StringCchCatW(exe,ARRAYSIZE(exe),L"WinArchiveFSPro.exe");
     if(SUCCEEDED(hr))hr=StringCchPrintfW(command,ARRAYSIZE(command),L"\"%ls\" --pack-list \"%ls\"",exe,list);
     STARTUPINFOW si={};si.cb=sizeof(si);PROCESS_INFORMATION pi={};
     if(FAILED(hr)||!CreateProcessW(exe,command,nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))
@@ -243,7 +246,7 @@ HRESULT LaunchEject(const wchar_t (&drive)[4])
     wchar_t *separator = wcsrchr(exe, L'\\');
     if (!separator) return HRESULT_FROM_WIN32(ERROR_BAD_PATHNAME);
     separator[1] = 0;
-    HRESULT hr = StringCchCatW(exe, ARRAYSIZE(exe), L"WinSquashfs.exe");
+    HRESULT hr = StringCchCatW(exe, ARRAYSIZE(exe), L"WinArchiveFSPro.exe");
     if (FAILED(hr)) return hr;
     wchar_t command[32768];
     hr = StringCchPrintfW(command, ARRAYSIZE(command), L"\"%ls\" --eject %lc:", exe, drive[0]);
@@ -296,8 +299,8 @@ public:
     {
         if ((flags & CMF_DEFAULTONLY) || first > last || (pack ? paths.empty() : !ActiveMount(drive)))
             return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 0);
-        const wchar_t *title = pack ? (Chinese() ? L"使用 WinSquashfs 创建存档" : L"Create archive with WinSquashfs") :
-            (Chinese() ? L"弹出（WinSquashfs）" : L"Eject (WinSquashfs)");
+        const wchar_t *title = pack ? (Chinese() ? L"使用 WinArchiveFSPro 创建存档" : L"Create archive with WinArchiveFSPro") :
+            (Chinese() ? L"弹出（WinArchiveFSPro）" : L"Eject (WinArchiveFSPro)");
         if (!InsertMenuW(menu, index, MF_BYPOSITION | MF_STRING, first, title))
             return HRESULT_FROM_WIN32(GetLastError());
         return MAKE_HRESULT(SEVERITY_SUCCESS, FACILITY_NULL, 1);
@@ -314,7 +317,7 @@ public:
             auto *ex = reinterpret_cast<CMINVOKECOMMANDINFOEX *>(info);
             if (!ex->lpVerbW || IS_INTRESOURCE(ex->lpVerbW) || _wcsicmp(ex->lpVerbW, pack ? PackVerb : Verb)) return E_INVALIDARG;
         }
-        else if (_stricmp(info->lpVerb, pack ? "WinSquashfs.Pack" : "WinSquashfs.Eject")) return E_INVALIDARG;
+        else if (_stricmp(info->lpVerb, pack ? "WinArchiveFSPro.Pack" : "WinArchiveFSPro.Eject")) return E_INVALIDARG;
         try { return pack ? LaunchPack(paths) : LaunchEject(drive); }
         catch (...) { return E_FAIL; }
     }
@@ -324,7 +327,7 @@ public:
         switch (type)
         {
             case GCS_VERBW: return StringCchCopyW(reinterpret_cast<LPWSTR>(text), size, pack ? PackVerb : Verb);
-            case GCS_VERBA: return StringCchCopyA(text, size, pack ? "WinSquashfs.Pack" : "WinSquashfs.Eject");
+            case GCS_VERBA: return StringCchCopyA(text, size, pack ? "WinArchiveFSPro.Pack" : "WinArchiveFSPro.Eject");
             case GCS_HELPTEXTW: return StringCchCopyW(reinterpret_cast<LPWSTR>(text), size,
                 pack ? (Chinese() ? L"将所选文件及文件夹创建为一个存档" : L"Create one archive from the selected files and folders") :
                 (Chinese() ? L"卸载此镜像并释放盘符" : L"Unmount this image and release the drive letter"));

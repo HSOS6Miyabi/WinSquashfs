@@ -1,7 +1,8 @@
 name: WinArchiveFSPro native build and integration
 on:
   push:
-    branches: ['refactor/native-cpp', 'refactor/native-cpp-validation']
+    branches: ['main', 'refactor/native-cpp', 'refactor/native-cpp-validation']
+    tags: ['v*']
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,14 +12,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - run: python3 native/cpp/scripts/prepare_native.py .
       - uses: actions/cache@v4
         id: erofs
         with:
           path: artifacts/erofs
-          key: archivefs-erofs-${{ hashFiles('native/erofs-reader.c', 'scripts/build-erofs.sh', 'native/cpp/scripts/erofs_binary.py', 'native/cpp/erofs_abi.c', 'native/cpp/scripts/prepare_native.py') }}
+          key: archivefs-erofs-${{ hashFiles('native/erofs-reader.c', 'scripts/build-erofs.sh', 'native/cpp/scripts/erofs_binary.py', 'native/cpp/erofs_abi.c') }}
       - if: steps.erofs.outputs.cache-hit != 'true'
-        run: bash scripts/build-erofs-cpp.sh
+        run: bash scripts/build-erofs.sh
       - uses: actions/upload-artifact@v4
         with:
           name: erofs-native
@@ -33,8 +33,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Prepare native source builds and installer
-        run: python native/cpp/scripts/prepare_native.py .
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -42,7 +40,7 @@ jobs:
           install: mingw-w64-x86_64-gcc squashfs-tools curl unzip
       - name: Build SquashFS reader and Explorer extension
         shell: msys2 {0}
-        run: bash scripts/build-native-cpp.sh
+        run: bash scripts/build-native.sh
       - uses: actions/download-artifact@v4
         with:
           name: erofs-native
@@ -115,10 +113,10 @@ jobs:
           if (!(Test-Path "$app/archivefs.exe")) { throw 'Missing native CLI' }
           python native/cpp/scripts/windows_integration.py $app
           if($LASTEXITCODE) { exit $LASTEXITCODE }
-          & ./tests/native-association.ps1 -AppDirectory $app
+          & ./tests/association.ps1 -AppDirectory $app
           if($LASTEXITCODE) { exit $LASTEXITCODE }
           $harness=Resolve-Path artifacts/native-tests/pack-shell.exe
-          & ./tests/native-pack-shell.ps1 -AppDirectory $app -Harness $harness
+          & ./tests/pack-shell.ps1 -AppDirectory $app -Harness $harness
           if($LASTEXITCODE) { exit $LASTEXITCODE }
           $gui=Start-Process "$app/WinArchiveFSPro.exe" -PassThru
           try {

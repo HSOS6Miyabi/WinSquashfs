@@ -6,7 +6,9 @@ commit=7e52cbffa83fbe9eb10bbf110cb12d503a048081
 git init .deps/erofs-utils
 git -C .deps/erofs-utils fetch --depth=1 https://github.com/erofs/erofs-utils.git "$commit"
 git -C .deps/erofs-utils checkout --detach FETCH_HEAD
-cp native/erofs-reader.c .deps/erofs-utils/winsqfs-reader.c
+python3 native/cpp/scripts/erofs_binary.py .deps/erofs-utils/lib/tar.c
+cp native/erofs-reader.c .deps/erofs-utils/erofs-reader-impl.c
+cp native/cpp/erofs_abi.c .deps/erofs-utils/winsqfs-reader.c
 cat >> .deps/erofs-utils/Dockerfile <<'DOCKER'
 
 FROM windows-builder AS winsqfs-builder

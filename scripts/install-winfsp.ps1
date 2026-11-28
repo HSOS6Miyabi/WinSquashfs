@@ -22,4 +22,3 @@ $required=[version]($versions.WinFspRuntimeVersion + '.0')
 if($installed.Major -ne $required.Major -or $installed -lt $required){throw "WinFsp $installed is incompatible; required $required"}
 Write-Host "WinFsp runtime: $installed at $dll"
 
-& (Join-Path $PSScriptRoot 'prepare-winfsp-binding.ps1')

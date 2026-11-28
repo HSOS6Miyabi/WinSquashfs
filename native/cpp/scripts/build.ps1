@@ -59,7 +59,18 @@ if (Test-Path "$prefix/bin/dwarfsck.exe") { Copy-Item "$prefix/bin/dwarfsck.exe"
 New-Item -ItemType Directory -Force "$dist/licenses","$dist/Assets" | Out-Null
 Copy-Item "$prefix/licenses/dwarfs.txt" "$dist/licenses/dwarfs.txt" -Force
 Copy-Item 'src/App/Assets/app-icon.ico','src/App/Assets/file-icon.ico' "$dist/Assets" -Force
-Copy-Item LICENSE "$dist/LICENSE" -Force
+Copy-Item LICENSE,README.md,README.zh-CN.md,THIRD-PARTY.md $dist -Force
+$redist=$env:VCToolsRedistDir
+if (!$redist) { throw 'VCToolsRedistDir is required for a portable Windows build' }
+$crt=Get-ChildItem (Join-Path $redist 'x64') -Directory | Where-Object Name -Match '^Microsoft\.VC[0-9]+\.CRT$' | Select-Object -First 1
+if (!$crt) { throw 'Visual C++ redistributable directory is missing' }
+Copy-Item (Join-Path $crt.FullName '*.dll') $dist -Force
+$licenseRoot=Join-Path $dist 'licenses/vcpkg'
+New-Item -ItemType Directory -Force $licenseRoot | Out-Null
+Get-ChildItem "$ports/x64-windows-static-md/share" -Directory | ForEach-Object {
+    $copyright=Join-Path $_.FullName 'copyright'
+    if(Test-Path $copyright){Copy-Item $copyright (Join-Path $licenseRoot ($_.Name+'.txt')) -Force}
+}
 New-Item -ItemType Directory -Force "$dist/prerequisites" | Out-Null
 Copy-Item artifacts/winfsp.msi "$dist/prerequisites/WinFsp.msi" -Force
 $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version

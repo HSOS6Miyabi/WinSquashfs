@@ -1,4 +1,4 @@
-﻿# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-only
 param([Parameter(Mandatory=$true)][string]$AppDirectory)
 $ErrorActionPreference='Stop'
 $AppDirectory=(Resolve-Path $AppDirectory).Path
@@ -7,12 +7,12 @@ Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 $prog='HKLM:\Software\Classes\WinSquashfs.Image\shell'
 $open=(Get-Item "$prog\open\command").GetValue('')
 $edit=(Get-Item "$prog\edit\command").GetValue('')
-if((Get-Item $prog).GetValue('') -ne 'open' -or $open -ne ('"'+$AppDirectory+'\WinSquashfs.exe" --unc "%1"') -or
-    $edit -ne ('"'+$AppDirectory+'\WinSquashfs.exe" --open "%1"')){throw "Incorrect shell association: $open / $edit"}
-$cli=Join-Path $AppDirectory 'winsqfs.exe'
-$root=Join-Path $env:TEMP ('WinSquashfsAssociation-'+[guid]::NewGuid().ToString('N'))
-$shareName='WinSquashfsAssoc-'+[guid]::NewGuid().ToString('N').Substring(0,8)
-$settings=Join-Path $env:LOCALAPPDATA 'WinSquashfs\unc.json'
+if((Get-Item $prog).GetValue('') -ne 'open' -or $open -ne ('"'+$AppDirectory+'\WinArchiveFSPro.exe" --unc "%1"') -or
+    $edit -ne ('"'+$AppDirectory+'\WinArchiveFSPro.exe" --open "%1"')){throw "Incorrect shell association: $open / $edit"}
+$cli=Join-Path $AppDirectory 'archivefs.exe'
+$root=Join-Path $env:TEMP ('WinArchiveFSProAssociation-'+[guid]::NewGuid().ToString('N'))
+$shareName='WinArchiveFSProAssoc-'+[guid]::NewGuid().ToString('N').Substring(0,8)
+$settings=Join-Path $env:LOCALAPPDATA 'WinArchiveFSPro\unc.json'
 $oldSettings=if(Test-Path $settings){[IO.File]::ReadAllBytes($settings)}else{$null}
 $alias='assoc-'+[guid]::NewGuid().ToString('N').Substring(0,8)
 $server=$null
@@ -60,13 +60,13 @@ try {
     $remoteProjected='\\sfs$\UNC\localhost\'+$shareName+'\远程镜像.sqfs'
     $opened+=Open-AssociatedImage $remote $remoteProjected
 
-    $existing=@(Get-Process WinSquashfs -ErrorAction SilentlyContinue|ForEach-Object Id)
+    $existing=@(Get-Process WinArchiveFSPro -ErrorAction SilentlyContinue|ForEach-Object Id)
     $shell.ShellExecute($image,'','','edit',1)
     $rootElement=[System.Windows.Automation.AutomationElement]::RootElement
     $mountCondition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'MountImage')
     $ready=$false
     for($i=0;$i -lt 120 -and !$ready;$i++){
-        foreach($process in @(Get-Process WinSquashfs -ErrorAction SilentlyContinue|Where-Object {$_.Id -notin $existing})){
+        foreach($process in @(Get-Process WinArchiveFSPro -ErrorAction SilentlyContinue|Where-Object {$_.Id -notin $existing})){
             $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$process.Id)
             $window=$rootElement.FindFirst([System.Windows.Automation.TreeScope]::Children,$condition)
             if($window){
@@ -76,7 +76,7 @@ try {
         }
         if(!$ready){Start-Sleep -Milliseconds 250}
     }
-    if(!$ready){throw 'Edit verb did not open a populated WinSquashfs browser'}
+    if(!$ready){throw 'Edit verb did not open a populated WinArchiveFSPro browser'}
     Write-Host 'PASS edit opens the graphical image browser'
 
     # The source is open in the GUI and the UNC namespace. Removing it must

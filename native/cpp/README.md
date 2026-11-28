@@ -18,7 +18,7 @@ For a Windows application build, set `ARCHIVEFS_WITH_DWARFS=ON` and provide the 
 
 ## Windows distribution
 
-From the project repository, run `python native/cpp/scripts/prepare_native.py .`, then build the native SquashFS and EROFS dependencies with `scripts/build-native-cpp.sh` and `scripts/build-erofs-cpp.sh`. Install WinFsp using `scripts/install-winfsp.ps1`, then use `native/cpp/scripts/build.ps1` in an MSVC developer environment. The build produces the native DLL, `archivefs.exe`, `WinArchiveFSPro.exe`, `WinArchiveFSPro.Unc.exe`, and the required compression tools in `artifacts/dist`.
+Build the native SquashFS and EROFS dependencies with `scripts/build-native.sh` (MSYS2) and `scripts/build-erofs.sh` (Linux with Docker). Install WinFsp using `scripts/install-winfsp.ps1`, then use `native/cpp/scripts/build.ps1` in an MSVC developer environment. The build produces the native DLL, `archivefs.exe`, `WinArchiveFSPro.exe`, `WinArchiveFSPro.Unc.exe`, and the required compression tools in `artifacts/dist`.
 
 The Windows workflow builds the official DwarFS library, runs the core tests and the real-archive integration tests, builds the installer, and verifies the installed application.
 
