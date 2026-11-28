@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: native-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/refactor/native-cpp-validation' }}
 jobs:
   erofs-native:
     runs-on: ubuntu-latest
@@ -273,8 +276,35 @@ jobs:
           path: artifacts/mount-comparison
           if-no-files-found: warn
   alternate-distributions:
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     uses: ./.github/workflows/windows-native-decoders.yml
+  release-candidate:
+    if: github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, windows-core, installer-runtime, product-upgrade, linux-sanitizers, alternate-distributions]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: output
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x86
+          path: output
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-arm64
+          path: output
+      - name: Assemble and validate all release packages
+        run: |
+          version="$(python3 -c 'import xml.etree.ElementTree as E; print(E.parse("Directory.Build.props").findtext("./PropertyGroup/Version"))')"
+          bash scripts/package-release.sh output release "$version"
+          printf '%s\n' "$GITHUB_SHA" > release/SOURCE_COMMIT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinArchiveFSPro-release-candidate
+          path: release/
+          if-no-files-found: error
   release:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     needs: [windows, windows-core, installer-runtime, product-upgrade, linux-sanitizers, alternate-distributions]

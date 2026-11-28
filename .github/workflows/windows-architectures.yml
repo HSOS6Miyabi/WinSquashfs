@@ -9,6 +9,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: native-architecture-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/refactor/native-cpp-validation' }}
 jobs:
   core-and-ui:
     strategy:

@@ -30,7 +30,7 @@ function Find-KitFile([string]$name,[string]$suffix){
 $km=(Find-KitFile fltKernel.h '\km\fltKernel.h').Directory.FullName
 $shared=(Find-KitFile ntdef.h '\shared\ntdef.h').Directory.FullName
 $libs=(Find-KitFile ntoskrnl.lib "\km\$Architecture\ntoskrnl.lib").Directory.FullName
-foreach($name in @('fltmgr.lib','hal.lib','BufferOverflowFastFailK.lib')){
+foreach($name in @('fltmgr.lib','hal.lib','BufferOverflowFastFailK.lib','libcntpr.lib')){
     if(!(Test-Path (Join-Path $libs $name))){throw "Missing WDK library: $name"}
 }
 New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
@@ -46,7 +46,7 @@ $compile=@('/nologo','/c','/TC','/std:c17','/kernel','/GS','/Zl','/O2','/Oi','/W
     "/Fo$obj",(Join-Path $PSScriptRoot 'unc_filter.c'))+$include
 & $cl @compile
 if($LASTEXITCODE){exit $LASTEXITCODE}
-& $link /nologo /driver /subsystem:native /nodefaultlib /dynamicbase /nxcompat /integritycheck /opt:ref /opt:icf "/machine:$machine" "/entry:$entry" "/out:$driver" $obj (Join-Path $libs 'ntoskrnl.lib') (Join-Path $libs 'fltmgr.lib') (Join-Path $libs 'hal.lib') (Join-Path $libs 'BufferOverflowFastFailK.lib')
+& $link /nologo /driver /subsystem:native,10.0 /release /nodefaultlib /dynamicbase /nxcompat /integritycheck /opt:ref /opt:icf "/machine:$machine" "/entry:$entry" "/out:$driver" $obj (Join-Path $libs 'ntoskrnl.lib') (Join-Path $libs 'fltmgr.lib') (Join-Path $libs 'hal.lib') (Join-Path $libs 'BufferOverflowFastFailK.lib') (Join-Path $libs 'libcntpr.lib')
 if($LASTEXITCODE){exit $LASTEXITCODE}
 Remove-Item -LiteralPath $obj
 if($Altitude){

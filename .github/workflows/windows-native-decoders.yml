@@ -1,15 +1,5 @@
 name: Native Windows production decoders
 on:
-  push:
-    branches: ['refactor/native-cpp-validation', 'refactor/native-cpp']
-    paths:
-      - 'scripts/build-alternate-readers.sh'
-      - 'native/cpp/**'
-      - 'installer/**'
-      - 'tests/**'
-      - 'Directory.Build.props'
-      - 'scripts/install-winfsp.ps1'
-      - '.github/workflows/windows-native-decoders.yml'
   workflow_dispatch:
   workflow_call:
 permissions:
