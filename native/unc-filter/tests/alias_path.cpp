@@ -32,6 +32,10 @@ void rejected(std::u16string_view path,ArchiveFsAliasResult result,bool unqualif
 }
 int main(){
     try{
+        mapped(u"\\$sfs",u"\\Device\\Mup\\$sfs\\root");
+        mapped(u"\\$sfs\\",u"\\Device\\Mup\\$sfs\\root");
+        mapped(u"\\sfs$\\",u"\\Device\\Mup\\$sfs\\root");
+        mapped(u"\\Device\\Mup\\$sfs\\",u"\\Device\\Mup\\$sfs\\root");
         mapped(u"\\sfs.NAS\\backup\\a.tar.gz\\目录\\文件.bin",u"\\Device\\Mup\\sfs$\\UNC\\NAS\\backup\\a.tar.gz\\目录\\文件.bin");
         mapped(u"\\SFS.192.168.1.10\\share$",u"\\Device\\Mup\\sfs$\\UNC\\192.168.1.10\\share$");
         mapped(u"\\sfs.nas.example.localhost\\share\\",u"\\Device\\Mup\\sfs$\\UNC\\nas.example\\share\\",false);

@@ -52,3 +52,5 @@ See Microsoft's documentation for [minifilter reparsing](https://learn.microsoft
 and [filter altitude allocation](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/allocated-altitudes).
 
 Run the **Signed UNC filter live integration** workflow on a dedicated interactive Windows runner labeled `archivefs-kernel`, with the signed filter for the checked-out source and WinFsp already installed. It creates a temporary SMB share restricted to the test account, checks first access to a fresh host/share without alias registration, validates directory enumeration, concurrent reads and read-only access, and checks that generic UNC and ordinary SMB still work after unload and reload. It restores the previous UNC settings and deletes the temporary share. The user-mode agent reserves the unqualified host prefix when that package policy is enabled, preventing recursive access to the archive namespace from inside the generic network projection.
+
+The filter also reparses the exact server roots `\\$sfs\`, `\\sfs$\` and `\\sfs.localhost\` to the unified `\\$sfs\root` share. The root share can be browsed without installing the optional filter.

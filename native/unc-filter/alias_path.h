@@ -26,6 +26,7 @@ typedef struct ArchiveFsAlias {
     size_t host_length;
     size_t share_begin;
     size_t target_length;
+    int namespace_root;
 } ArchiveFsAlias;
 
 static inline ArchiveFsChar ArchiveFsLower(ArchiveFsChar ch)
@@ -98,6 +99,7 @@ static inline int ArchiveFsPathValid(const ArchiveFsChar *s, size_t n)
 
 #define ARCHIVEFS_ALIAS_TARGET "\\Device\\Mup\\sfs$\\UNC\\"
 #define ARCHIVEFS_ALIAS_TARGET_LENGTH (sizeof(ARCHIVEFS_ALIAS_TARGET) - 1u)
+#define ARCHIVEFS_NAMESPACE_ROOT "\\Device\\Mup\\$sfs\\root"
 
 static inline ArchiveFsAliasResult ArchiveFsParseAlias(const ArchiveFsChar *name, size_t n,
                                                         int include_unqualified,
@@ -105,10 +107,22 @@ static inline ArchiveFsAliasResult ArchiveFsParseAlias(const ArchiveFsChar *name
 {
     size_t begin = 1, server_end, host_begin, host_end, share, total;
     int qualified;
-    if (!name || !result || n < 6 || n > 32767 || name[0] != '\\')
+    if (!name || !result || n < 5 || n > 32767 || name[0] != '\\')
         return ArchiveFsAliasUnrelated;
     if (n > 12 && ArchiveFsAsciiEqual(name, 12, "\\device\\mup\\"))
         begin = 12;
+    {
+        size_t end = n;
+        if (end > begin && name[end - 1] == '\\') --end;
+        if (ArchiveFsAsciiEqual(name + begin, end - begin, "$sfs") ||
+            ArchiveFsAsciiEqual(name + begin, end - begin, "sfs$") ||
+            ArchiveFsAsciiEqual(name + begin, end - begin, "sfs.localhost")) {
+            result->host_begin = result->host_length = result->share_begin = 0;
+            result->target_length = sizeof(ARCHIVEFS_NAMESPACE_ROOT) - 1u;
+            result->namespace_root = 1;
+            return ArchiveFsAliasMatched;
+        }
+    }
     if (n - begin < 4 || !ArchiveFsAsciiEqual(name + begin, 4, "sfs."))
         return ArchiveFsAliasUnrelated;
     server_end = begin;
@@ -133,6 +147,7 @@ static inline ArchiveFsAliasResult ArchiveFsParseAlias(const ArchiveFsChar *name
     result->host_length = host_end - host_begin;
     result->share_begin = share;
     result->target_length = total;
+    result->namespace_root = 0;
     return ArchiveFsAliasMatched;
 }
 
@@ -141,6 +156,11 @@ static inline void ArchiveFsMakeAlias(const ArchiveFsChar *name, size_t n,
 {
     size_t i, pos = 0;
     const char prefix[] = ARCHIVEFS_ALIAS_TARGET;
+    const char root[] = ARCHIVEFS_NAMESPACE_ROOT;
+    if (alias->namespace_root) {
+        for (i = 0; i < sizeof(root) - 1; ++i) target[i] = (ArchiveFsChar)(unsigned char)root[i];
+        return;
+    }
     for (i = 0; i < sizeof(prefix) - 1; ++i) target[pos++] = (ArchiveFsChar)(unsigned char)prefix[i];
     for (i = 0; i < alias->host_length; ++i) target[pos++] = name[alias->host_begin + i];
     target[pos++] = '\\';
