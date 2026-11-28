@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "projection.hpp"
 #include "decoder_backend.hpp"
+#include "image_creation.hpp"
 #include "file_time.hpp"
 #include <condition_variable>
 #include <future>
@@ -22,6 +23,19 @@ namespace archivefs {
 namespace fs=std::filesystem;
 using Clock=std::chrono::steady_clock;
 ArchiveOpener make_archive_opener(fs::path decoders,std::size_t cache_bytes){return [decoders=std::move(decoders),cache_bytes](const fs::path& path,SourcePolicy policy){auto backend=open_decoder_backend(open_file_source(path,policy),decoders,cache_bytes);auto info=backend->info();auto page=recommended_page_size(info);return std::make_shared<ArchiveTree>(std::make_shared<ArchiveReader>(std::move(backend),cache_bytes,page));};}
+std::vector<fs::path> extract_batch(const std::vector<fs::path>& sources,const fs::path& directory,
+                                    const ArchiveOpener& opener,std::stop_token stop){
+    if(!opener)throw std::invalid_argument("missing archive opener");
+    auto outputs=plan_batch_outputs(sources,directory,u".extracted");
+    for(auto const& source:sources)if(!fs::is_regular_file(source))throw std::invalid_argument("source is not an archive file");
+    for(std::size_t i=0;i<sources.size();++i){
+        if(stop.stop_requested())throw std::runtime_error("operation cancelled");
+        auto tree=opener(sources[i],SourcePolicy::transient_handle);
+        if(!tree)throw std::runtime_error("archive opener returned no image");
+        tree->extract(tree->root(),outputs[i],stop);
+    }
+    return outputs;
+}
 struct ImagePool::Entry {std::u16string key;std::shared_future<std::shared_ptr<ArchiveTree>> future;std::size_t active=0;Clock::time_point idle=Clock::time_point::max();};
 struct ImagePool::State {
     State(ArchiveOpener fn,Settings cfg):opener(std::move(fn)),settings(cfg){}

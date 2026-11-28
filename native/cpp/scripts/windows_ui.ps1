@@ -60,6 +60,18 @@ try{
     }
     $images+=$image
   }
+  $batch=Join-Path $root 'batch'
+  New-Item -ItemType Directory $batch|Out-Null
+  Choose $w 'ImageFormat' 'SquashFS'
+  (Control $w 'SeparateArchives').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+  Set-Value $w 'PackOutput' $batch
+  Invoke-Control $w 'CreateImage'
+  $null=Wait-Until {(Test-Path "$batch\source.squashfs") -and (Test-Path "$batch\extra.txt.squashfs")} 'separate archive creation' 180
+  $null=Control $w 'CreateImage'
+  foreach($created in @("$batch\source.squashfs","$batch\extra.txt.squashfs")){
+    & $cli verify $created;if($LASTEXITCODE){throw "Invalid batch-created image: $created"}
+  }
+  Save-WindowScreenshot $p 'batch-create'
   Close-Gui
   $image=$images[0]
   $p=Start-Process $gui -ArgumentList @('--open',('"'+$image+'"')) -PassThru

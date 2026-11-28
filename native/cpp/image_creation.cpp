@@ -138,6 +138,41 @@ void write_tar(const std::vector<fs::path>& sources,const std::function<void(con
     }
     cancelled(stop);tar.check(archive_write_close(tar.value));
 }
+std::vector<fs::path> plan_batch_outputs(const std::vector<fs::path>& sources,const fs::path& directory,std::u16string_view suffix){
+    require(!sources.empty(),"no source files selected");
+    require(fs::is_directory(directory),"output directory does not exist");
+    auto output=fs::canonical(directory);
+    std::set<std::u16string,WindowsNameLess> names;
+    std::vector<fs::path> result;
+    for(auto const& input:sources){
+        require(fs::exists(input),"source does not exist");
+        auto source=fs::absolute(input).lexically_normal();
+        if(source.filename().empty()&&source!=source.root_path())source=source.parent_path();
+        auto filename=source.filename().u16string();
+        require(!filename.empty(),"source needs a file or directory name");
+        filename+=suffix;
+        require(names.insert(filename).second,"duplicate batch output name");
+        auto path=output/fs::path(filename);
+        require(!fs::exists(fs::symlink_status(path)),"batch output already exists");
+        result.push_back(std::move(path));
+    }
+    return result;
+}
+std::vector<fs::path> ImageCreator::create_batch(const std::vector<fs::path>& sources,const fs::path& directory,
+                                               CreationOptions options,LogSink log,std::stop_token stop)const{
+    const auto suffix=options.format==ArchiveFormat::squashfs?u".squashfs":options.format==ArchiveFormat::dwarfs?u".dwarfs":options.format==ArchiveFormat::erofs?u".erofs":u"";
+    require(*suffix!=0,"unknown archive format");
+    auto outputs=plan_batch_outputs(sources,directory,suffix);
+    // Check directory placement before starting any individual creation.
+    const auto parent=fs::canonical(directory);
+    for(auto const& source:sources)if(fs::is_directory(source))require(!beneath(fs::canonical(source),parent),"output must be outside the source directory");
+    for(std::size_t i=0;i<sources.size();++i){
+        cancelled(stop);
+        if(log)log("Creating "+to_utf8(outputs[i].u16string()));
+        create({sources[i]},outputs[i],options,log,stop);
+    }
+    return outputs;
+}
 void ImageCreator::create(const std::vector<fs::path>& sources,const fs::path& destination,CreationOptions options,LogSink log,std::stop_token stop)const{
     auto items=normalize(sources);auto output=fs::absolute(destination).lexically_normal();require(!fs::exists(fs::symlink_status(output)),"output already exists");require(fs::is_directory(output.parent_path()),"output directory does not exist");auto parent=fs::canonical(output.parent_path());for(auto& item:items)if(fs::is_directory(item))require(!beneath(fs::canonical(item),parent),"output must be outside the source directory");cancelled(stop);Workspace workspace(parent);auto image=workspace.path/"image";
     auto squash=[&](const fs::path& target,const CreationOptions& settings){Args args;for(auto& item:items)args.push_back(fs::path(item.generic_u16string()).native());args.push_back(fs::path(target.generic_u16string()).native());auto flags=settings.arguments();args.insert(args.end(),flags.begin(),flags.end());run_process(executable(tools_,"mksquashfs"),args,log,stop);};

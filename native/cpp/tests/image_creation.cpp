@@ -38,6 +38,13 @@ int main(int argc,char** argv){try{
     ImageCreator creator(tools,fs::path(argv[1]));
     for(auto format:{ArchiveFormat::squashfs,ArchiveFormat::dwarfs,ArchiveFormat::erofs})for(unsigned level=1;level<=8;++level){auto settings=CreationOptions::for_preset(format,static_cast<CompressionPreset>(level));require(!settings.arguments().empty(),"preset arguments");auto output=temp.p/(std::to_string(static_cast<int>(format))+"-"+std::to_string(level)+".image");creator.create({input,folder},output,settings,[](std::string_view line){std::cerr<<line<<'\n';});require(detect_format(*open_file_source(output))==format,"created image magic");if(format==ArchiveFormat::erofs){auto source=open_file_source(output);std::vector<char> data(bytes.size());source->read_exact(1028,std::as_writable_bytes(std::span(data)));require(data==bytes,"EROFS TAR transport corrupted binary data");}}
     auto options=CreationOptions::for_preset(ArchiveFormat::squashfs,CompressionPreset::balanced);throws([&]{creator.create({root},root/"nested.img",options);});throws([&]{creator.create({input},input,options);});std::stop_source cancelled;cancelled.request_stop();throws([&]{creator.create({input},temp.p/"cancelled.img",options,{},cancelled.get_token());});require(!fs::exists(temp.p/"cancelled.img"),"cancel output");
+    auto batch=temp.p/"batch";fs::create_directory(batch);
+    auto outputs=creator.create_batch({input,folder},batch,options);require(outputs.size()==2,"two separate archives");
+    require(outputs[0].filename()=="data.bin.squashfs"&&outputs[1].filename()=="folder.squashfs","batch output names");
+    for(auto const& output:outputs)require(detect_format(*open_file_source(output))==ArchiveFormat::squashfs,"batch output format");
+    throws([&]{creator.create_batch({input,folder},batch,options);});
+    auto collision=temp.p/"collision";fs::create_directory(collision);throws([&]{creator.create_batch({input,input},collision,options);});require(fs::is_empty(collision),"duplicate names checked before creation");
+    throws([&]{creator.create_batch({input},collision,options,{},cancelled.get_token());});require(fs::is_empty(collision),"cancelled batch has no output");
     std::set<std::string> logs;run_process(tool,{fs::path("echo").native()},[&](std::string_view l){logs.emplace(l);},{},[&](const auto& write){write(bytes.data(),bytes.size());});require(logs.contains("input=8193")&&logs.contains("done"),"pipe transport");throws([&]{run_process(tool,{fs::path("fail").native()});});
     // The child closes its input before consuming a large write. This must
     // return an exception, without SIGPIPE killing the parent.

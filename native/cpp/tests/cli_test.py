@@ -48,5 +48,16 @@ with tempfile.TemporaryDirectory(prefix='archivefs-cli-') as work:
         run('unpack', image, output, success=False)
         run('read', image, 'data.bin', -1, 1, success=False)
         run('read', image, 'data.bin', 0, 16777217, success=False)
+    extracted = directory / 'batch-extracted'
+    extracted.mkdir()
+    inputs = [directory / f'{name}.img' for name in ['SquashFS', 'DwarFS', 'EROFS']]
+    run('batch-unpack', extracted, *inputs)
+    for image in inputs:
+        assert (extracted / (image.name + '.extracted') / 'data.bin').read_bytes() == data
+    run('batch-unpack', extracted, *inputs, success=False)
+    empty = directory / 'duplicates'
+    empty.mkdir()
+    run('batch-unpack', empty, inputs[0], inputs[0], success=False)
+    assert not list(empty.iterdir())
     run('info', directory / 'missing.img', success=False)
 print('PASS CLI format dispatch, Unicode output, random reads, verification, extraction and argument validation')

@@ -2,6 +2,7 @@
 #include "archive_tree.hpp"
 #include "decoder_backend.hpp"
 #include "image_creation.hpp"
+#include "projection.hpp"
 #include <charconv>
 #include <clocale>
 #ifdef ARCHIVEFS_WITH_WINFSP
@@ -113,8 +114,8 @@ int cli(std::vector<std::u16string> args) {
         } else break;
     }
     if(args.size()==1&&(args[0]==u"--help"||args[0]==u"help")) {
-        std::cout<<language.tr("Usage: archivefs [--lang en-US|zh-CN|system] info|list|search|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n",
-            "用法：archivefs [--lang en-US|zh-CN|system] info|list|search|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n");return 0;
+        std::cout<<language.tr("Usage: archivefs [--lang en-US|zh-CN|system] info|list|search|read|verify|unpack|batch-unpack|pack|create|batch-create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n",
+            "用法：archivefs [--lang en-US|zh-CN|system] info|list|search|read|verify|unpack|batch-unpack|pack|create|batch-create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n");return 0;
     }
     if(args.size()==1&&(args[0]==u"--version"||args[0]==u"version")) {std::cout<<ARCHIVEFS_VERSION<<'\n';return 0;}
     if(args.empty()) throw UsageError("invalid command arguments");
@@ -133,11 +134,19 @@ int cli(std::vector<std::u16string> args) {
     if(command==u"serve"&&(args.size()==3||args.size()==4)){auto idle=args.size()==4?number(args[3]):60;if(idle>86400)throw std::invalid_argument("invalid idle timeout");ConsoleCancellation c;serve_share({args[1],args[2]},modules,static_cast<unsigned>(idle),c.stop.get_token());return 0;}
 #endif
     if(args.size()<2)throw UsageError("invalid command arguments");
-    if(command==u"create"||command==u"pack") {
+    if(command==u"batch-unpack"){
+        if(args.size()<3)throw UsageError("batch-unpack OUTPUT_DIRECTORY IMAGE...");
+        std::vector<std::filesystem::path> images;
+        for(std::size_t i=2;i<args.size();++i)images.emplace_back(args[i]);
+        auto outputs=extract_batch(images,args[1],make_archive_opener(modules));
+        for(auto const& p:outputs)std::cout<<to_utf8(p.u16string())<<'\n';
+        return 0;
+    }
+    if(command==u"create"||command==u"batch-create"||command==u"pack") {
         CreationOptions options;
         std::vector<std::filesystem::path> inputs;
         std::filesystem::path output;
-        if(command==u"create") {
+        if(command==u"create"||command==u"batch-create") {
             if(args.size()<5)throw UsageError("create FORMAT PRESET OUTPUT SOURCE...");
             auto format=args[1]==u"SquashFS"||args[1]==u"squashfs"?ArchiveFormat::squashfs:
                 args[1]==u"DwarFS"||args[1]==u"dwarfs"?ArchiveFormat::dwarfs:
@@ -149,7 +158,10 @@ int cli(std::vector<std::u16string> args) {
             if(args.size()!=3&&args.size()!=4)throw UsageError("pack SOURCE OUTPUT [CODEC]");
             inputs.emplace_back(args[1]);output=args[2];if(args.size()==4)options.codec=to_utf8(args[3]);
         }
-        ImageCreator(tools,modules).create(inputs,output,options,[](std::string_view line){std::cout<<line<<'\n';});
+        auto log=[](std::string_view line){std::cout<<line<<'\n';};
+        ImageCreator creator(tools,modules);
+        if(command==u"batch-create")creator.create_batch(inputs,output,options,log);
+        else creator.create(inputs,output,options,log);
         return 0;
     }
     if(!((command==u"info"||command==u"verify")&&args.size()==2) &&
