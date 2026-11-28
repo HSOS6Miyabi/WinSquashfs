@@ -35,7 +35,7 @@ Start the independent UNC agent in the application. It stays running when the GU
     \\sfs$\path\archive.dwarfs
     \\sfs$\UNC\NAS\backup\archive.erofs
 
-Both server names expose enabled drive mappings, the configured directory alias, and network shares. Explicit image paths are recognized by content. Source reads use the hosting process's Windows credentials. Transient local sources use opportunistic locks where available, with short-lived reads and identity checks otherwise. Changed sources invalidate their cached generations. Explicit drive mounts protect the source until ejected.
+Both server names expose enabled drive mappings, the configured directory alias, and network shares. Double-click a remote image or run `archivefs unc-alias IMAGE` to register an exact host/share alias such as `\\sfs.NAS.localhost\backup`. Registered aliases are restored at agent startup; `\\sfs$\UNC` remains the direct entry point for a new host or share. Explicit image paths are recognized by content. Source reads use the hosting process's Windows credentials. Transient local sources use opportunistic locks where available, with short-lived reads and identity checks otherwise. Changed sources invalidate their cached generations. Explicit drive mounts protect the source until ejected.
 
 ## Command line and development
 

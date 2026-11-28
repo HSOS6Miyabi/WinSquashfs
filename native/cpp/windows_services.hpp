@@ -25,6 +25,7 @@ void start_agent(std::stop_token stop={});
 void stop_agent(std::stop_token stop={});
 bool agent_running();
 int run_agent();
+std::u16string register_unc_alias(const std::filesystem::path& source,std::stop_token stop={});
 void open_unc(const std::filesystem::path& source,std::stop_token stop={});
 class MountedVolume {
 public:

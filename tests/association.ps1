@@ -57,7 +57,7 @@ try {
     $server=$shareName
     Copy-Item -LiteralPath $image -Destination "$root\远程镜像.sqfs"
     $remote='\\localhost\'+$shareName+'\远程镜像.sqfs'
-    $remoteProjected='\\sfs$\UNC\localhost\'+$shareName+'\远程镜像.sqfs'
+    $remoteProjected='\\sfs.localhost.localhost\'+$shareName+'\远程镜像.sqfs'
     $opened+=Open-AssociatedImage $remote $remoteProjected
 
     $existing=@(Get-Process WinArchiveFSPro -ErrorAction SilentlyContinue|ForEach-Object Id)

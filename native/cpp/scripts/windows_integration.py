@@ -99,6 +99,8 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
     share_name = 'archivefs-' + uuid.uuid4().hex[:10] + '$'
     settings_path = Path(os.environ['LOCALAPPDATA']) / 'WinArchiveFSPro' / 'unc.json'
     old_settings = settings_path.read_bytes() if settings_path.exists() else None
+    aliases_path = settings_path.parent / 'remote-aliases.json'
+    old_aliases = aliases_path.read_bytes() if aliases_path.exists() else None
     invoke('unc-stop')
     try:
         subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',
@@ -116,8 +118,14 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
                 projected = Path(f'\\\\{server}\\UNC\\localhost') / share_name / copy.name / '文件.bin'
                 wait_until(projected.is_file)
                 assert projected.read_bytes()==data
+            short_path = invoke('unc-alias',remote)
+            assert short_path.lower().startswith(('\\\\sfs.localhost.localhost\\'+share_name+'\\').lower()), short_path
+            alias_file = Path(short_path) / '文件.bin'
+            wait_until(alias_file.is_file)
+            assert alias_file.read_bytes()==data
             copy.unlink()
             wait_until(lambda: not projected.exists())
+            wait_until(lambda: not alias_file.exists())
         junction = root / 'junction'
         subprocess.run(['cmd.exe','/d','/c','mklink','/J',str(junction),str(root/'sources')],check=True,timeout=30)
         assert (junction/'文件.bin').read_bytes()==data
@@ -132,6 +140,10 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
         invoke('unc-stop')
         subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',
             f"Remove-SmbShare -Name '{share_name}' -Force -Confirm:$false -ErrorAction SilentlyContinue"],timeout=60)
+        if old_aliases is not None:
+            aliases_path.write_bytes(old_aliases)
+        else:
+            aliases_path.unlink(missing_ok=True)
         if old_settings is not None:
             settings_path.write_bytes(old_settings)
         else:

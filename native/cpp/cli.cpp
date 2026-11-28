@@ -113,8 +113,8 @@ int cli(std::vector<std::u16string> args) {
         } else break;
     }
     if(args.size()==1&&(args[0]==u"--help"||args[0]==u"help")) {
-        std::cout<<language.tr("Usage: archivefs [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-open|unc-status|serve|doctor ...\n",
-            "用法：archivefs [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-open|unc-status|serve|doctor ...\n");return 0;
+        std::cout<<language.tr("Usage: archivefs [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n",
+            "用法：archivefs [--lang en-US|zh-CN|system] info|list|read|verify|unpack|pack|create|mount|eject|unc-start|unc-stop|unc-path|unc-alias|unc-open|unc-status|serve|doctor ...\n");return 0;
     }
     if(args.size()==1&&(args[0]==u"--version"||args[0]==u"version")) {std::cout<<ARCHIVEFS_VERSION<<'\n';return 0;}
     if(args.empty()) throw UsageError("invalid command arguments");
@@ -125,6 +125,7 @@ int cli(std::vector<std::u16string> args) {
     if(command==u"unc-stop"&&args.size()==1){stop_agent();return 0;}
     if(command==u"unc-status"&&args.size()==1){std::cout<<(agent_running()?language.tr("Running","运行中"):language.tr("Stopped","已停止"))<<'\n';return 0;}
     if(command==u"unc-path"&&args.size()==2){std::cout<<to_utf8(Settings::load().unc_path(args[1]))<<'\n';return 0;}
+    if(command==u"unc-alias"&&args.size()==2){ConsoleCancellation c;std::cout<<to_utf8(register_unc_alias(args[1],c.stop.get_token()))<<'\n';return 0;}
     if(command==u"unc-open"&&args.size()==2){ConsoleCancellation c;open_unc(args[1],c.stop.get_token());return 0;}
     if(command==u"eject"&&args.size()==2){eject_volume(args[1]);return 0;}
     if(command==u"mount"&&(args.size()==2||args.size()==3)){ConsoleCancellation c;MountedVolume mount(args[1],modules,args.size()==3?args[2]:u"");std::cout<<to_utf8(mount.drive())<<std::endl;mount.wait(c.stop.get_token());return 0;}

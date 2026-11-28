@@ -18,6 +18,8 @@
 #include <cwctype>
 #include <utility>
 #include <thread>
+#include <map>
+#include <set>
 namespace archivefs {
 namespace fs=std::filesystem;
 using namespace std::chrono_literals;
@@ -73,8 +75,196 @@ void open_in_explorer(std::u16string_view path){auto p=wide(path);auto result=Sh
 bool agent_running(){Handle h(OpenEventW(SYNCHRONIZE,FALSE,agent_name(L"Ready").c_str()));return h&&WaitForSingleObject(h.value,0)==WAIT_OBJECT_0;}
 void start_agent(std::stop_token stop){cancelled(stop);if(agent_running())return;winfsp_runtime_info();auto executable=application_directory()/L"WinArchiveFSPro.Unc.exe";auto command=L"\""+executable.wstring()+L"\"";STARTUPINFOW si{};si.cb=sizeof(si);PROCESS_INFORMATION pi{};if(!CreateProcessW(executable.c_str(),command.data(),nullptr,nullptr,FALSE,DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP,nullptr,executable.parent_path().c_str(),&si,&pi))fail("start UNC agent");Handle proc(pi.hProcess),thread(pi.hThread);std::stop_callback cancel_start(stop,[&] noexcept {try{if(!agent_running())TerminateProcess(proc.value,1);}catch(...){TerminateProcess(proc.value,1);}});for(unsigned i=0;i<300;++i){if(agent_running())return;cancelled(stop);if(WaitForSingleObject(proc.value,50)==WAIT_OBJECT_0){if(instance_stopped())break;std::this_thread::sleep_for(50ms);}}if(!agent_running()&&WaitForSingleObject(proc.value,0)==WAIT_TIMEOUT)TerminateProcess(proc.value,1);throw std::runtime_error("UNC agent did not become ready; see unc.log in application settings");}
 void stop_agent(std::stop_token stop){for(unsigned i=0;i<300;++i){cancelled(stop);Handle event(OpenEventW(EVENT_MODIFY_STATE,FALSE,agent_name(L"Stop").c_str()));if(event)SetEvent(event.value);if(instance_stopped())return;std::this_thread::sleep_for(50ms);}throw std::runtime_error("UNC agent did not stop");}
-int run_agent(){winfsp_runtime_info();UserSecurity security;Handle instance(CreateMutexW(&security.attributes,FALSE,agent_name(L"Instance").c_str()));if(!instance)fail("CreateMutexW");auto ownership=WaitForSingleObject(instance.value,0);if(ownership==WAIT_TIMEOUT)return 0;if(ownership!=WAIT_OBJECT_0&&ownership!=WAIT_ABANDONED)fail("WaitForSingleObject");struct Release{HANDLE h;~Release(){ReleaseMutex(h);}}release{instance.value};Handle stop(CreateEventW(&security.attributes,TRUE,FALSE,agent_name(L"Stop").c_str())),ready(CreateEventW(&security.attributes,TRUE,FALSE,agent_name(L"Ready").c_str()));if(!stop||!ready)fail("CreateEventW");ResetEvent(ready.value);ResetEvent(stop.value);auto settings=Settings::load();auto pool=std::make_shared<ImagePool>(make_archive_opener(application_directory(),static_cast<std::size_t>(settings.cache_mib)<<20),ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images});std::vector<std::unique_ptr<NativeMount>> mounts;for(auto& share:settings.shares())mounts.push_back(std::make_unique<NativeMount>(unc_projection(share,pool),u"",u"\\"+share.server+u"\\"+share.name));if(!SetEvent(ready.value))fail("SetEvent");auto rv=WaitForSingleObject(stop.value,INFINITE);ResetEvent(ready.value);if(rv!=WAIT_OBJECT_0)fail("wait for UNC stop");return 0;}
-void open_unc(const fs::path& source,std::stop_token stop){auto path=Settings::load().unc_path(source);start_agent(stop);cancelled(stop);auto attributes=GetFileAttributesW(wide(path).c_str());if(attributes==INVALID_FILE_ATTRIBUTES)fail("open UNC image");if(!(attributes&FILE_ATTRIBUTE_DIRECTORY))throw std::runtime_error("UNC path is not an image directory");open_in_explorer(path);}
+
+namespace {
+struct RemoteAlias {
+    std::u16string host,share;
+    std::u16string server(bool qualified=true)const{
+        return u"sfs."+host+(qualified?u".localhost":u"");
+    }
+    std::u16string prefix(bool qualified=true)const{
+        return u"\\"+server(qualified)+u"\\"+share;
+    }
+    Share projection(bool qualified=true)const{
+        return {share,fs::path(u"\\\\"+host+u"\\"+share+u"\\"),false,server(qualified)};
+    }
+};
+bool alias_component(std::u16string_view value){
+    return !value.empty()&&value.size()<=255&&value!=u"."&&value!=u".."&&
+        value.back()!=u'.'&&value.back()!=u' '&&
+        std::none_of(value.begin(),value.end(),[](char16_t ch){
+            return ch<32||std::u16string_view(u"\\/:*?\"<>|").find(ch)!=std::u16string_view::npos;
+        });
+}
+bool equal_name(std::u16string_view a,std::u16string_view b){
+    WindowsNameLess less;return !less(a,b)&&!less(b,a);
+}
+bool reserved_host(std::u16string_view host){
+    if(equal_name(host,u"sfs$")||equal_name(host,u"sfs.localhost"))return true;
+    if(host.size()>=14&&equal_name(host.substr(0,4),u"sfs.")&&
+        equal_name(host.substr(host.size()-10),u".localhost"))return true;
+    return false;
+}
+RemoteAlias parse_alias(std::u16string host,std::u16string share){
+    if(!alias_component(host)||!alias_component(share)||reserved_host(host))
+        throw std::invalid_argument("invalid remote UNC source");
+    return {std::move(host),std::move(share)};
+}
+std::optional<RemoteAlias> source_alias(const fs::path& source){
+    auto value=fs::absolute(source).lexically_normal().u16string();
+    if(value.starts_with(u"\\\\?\\UNC\\"))value=u"\\\\"+value.substr(8);
+    if(!value.starts_with(u"\\\\")||value.starts_with(u"\\\\?\\")||
+       value.starts_with(u"\\\\.\\"))return std::nullopt;
+    auto host_end=value.find(u'\\',2);
+    if(host_end==std::u16string::npos)return std::nullopt;
+    auto share_end=value.find(u'\\',host_end+1);
+    if(share_end==std::u16string::npos||share_end==value.size()-1)return std::nullopt;
+    return parse_alias(value.substr(2,host_end-2),value.substr(host_end+1,share_end-host_end-1));
+}
+class AliasLock {
+public:
+    explicit AliasLock():security_(),handle_(CreateMutexW(&security_.attributes,FALSE,agent_name(L"AliasRegistry").c_str())){
+        if(!handle_)fail("create alias registry mutex");
+        auto result=WaitForSingleObject(handle_.value,10000);
+        if(result!=WAIT_OBJECT_0&&result!=WAIT_ABANDONED)throw std::runtime_error("remote alias registry is busy");
+    }
+    ~AliasLock(){ReleaseMutex(handle_.value);}
+private:
+    UserSecurity security_;Handle handle_;
+};
+fs::path alias_requests(){return settings_directory()/L"remote-aliases.json";}
+fs::path alias_status(){
+    DWORD session=0;if(!ProcessIdToSessionId(GetCurrentProcessId(),&session))fail("get session ID");
+    return settings_directory()/(L"remote-aliases-active-"+std::to_wstring(session)+L".json");
+}
+nlohmann::json read_alias_json(const fs::path& file){
+    if(!fs::exists(file))return nlohmann::json::array();
+    if(fs::file_size(file)>4u<<20)throw std::runtime_error("remote alias registry is too large");
+    std::ifstream stream(file,std::ios::binary);
+    auto json=nlohmann::json::parse(stream);
+    if(!json.is_array())throw std::runtime_error("invalid remote alias registry");
+    return json;
+}
+void write_alias_json(const fs::path& file,const nlohmann::json& json){
+    fs::create_directories(file.parent_path());
+    auto temp=file;temp+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";
+    struct Cleanup{fs::path p;~Cleanup(){std::error_code ec;fs::remove(p,ec);}}cleanup{temp};
+    {std::ofstream stream(temp,std::ios::binary|std::ios::trunc);
+        stream.exceptions(std::ios::failbit|std::ios::badbit);stream<<json.dump(2)<<'\n';stream.close();}
+    if(!MoveFileExW(temp.c_str(),file.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
+        fail("save remote alias registry");
+}
+void request_alias(const RemoteAlias& alias){
+    AliasLock lock;
+    auto requests=read_alias_json(alias_requests());
+    for(auto& row:requests)
+        if(equal_name(to_utf16(row.at("Host").get<std::string>()),alias.host)&&
+           equal_name(to_utf16(row.at("Share").get<std::string>()),alias.share))return;
+    requests.push_back({{"Host",to_utf8(alias.host)},{"Share",to_utf8(alias.share)}});
+    write_alias_json(alias_requests(),requests);
+}
+bool alias_active(std::u16string_view prefix){
+    AliasLock lock;
+    for(auto& value:read_alias_json(alias_status()))
+        if(equal_name(to_utf16(value.get<std::string>()),prefix))return true;
+    return false;
+}
+class RemoteAliasMounts {
+public:
+    explicit RemoteAliasMounts(std::shared_ptr<ImagePool> pool,const std::vector<Share>& builtin):pool_(std::move(pool)){
+        for(auto& share:builtin)reserved_.insert(u"\\"+share.server+u"\\"+share.name);
+    }
+    void refresh(){
+        AliasLock lock;
+        auto requests=read_alias_json(alias_requests());
+        for(auto& row:requests){
+            auto alias=parse_alias(to_utf16(row.at("Host").get<std::string>()),to_utf16(row.at("Share").get<std::string>()));
+            for(bool qualified:{true,false}){
+                auto prefix=alias.prefix(qualified);
+                if(prefix.size()>=192||reserved_.contains(prefix)||mounts_.contains(prefix))continue;
+                try{
+                    auto share=alias.projection(qualified);
+                    auto mount=std::make_unique<NativeMount>(unc_projection(share,pool_),u"",prefix);
+                    mounts_.emplace(std::move(prefix),std::move(mount));
+                }catch(const std::exception&){/* The generic UNC namespace remains available. */}
+            }
+        }
+        auto active=nlohmann::json::array();
+        for(auto& [prefix,mount]:mounts_)active.push_back(to_utf8(prefix));
+        write_alias_json(alias_status(),active);
+    }
+    ~RemoteAliasMounts(){
+        try{AliasLock lock;std::error_code ec;fs::remove(alias_status(),ec);}catch(...){}
+    }
+private:
+    std::shared_ptr<ImagePool> pool_;
+    std::set<std::u16string,WindowsNameLess> reserved_;
+    std::map<std::u16string,std::unique_ptr<NativeMount>,WindowsNameLess> mounts_;
+};
+}
+
+int run_agent(){
+    winfsp_runtime_info();
+    UserSecurity security;
+    Handle instance(CreateMutexW(&security.attributes,FALSE,agent_name(L"Instance").c_str()));
+    if(!instance)fail("CreateMutexW");
+    auto ownership=WaitForSingleObject(instance.value,0);
+    if(ownership==WAIT_TIMEOUT)return 0;
+    if(ownership!=WAIT_OBJECT_0&&ownership!=WAIT_ABANDONED)fail("WaitForSingleObject");
+    struct Release{HANDLE h;~Release(){ReleaseMutex(h);}}release{instance.value};
+    Handle stop(CreateEventW(&security.attributes,TRUE,FALSE,agent_name(L"Stop").c_str())),
+        ready(CreateEventW(&security.attributes,TRUE,FALSE,agent_name(L"Ready").c_str())),
+        aliases(CreateEventW(&security.attributes,FALSE,FALSE,agent_name(L"AliasesChanged").c_str()));
+    if(!stop||!ready||!aliases)fail("CreateEventW");
+    ResetEvent(ready.value);ResetEvent(stop.value);
+    auto settings=Settings::load();
+    auto pool=std::make_shared<ImagePool>(make_archive_opener(application_directory(),
+        static_cast<std::size_t>(settings.cache_mib)<<20),
+        ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images});
+    auto shares=settings.shares();
+    std::vector<std::unique_ptr<NativeMount>> mounts;
+    for(auto& share:shares)mounts.push_back(std::make_unique<NativeMount>(
+        unc_projection(share,pool),u"",u"\\"+share.server+u"\\"+share.name));
+    RemoteAliasMounts remote(pool,shares);
+    try{remote.refresh();}catch(const std::exception&){}
+    if(!SetEvent(ready.value))fail("SetEvent");
+    struct ResetReady{HANDLE event;~ResetReady(){ResetEvent(event);}}reset_ready{ready.value};
+    HANDLE events[]{stop.value,aliases.value};
+    for(;;){
+        auto result=WaitForMultipleObjects(2,events,FALSE,INFINITE);
+        if(result==WAIT_OBJECT_0)break;
+        if(result!=WAIT_OBJECT_0+1)fail("wait for UNC agent");
+        try{remote.refresh();}catch(const std::exception&){}
+    }
+    return 0;
+}
+std::u16string register_unc_alias(const fs::path& source,std::stop_token stop){
+    auto fallback=Settings::load().unc_path(source);
+    auto alias=source_alias(source);
+    if(!alias)return fallback;
+    start_agent(stop);
+    cancelled(stop);
+    auto preferred=alias->prefix();
+    if(preferred.size()>=192)return fallback;
+    request_alias(*alias);
+    Handle changed(OpenEventW(EVENT_MODIFY_STATE,FALSE,agent_name(L"AliasesChanged").c_str()));
+    if(!changed)throw std::runtime_error("remote alias registry is unavailable");
+    if(!SetEvent(changed.value))fail("notify remote alias registry");
+    for(unsigned i=0;i<100;++i){
+        cancelled(stop);
+        if(alias_active(preferred)){
+            auto normalized=source;
+            auto value=normalized.u16string();
+            if(value.starts_with(u"\\\\?\\UNC\\"))normalized=fs::path(u"\\\\"+value.substr(8));
+            if(auto path=image_unc_path(alias->projection(),normalized))return *path;
+            break;
+        }
+        if(!agent_running())break;
+        std::this_thread::sleep_for(100ms);
+    }
+    return fallback;
+}
+void open_unc(const fs::path& source,std::stop_token stop){auto path=register_unc_alias(source,stop);start_agent(stop);cancelled(stop);auto attributes=GetFileAttributesW(wide(path).c_str());if(attributes==INVALID_FILE_ATTRIBUTES)fail("open UNC image");if(!(attributes&FILE_ATTRIBUTE_DIRECTORY))throw std::runtime_error("UNC path is not an image directory");open_in_explorer(path);}
 struct MountedVolume::Impl {
     std::unique_ptr<NativeMount> mount;fs::path source_path;std::u16string point;Handle stop,done;std::jthread worker;std::mutex mutex;
     Impl(const fs::path& source,const fs::path& decoders,std::u16string drive):source_path(fs::absolute(source)){winfsp_runtime_info();mount=std::make_unique<NativeMount>(mount_projection(make_archive_opener(decoders)(source,SourcePolicy::protected_handle)),std::move(drive));point=mount->mount_point();UserSecurity security;stop.value=CreateEventW(&security.attributes,TRUE,FALSE,eject_name(point,L"Stop").c_str());done.value=CreateEventW(&security.attributes,TRUE,FALSE,eject_name(point,L"Done").c_str());if(!stop||!done)fail("create eject events");ResetEvent(stop.value);ResetEvent(done.value);worker=std::jthread([this]{WaitForSingleObject(stop.value,INFINITE);std::lock_guard lock(mutex);mount->unmount();SetEvent(done.value);});}

@@ -93,7 +93,19 @@ std::vector<ProjectedNodePtr> archive_children(const ProjectedNodePtr& parent){i
 bool projected_host(std::u16string_view host){return equal(host,u"sfs$")||equal(host,u"sfs.localhost")||(host.size()>4&&equal(host.substr(0,4),u"sfs.")&&host.size()>=10&&equal(host.substr(host.size()-10),u".localhost"));}
 bool projected_source(const fs::path& path){
 #ifdef _WIN32
-    auto value=path.u16string();if(value.starts_with(u"\\\\?\\UNC\\"))value=u"\\\\"+value.substr(8);if(value.starts_with(u"\\\\")){auto end=value.find(u'\\',2);return projected_host(std::u16string_view(value).substr(2,end==std::u16string::npos?end:end-2));}
+    auto value=path.u16string();if(value.starts_with(u"\\\\?\\UNC\\"))value=u"\\\\"+value.substr(8);if(value.starts_with(u"\\\\")){
+        auto end=value.find(u'\\',2);auto host=std::u16string_view(value).substr(2,end==std::u16string::npos?end:end-2);
+        if(projected_host(host))return true;
+        if(host.size()>4&&equal(host.substr(0,4),u"sfs.")&&end!=std::u16string::npos){
+            auto share_end=value.find(u'\\',end+1);
+            auto root=value.substr(0,share_end==std::u16string::npos?value.size():share_end);
+            if(root.back()!=u'\\')root+=u'\\';
+            wchar_t format[64]{};
+            if(GetVolumeInformationW(fs::path(root).c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64))
+                return !_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS");
+        }
+        return false;
+    }
     auto root=path.root_path();if(!root.empty()){wchar_t format[64]{};if(GetVolumeInformationW(root.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)){if(_wcsicmp(format,L"ArchiveFS")==0||_wcsicmp(format,L"SquashFS")==0)return true;}}
 #else
     (void)path;
