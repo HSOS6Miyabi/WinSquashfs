@@ -101,7 +101,7 @@ rewrite("lib/sqfs/meta_writer.c", [
 # POSIX getsubopt returns the unmatched token through valuep. This is
 # required for flag-only compressor options such as extreme and BCJ filters.
 rewrite("lib/compat/getsubopt.c", [
-    ("\\treturn -1;\\n}", "\\t*val = s;\\n\\treturn -1;\\n}"),
+    ("\treturn -1;\n}", "\t*val = s;\n\treturn -1;\n}"),
 ])
 rewrite("lib/common/parse_size.c", [
     ("\t\tacc /= 100;\n\t\tbreak;", "\t\tacc /= 100;\n\t\t++in;\n\t\tbreak;"),
