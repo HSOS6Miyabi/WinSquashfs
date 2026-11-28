@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "windows_services.hpp"
 #include "windows_atomic_file.hpp"
+#include "remote_control.hpp"
 #include <wincrypt.h>
 #include <nlohmann/json.hpp>
 #include <set>
@@ -66,15 +67,44 @@ void save_remote_connections(const std::vector<RemoteConnection>& connections){
     for(auto& c:connections)j.push_back({{"name",c.name},{"protocol",std::string(remote_protocol_name(c.protocol))},{"endpoint",c.endpoint},{"root",c.root},{"username",c.username},{"region",c.region},{"bucket",c.bucket},{"host_key",c.host_key},{"private_key",c.private_key},{"shell_root",c.shell_root},{"ca_file",c.ca_file},{"read_only",c.read_only},{"ssh_helper",c.ssh_helper},{"sudo",c.sudo},{"partial_put",c.partial_put},{"implicit_tls",c.implicit_tls},{"cache_mode",c.cache_mode},{"timeout_seconds",c.timeout_seconds},{"metadata_seconds",c.metadata_seconds},{"cache_mib",c.cache_mib},{"read_cache_mib",c.read_cache_mib},{"credentials",protect(c)}});
     detail::write_text_atomic(settings_directory()/L"remote-connections.json",j.dump(2)+"\n","Save remote connections");
 }
-void copy_remote_file(std::string_view protocol,std::string_view connection,std::string_view from,std::string_view to,bool replace){
-    auto profiles=load_remote_connections();auto p=parse_remote_protocol(protocol);
-    for(auto& c:profiles){
-        if(c.protocol!=p||c.name!=connection)continue;
-        if(c.read_only)throw RemoteFailure(RemoteError::permission,"Remote connection is read-only");
-        auto transport=make_remote_transport(c);validate_remote_path(from);validate_remote_path(to);
-        if(!transport->copy(from,to,replace))throw RemoteFailure(RemoteError::unsupported,"Server-side copy is unavailable");
-        return;
+namespace {
+// Use names displayed in the mounted namespace, separated by slashes.
+std::u16string projected_path(std::string_view connection,std::string_view raw){
+    validate_remote_path(raw);
+    auto path=u"\\"+to_utf16(connection);
+    if(raw=="/")return path;
+    raw.remove_prefix(1);
+    while(!raw.empty()){
+        auto slash=raw.find('/');auto part=raw.substr(0,slash);
+        auto name=to_utf16(part);
+        path+=u'\\';path+=name;
+        if(slash==raw.npos)break;
+        raw.remove_prefix(slash+1);
     }
-    throw RemoteFailure(RemoteError::missing,"Saved remote connection not found");
+    return path;
+}
+void control_remote(RemoteCommand command,std::string_view protocol,std::string_view connection,std::string_view from,std::string_view to={},bool replace=false){
+    auto profiles=load_remote_connections();auto p=parse_remote_protocol(protocol);
+    auto profile=std::find_if(profiles.begin(),profiles.end(),[&](const auto& c){return c.protocol==p&&c.name==connection;});
+    if(profile==profiles.end())throw RemoteFailure(RemoteError::missing,"Saved remote connection not found");
+    if(profile->read_only)throw RemoteFailure(RemoteError::permission,"Remote connection is read-only");
+    auto source=projected_path(connection,from);
+    auto destination=command==RemoteCommand::copy?projected_path(connection,to):std::u16string{};
+    auto request=encode_remote_control(command,destination,replace);
+    start_agent();
+    auto path=u"\\\\$sfs\\"+to_utf16(protocol)+source;
+    detail::FileHandle handle(CreateFileW(std::filesystem::path(path).c_str(),GENERIC_READ,
+        FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS,nullptr));
+    if(handle.value==INVALID_HANDLE_VALUE)detail::file_error(GetLastError(),"Open remote source");
+    DWORD transferred=0;
+    if(!DeviceIoControl(handle.value,remote_control_code,request.data(),static_cast<DWORD>(request.size()),
+        nullptr,0,&transferred,nullptr))detail::file_error(GetLastError(),"Remote filesystem operation");
+}
+}
+void copy_remote_file(std::string_view protocol,std::string_view connection,std::string_view from,std::string_view to,bool replace){
+    control_remote(RemoteCommand::copy,protocol,connection,from,to,replace);
+}
+void recover_remote_file(std::string_view protocol,std::string_view connection,std::string_view path,bool discard){
+    control_remote(discard?RemoteCommand::discard:RemoteCommand::retry,protocol,connection,path);
 }
 }

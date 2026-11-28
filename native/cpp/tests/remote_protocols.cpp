@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "remote_projection.hpp"
+#include "remote_control.hpp"
+#include "remote_recovery.hpp"
 #include <array>
 #include <cstring>
 #include <iostream>
@@ -39,6 +41,12 @@ void mounted_test(const std::shared_ptr<Projection>& p,const std::shared_ptr<Pro
     auto created=open(dir/L"b.txt",CREATE_NEW);check(WriteFile(created.value,"AB",2,&done,nullptr)&&done==2,"mounted create and write");check(FlushFileBuffers(created.value)!=0,"mounted new file flush");created.close();
     fs::rename(dir/L"b.txt",dir/L"c.txt");check(fs::exists(dir/L"c.txt"),"mounted rename");
     check(fs::remove(dir/L"c.txt"),"mounted deletion");
+    auto source=open(dir/L"a.txt",OPEN_EXISTING);
+    auto request=encode_remote_control(RemoteCommand::copy,u"\\test\\server-copy.txt");
+    check(DeviceIoControl(source.value,remote_control_code,request.data(),static_cast<DWORD>(request.size()),nullptr,0,&done,nullptr)!=0,"mounted server-side copy");
+    source.close();
+    check(fs::file_size(dir/L"server-copy.txt")==6,"server copy size");
+    check(fs::remove(dir/L"server-copy.txt"),"delete copied file");
     std::cout<<"PASS WinFsp mounted remote WebDAV read/write/flush/rename and namespace\n";
 }
 #endif
@@ -47,12 +55,35 @@ int main(int argc,char** argv){
     try{
         if(argc!=4)return 2;
         RemoteConnection c;c.name="test";c.endpoint=argv[1];c.root="/dav";c.cache_mib=8;c.read_cache_mib=0;c.metadata_seconds=0;
-        if(std::string_view(argv[3])=="writeback")c.cache_mode="writeback";
+        auto mode=std::string_view(argv[3]);
+        if(mode=="writeback"||mode=="recover"||mode=="conflict"||mode=="lost-response")c.cache_mode="writeback";
         auto p=remote_projection(RemoteProtocol::dav,{c},argv[2]);
         auto n=namespace_projection();n->replace_routes({{u"dav",p}});
 #ifdef ARCHIVEFS_WITH_WINFSP
         if(std::string_view(argv[3])=="winfsp"){mounted_test(p,n);return 0;}
 #endif
+        if(mode=="recover"||mode=="conflict"||mode=="lost-response"){
+            auto file=p->open(u"\\test\\a.txt");check(static_cast<bool>(file),"recover source");
+            std::string x="AB";p->write(file,3,std::as_bytes(std::span(x)),false,false);
+            if(mode=="lost-response"){
+                bool failed=false;try{p->flush(file);}catch(const RemoteFailure&){failed=true;}
+                check(failed,"upload response loss");
+            }
+            file.reset();n.reset();p.reset();
+            p=remote_projection(RemoteProtocol::dav,{c},argv[2]);file=p->open(u"\\test\\a.txt");check(static_cast<bool>(file),"restored pending file");
+            std::array<std::byte,4> b{};check(p->read(file,2,b)==4&&!std::memcmp(b.data(),"2AB5",4),"restored local data");
+            bool blocked=false;try{p->flush(file);}catch(const RemoteFailure& e){blocked=e.code()==RemoteError::conflict;}
+            check(blocked,"recovered file does not upload implicitly");
+            if(mode=="conflict"){
+                auto other=make_remote_transport(c);std::string changed="XXXXXXXXXX";
+                other->replace("/a.txt",changed.size(),[&](std::uint64_t pos,std::span<std::byte> out){auto count=std::min(out.size(),changed.size()-static_cast<std::size_t>(pos));std::memcpy(out.data(),changed.data()+static_cast<std::size_t>(pos),count);return count;});
+                bool conflict=false;try{p->recover(file,false);}catch(const RemoteFailure& e){conflict=e.code()==RemoteError::conflict;}
+                check(conflict,"recovery preserves changed remote version");
+                p->recover(file,true);
+                check(p->read(file,0,b)==4&&!std::memcmp(b.data(),"XXXX",4),"discard pending upload");
+            }else p->recover(file,false);
+            std::cout<<"PASS persistent recovery, explicit retry and conflict handling\n";return 0;
+        }
         auto top=n->open(u"\\");check(top&&n->list(top).size()==1,"namespace root");
         auto root=n->open(u"\\dav\\test");check(root&&n->list(root).size()==1,"connection directory");
         auto file=n->open(u"\\dav\\test\\a.txt");check(file&&n->query_info(file).size==10,"stat");

@@ -56,6 +56,11 @@ public:
         if(p!=n->route||rest==u"\\")throw RemoteFailure(RemoteError::unsupported,"Cannot rename across namespace shares");
         p->rename(n->routed,rest,replace);
     }
+    void recover(const ProjectedNodePtr& n,bool discard)override{require(n);n->route->recover(n->routed,discard);}
+    bool server_copy(const ProjectedNodePtr& n,std::u16string_view path,bool replace)override{
+        require(n);auto [name,p,rest]=resolve(path);(void)name;
+        return p==n->route&&rest!=u"\\"&&p->server_copy(n->routed,rest,replace);
+    }
 private:
     mutable std::shared_mutex mutex_;RouteMap routes_;
     struct Resolved{std::u16string name;std::shared_ptr<Projection> projection;std::u16string rest;};

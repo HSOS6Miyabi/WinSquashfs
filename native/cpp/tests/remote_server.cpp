@@ -46,6 +46,29 @@ int main(int argc,char** argv){
         check(!read(*t,"/test-dir/moved").empty(),"renamed content");
         t->remove("/test-dir/moved",false);t->remove("/test-dir",true);
         check(t->list("/").empty(),"remote deletion");
+        if(c.protocol==RemoteProtocol::s3){
+            constexpr std::uint64_t length=(64ULL<<20)+913;
+            auto input=[](std::uint64_t offset,std::span<std::byte> out){
+                for(std::size_t i=0;i<out.size();++i)out[i]=static_cast<std::byte>((offset+i)%251);
+                return out.size();
+            };
+            t->mkdir("/source");
+            t->mkdir("/source/empty");
+            t->mkdir("/source/nested");
+            t->replace("/source/nested/file +%.bin",length,input,{},true);
+            auto original=t->stat("/source/nested/file +%.bin");
+            check(original.size==length&&original.revision.find('-')!=std::string::npos,"multipart upload");
+            t->rename("/source","/destination",false);
+            check(t->list("/").size()==1&&t->stat("/destination/empty").directory,"directory rename including empty marker");
+            auto info=t->stat("/destination/nested/file +%.bin");check(info.size==length,"multipart copy size");
+            for(auto offset:std::array<std::uint64_t,3>{0,(16ULL<<20)-100,length-100}){
+                std::array<std::byte,100> out{},expected{};input(offset,expected);
+                t->read("/destination/nested/file +%.bin",offset,out,info.revision);check(out==expected,"multipart content");
+            }
+            t->remove("/destination/nested/file +%.bin",false);t->remove("/destination/nested",true);
+            t->remove("/destination/empty",true);t->remove("/destination",true);
+            check(t->list("/").empty(),"multipart rename cleanup");
+        }
         std::cout<<"PASS actual "<<argv[1]<<" server operations\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

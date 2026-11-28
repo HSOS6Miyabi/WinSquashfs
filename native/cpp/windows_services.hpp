@@ -27,6 +27,7 @@ std::filesystem::path settings_directory();
 std::vector<RemoteConnection> load_remote_connections();
 void save_remote_connections(const std::vector<RemoteConnection>& connections);
 void copy_remote_file(std::string_view protocol,std::string_view connection,std::string_view from,std::string_view to,bool replace=false);
+void recover_remote_file(std::string_view protocol,std::string_view connection,std::string_view path,bool discard=false);
 std::vector<std::filesystem::path> recent_images();
 void remember_image(const std::filesystem::path& path);
 void clear_recent_images();

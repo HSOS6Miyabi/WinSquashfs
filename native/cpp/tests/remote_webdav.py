@@ -17,6 +17,8 @@ class Server(ThreadingHTTPServer):
         self.patch = patch
         self.puts = 0
         self.patches = 0
+        self.copies = 0
+        self.lose_response = False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -108,6 +110,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.response(412)
         self.server.files[path] = data
         self.server.puts += 1
+        if self.server.lose_response:
+            self.server.lose_response = False
+            self.close_connection = True
+            return
+        self.response(201)
+
+    def do_COPY(self):
+        path = self.path_value()
+        dest = unquote(urlparse(self.headers["Destination"]).path)
+        if dest in self.server.files and self.headers.get("Overwrite") == "F":
+            return self.response(412)
+        self.server.files[dest] = self.server.files[path]
+        self.server.copies += 1
         self.response(201)
 
     def do_MOVE(self):
@@ -130,12 +145,32 @@ def exercise(patch, mode, patches, puts):
             subprocess.run([sys.argv[1], f"http://127.0.0.1:{server.server_port}", directory, mode], check=True, timeout=30)
         assert server.files == {"/dav/a.txt": b"012AB5"}
         assert (server.patches, server.puts) == (patches, puts), (server.patches, server.puts)
+        if mode == "winfsp":
+            assert server.copies == 1
     finally:
         server.shutdown()
         server.server_close()
         worker.join()
 
 
+def recovery(mode, expected):
+    server = Server(True)
+    server.lose_response = mode == "lost-response"
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            subprocess.run([sys.argv[1], f"http://127.0.0.1:{server.server_port}", directory, mode], check=True, timeout=30)
+        assert server.files == {"/dav/a.txt": expected}
+        assert server.puts == 1, server.puts
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
+
+recovery("recover", b"012AB56789")
+recovery("conflict", b"XXXXXXXXXX")
+recovery("lost-response", b"012AB56789")
 exercise(True, "auto", 2, 2)
 exercise(False, "auto", 0, 4)
 exercise(True, "writeback", 0, 4)

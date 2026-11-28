@@ -83,6 +83,8 @@ def s3():
                               aws_access_key_id="test", aws_secret_access_key="local-test-password")
         client.create_bucket(Bucket="archivefs-test")
         test("s3", endpoint=url, root="/", bucket="archivefs-test", user="test", secret="local-test-password")
+        assert not client.list_multipart_uploads(Bucket="archivefs-test").get("Uploads")
+        assert not client.list_objects_v2(Bucket="archivefs-test").get("Contents")
     finally:
         server.stop()
 

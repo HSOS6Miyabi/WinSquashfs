@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "remote_projection.hpp"
+#include "remote_recovery.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -23,7 +24,8 @@ struct RemoteFileState{
     Clock::time_point checked{};
     fs::path stage;
     std::uint64_t reserved=0;
-    bool dirty=false,deleted=false;
+    bool dirty=false,deleted=false,recovery_required=false,damaged=false;
+    std::uint64_t base_size=0;
 };
 namespace {
 [[noreturn]] void fail(RemoteError c,const char* m){throw RemoteFailure(c,m);}
@@ -103,6 +105,7 @@ struct RemoteMount:std::enable_shared_from_this<RemoteMount>{
     std::map<std::string,std::weak_ptr<RemoteFileState>,std::less<>> states;
     std::map<std::string,std::shared_ptr<RemoteFileState>,std::less<>> pending;
     std::map<std::string,Listing,std::less<>> listings;
+    std::set<std::string,std::less<>> blocked;
     ConcurrentCache<std::string,std::byte> reads;
     std::uint64_t used=0,limit=0,sequence=0;
     RemoteMount(RemoteConnection c,fs::path dir,std::shared_ptr<RemoteTransport> t):
@@ -120,6 +123,50 @@ struct RemoteMount:std::enable_shared_from_this<RemoteMount>{
             }
         }
     }
+    void restore(){
+        if(!fs::exists(cache))return;
+        for(auto& entry:fs::directory_iterator(cache)){
+            if(!entry.is_directory()||entry.is_symlink()||!entry.path().filename().string().starts_with("pending-"))continue;
+            try{
+                auto record=read_remote_recovery(entry.path());
+                if(record.identity!=remote_recovery_identity(config))continue;
+                if(record.phase=="committed")continue;
+                auto path=record.path;
+                if(record.phase=="editing"||!fs::is_regular_file(entry.path()/"data")||
+                   fs::is_symlink(entry.path()/"data")||fs::file_size(entry.path()/"data")!=record.size){
+                    blocked.insert(path);continue;
+                }
+                if(pending.contains(path)){
+                    blocked.insert(path);pending.erase(path);states.erase(path);continue;
+                }
+                if(blocked.contains(path))continue;
+                auto s=state(path,{remote_name(path),false,record.size,0,record.revision});
+                s->stage=entry.path();s->reserved=record.size;s->base_size=record.base_size;
+                s->dirty=true;s->recovery_required=true;
+                pending.emplace(path,std::move(s));
+            }catch(const std::exception&){
+                // Leave unrecognized or incomplete cache data untouched.
+                // It remains counted against the local write-cache limit.
+            }
+        }
+    }
+    void journal(const RemoteFileState& s,std::string phase){
+        write_remote_recovery(s.stage,{remote_recovery_identity(config),s.path,s.meta.revision,
+            std::move(phase),s.base_size,s.meta.size});
+    }
+    void check_recovery(std::string_view path)const{
+        if(blocked.contains(path))fail(RemoteError::conflict,"Incomplete or duplicate local write cache requires manual recovery");
+        if(auto it=pending.find(path);it!=pending.end()&&it->second->recovery_required)
+            fail(RemoteError::conflict,"Pending write requires explicit recovery");
+    }
+    void edit_begin(RemoteFileState& s){
+        if(s.damaged||s.recovery_required)fail(RemoteError::conflict,"Pending write requires recovery");
+        journal(s,"editing");s.damaged=true;
+    }
+    void edit_end(RemoteFileState& s){
+        sync_remote_cache_file(s.stage/"data");
+        journal(s,"ready");s.damaged=false;
+    }
     void reserve(std::uint64_t bytes){
         if(used>limit||bytes>limit-used)fail(RemoteError::no_space,"Remote write cache capacity exceeded");
         used+=bytes;
@@ -133,10 +180,13 @@ struct RemoteMount:std::enable_shared_from_this<RemoteMount>{
         auto it=listings.find(key);
         if(!refresh&&it!=listings.end()&&it->second.expires>now)return it->second.entries;
         auto rows=transport->list(path);
+        std::set<std::string,std::less<>> seen;
         for(auto& row:rows){
             auto full=remote_join(path,row.name);
+            seen.insert(full);
             if(auto p=pending.find(full);p!=pending.end())row=p->second->meta;
         }
+        for(auto& [full,s]:pending)if(remote_parent(full)==path&&!seen.contains(full))rows.push_back(s->meta);
         auto named=mapped_names(std::move(rows));
         if(listings.size()>=256)listings.clear();
         listings.insert_or_assign(std::move(key),Listing{now+std::chrono::seconds(config.metadata_seconds),named});
@@ -166,6 +216,8 @@ struct RemoteMount:std::enable_shared_from_this<RemoteMount>{
     }
     void check_writable(RemoteFileState& s){
         if(config.read_only||s.path=="/")fail(RemoteError::permission,"Remote connection or path is read-only");
+        check_recovery(s.path);
+        if(s.damaged)fail(RemoteError::conflict,"Incomplete local cache write");
         refresh(s);
     }
     void changed(RemoteFileState& s,std::uint64_t size){
@@ -193,9 +245,10 @@ struct RemoteMount:std::enable_shared_from_this<RemoteMount>{
                 if(current.size!=s->meta.size||(!s->meta.revision.empty()&&current.revision!=s->meta.revision))
                     fail(RemoteError::conflict,"Remote source changed while creating the write cache");
             }
-            std::ofstream journal(dir/"target.txt",std::ios::binary|std::ios::trunc);
-            journal<<remote_protocol_name(config.protocol)<<"\n"<<config.name<<"\n"<<s->path<<"\n"<<s->meta.revision<<"\n";
-            journal.flush();check_stream(journal);journal.close();check_stream(journal);
+            sync_remote_cache_file(dir/"data");
+            write_remote_recovery(dir,{remote_recovery_identity(config),s->path,s->meta.revision,
+                "ready",s->meta.size,size});
+            s->base_size=s->meta.size;
             s->stage=dir;s->reserved=size;s->dirty=true;
             if(!preserve)s->meta.size=0;
             pending[s->path]=s;
@@ -214,19 +267,62 @@ struct RemoteMount:std::enable_shared_from_this<RemoteMount>{
     }
     void flush(RemoteFileState& s){
         if(!s.dirty)return;
+        if(s.recovery_required||s.damaged)fail(RemoteError::conflict,"Pending upload requires explicit recovery");
         const auto data=s.stage/"data";
         auto size=fs::file_size(data);
         if(size!=s.meta.size)fail(RemoteError::protocol,"Remote write cache size mismatch");
-        transport->replace(s.path,size,[data,size](std::uint64_t offset,std::span<std::byte> out){
-            auto n=static_cast<std::size_t>(std::min<std::uint64_t>(out.size(),size-offset));
-            file_read(data,offset,out.first(n));return n;
-        },s.meta.revision);
-        // The complete remote write has been acknowledged. Never resend it
-        // merely because a subsequent metadata request or local cleanup fails.
-        auto old=s.stage;s.stage.clear();s.dirty=false;
-        pending.erase(s.path);used-=s.reserved;s.reserved=0;
-        std::error_code ec;fs::remove_all(old,ec);
+        journal(s,"uploading");
+        try{
+            transport->replace(s.path,size,[data,size](std::uint64_t offset,std::span<std::byte> out){
+                if(offset>size)throw std::out_of_range("Cache upload offset");
+                auto n=static_cast<std::size_t>(std::min<std::uint64_t>(out.size(),size-offset));
+                file_read(data,offset,out.first(n));return n;
+            },s.meta.revision);
+        }catch(...){s.recovery_required=true;throw;}
+        complete(s,size);
+    }
+    void complete(RemoteFileState& s,std::uint64_t size){
+        // Once acknowledged, never replay the upload because local cleanup
+        // failed. A surviving uploading record requires explicit recovery.
+        auto old=s.stage;
+        bool recorded=false;
+        try{journal(s,"committed");recorded=true;}catch(...){}
+        s.stage.clear();s.dirty=false;s.recovery_required=false;s.damaged=false;
+        pending.erase(s.path);
+        std::error_code ec;
+        fs::remove_all(old,ec);
+        if(!ec)used-=s.reserved;
+        s.reserved=0;
         changed(s,size);
+        if(ec&&!recorded)fail(RemoteError::conflict,"Remote write succeeded but local recovery record could not be retired");
+    }
+    void recover(RemoteFileState& s,bool discard){
+        if(!s.dirty||!s.recovery_required||s.damaged)
+            fail(RemoteError::conflict,"No intact pending recovery record for this path");
+        if(discard){
+            auto current=transport->stat(s.path);
+            this->discard(s);s.recovery_required=false;s.meta=std::move(current);s.checked=Clock::now();++s.epoch;invalidate(s.path);return;
+        }
+        auto current=transport->stat(s.path);
+        if(current.directory)fail(RemoteError::conflict,"Remote recovery target is a directory");
+        if(current.size==s.meta.size&&!current.revision.empty()){
+            // A response may have been lost after the server committed the
+            // upload. Compare the complete content before attempting a retry.
+            std::vector<std::byte> a(1u<<20),b(a.size());
+            bool identical=true;
+            for(std::uint64_t offset=0;offset<current.size;){
+                auto n=static_cast<std::size_t>(std::min<std::uint64_t>(a.size(),current.size-offset));
+                file_read(s.stage/"data",offset,std::span(a).first(n));
+                transport->read(s.path,offset,std::span(b).first(n),current.revision);
+                if(!std::equal(a.begin(),a.begin()+static_cast<std::ptrdiff_t>(n),b.begin())){identical=false;break;}
+                offset+=n;
+            }
+            if(identical&&transport->stat(s.path).revision==current.revision){complete(s,current.size);return;}
+        }
+        if(s.meta.revision.empty()||current.revision!=s.meta.revision||current.size!=s.base_size)
+            fail(RemoteError::conflict,"Remote version changed; pending local data retained");
+        s.recovery_required=false;
+        try{flush(s);}catch(...){if(s.dirty)s.recovery_required=true;throw;}
     }
     void discard(RemoteFileState& s){
         if(s.dirty){std::error_code ec;fs::remove_all(s.stage,ec);if(ec)throw std::system_error(ec,"Cannot discard deleted remote cache");
@@ -254,7 +350,9 @@ public:
             if(encode_windows_name(c.name)!=name||mounts_.contains(name))throw std::invalid_argument("Invalid or duplicate remote connection name");
             auto path=directory/fs::path(to_utf16(std::string(remote_protocol_name(protocol))))/fs::path(name);
             auto transport=factory(c);
-            mounts_.emplace(std::move(name),std::make_shared<RemoteMount>(std::move(c),std::move(path),std::move(transport)));
+            auto mount=std::make_shared<RemoteMount>(std::move(c),std::move(path),std::move(transport));
+            mount->restore();
+            mounts_.emplace(std::move(name),std::move(mount));
         }
     }
     bool writable_volume()const noexcept override{return true;}
@@ -310,7 +408,7 @@ public:
         if(s.meta.directory)throw std::invalid_argument("Not a remote file");
         if(offset>=s.meta.size||output.empty())return 0;
         auto n=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),s.meta.size-offset));
-        if(s.dirty){file_read(s.stage/"data",offset,output.first(n));return n;}
+        if(s.dirty){if(s.damaged)fail(RemoteError::conflict,"Local cache write is incomplete");file_read(s.stage/"data",offset,output.first(n));return n;}
         constexpr std::size_t page=256u<<10;
         if(!m->config.read_cache_mib||s.meta.revision.empty()||n>=2*page){
             m->transport->read(s.path,offset,output.first(n),s.meta.revision);return n;
@@ -334,6 +432,7 @@ public:
         auto entries=m->listing(d.path,true);
         if(std::any_of(entries.begin(),entries.end(),[&](auto& e){return equal(e.name,name);}))fail(RemoteError::exists,"Remote path already exists");
         auto full=remote_join(d.path,new_component(name));
+        m->check_recovery(full);
         if(directory)m->transport->mkdir(full);else m->transport->replace(full,0,{}, {},true);
         m->invalidate(full);auto meta=m->transport->stat(full);
         return node_for(m->state(full,std::move(meta)),append(parent->path,name),name);
@@ -350,9 +449,15 @@ public:
             m->changed(s,size);return data.size();
         }
         if(m->config.cache_mode=="direct")fail(RemoteError::unsupported,"Server lacks direct random write support");
+        if(size>s.meta.size){
+            auto extra=size-s.meta.size;
+            auto needed=s.dirty?extra:size;
+            if(m->used>m->limit||needed>m->limit-m->used)fail(RemoteError::no_space,"Remote write cache capacity exceeded");
+        }
         m->prepare(node->remote,true);
+        m->edit_begin(s);
         if(size>s.meta.size)m->cache_resize(s,size);
-        file_write(s.stage/"data",offset,data);++s.epoch;m->invalidate(s.path);return data.size();
+        file_write(s.stage/"data",offset,data);m->edit_end(s);++s.epoch;m->invalidate(s.path);return data.size();
     }
     void resize(const ProjectedNodePtr& node,std::uint64_t size)override{
         auto m=owner(node);std::lock_guard lock(m->mutex);auto& s=*node->remote;m->check_writable(s);
@@ -363,7 +468,7 @@ public:
             if(size==0){m->transport->replace(s.path,0,{},s.meta.revision);m->changed(s,0);return;}
         }
         if(m->config.cache_mode=="direct")fail(RemoteError::unsupported,"Server lacks direct resize support");
-        m->prepare(node->remote,size!=0);m->cache_resize(s,size);
+        m->prepare(node->remote,size!=0);m->edit_begin(s);m->cache_resize(s,size);m->edit_end(s);
     }
     void flush(const ProjectedNodePtr& node)override{
         if(node&&node->remote){auto m=owner(node);std::lock_guard lock(m->mutex);m->flush(*node->remote);return;}
@@ -397,15 +502,45 @@ public:
             break;
         }
         if(target==s.path)return;
+        m->check_recovery(target);
         // Keep open descendants consistent by refusing to rename directories
         // while another descendant has a live handle or pending write.
-        if(s.meta.directory)for(auto& [key,value]:m->states)
-            if(key.starts_with(s.path+"/")&&!value.expired())fail(RemoteError::conflict,"Remote directory has active descendants");
+        if(s.meta.directory){
+            for(auto& [key,value]:m->states)
+                if(key.starts_with(s.path+"/")&&!value.expired())fail(RemoteError::conflict,"Remote directory has active descendants");
+            for(auto& key:m->blocked)if(key.starts_with(s.path+"/"))fail(RemoteError::conflict,"Remote directory has incomplete cached writes");
+        }
         if(auto it=m->states.find(target);it!=m->states.end()&&!it->second.expired())fail(RemoteError::conflict,"Remote destination is open");
         m->flush(s);auto old=s.path;
         m->transport->rename(old,target,replace);m->invalidate(old);m->states.erase(old);
         s.path=target;s.meta.name=remote_name(target);s.checked={};++s.epoch;
         m->states[target]=node->remote;m->invalidate(target);
+    }
+    void recover(const ProjectedNodePtr& node,bool discard)override{
+        auto m=owner(node);std::lock_guard lock(m->mutex);
+        if(m->config.read_only)fail(RemoteError::permission,"Remote connection is read-only");
+        m->recover(*node->remote,discard);
+    }
+    bool server_copy(const ProjectedNodePtr& node,std::u16string_view path,bool replace)override{
+        auto m=owner(node);
+        auto [parent,name]=parent_of(path);auto dest=owner(parent);
+        if(m!=dest)return false;
+        std::lock_guard lock(m->mutex);auto& source=*node->remote;
+        m->check_writable(source);
+        if(source.meta.directory)return false;
+        auto target=remote_join(parent->remote->path,new_component(name));
+        for(auto& entry:m->listing(parent->remote->path,true))if(equal(entry.name,name)){
+            if(!replace)fail(RemoteError::exists,"Remote destination exists");
+            if(entry.info.directory)fail(RemoteError::permission,"Remote copy destination is a directory");
+            target=remote_join(parent->remote->path,entry.info.name);break;
+        }
+        if(target==source.path)throw std::invalid_argument("Source and destination are identical");
+        m->check_recovery(target);
+        if(auto it=m->states.find(target);it!=m->states.end()&&!it->second.expired())
+            fail(RemoteError::conflict,"Remote destination is open");
+        m->flush(source);
+        if(!m->transport->copy(source.path,target,replace))return false;
+        m->invalidate(target);m->states.erase(target);return true;
     }
     void operation_error(std::string_view message)noexcept override{if(error_)try{error_(message);}catch(...){}}
 private:

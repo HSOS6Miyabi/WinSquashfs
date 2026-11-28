@@ -377,6 +377,14 @@ void MainWindow::remote_page(){
     children.Append(button(tr(L"Open namespace root",L"打开统一根目录"),[this]{
         run([](std::stop_token stop){start_agent(stop);open_in_explorer(u"\\\\$sfs\\root");return std::function<void()>{};},tr(L"Opening namespace",L"正在打开统一目录"));
     },L"RemoteOpenRoot"));
+    auto retry_path=identify(box(tr(L"Pending file path (within connection)",L"待上传文件路径（连接内）")),L"RemoteRetryPath");
+    children.Append(retry_path);
+    children.Append(button(tr(L"Retry pending upload",L"重试待上传文件"),[=,this]{
+        try{auto i=list.SelectedIndex();if(i<0)throw std::invalid_argument("Select a saved connection");
+            auto p=profiles->at(i);auto path=to_utf8(u16(retry_path.Text()));
+            run([p,path](std::stop_token){recover_remote_file(remote_protocol_name(p.protocol),p.name,path);return std::function<void()>{};},tr(L"Recovering pending upload",L"正在恢复待上传文件"));
+        }catch(...){report(std::current_exception());}
+    },L"RemoteRetry"));
     children.Append(button(tr(L"Open pending write cache",L"打开待上传写入缓存"),[this]{try{auto dir=settings_directory()/L"remote-cache";fs::create_directories(dir);open_in_explorer(dir.u16string());}catch(...){report(std::current_exception());}},L"RemoteRecovery"));
     auto save=[=,this](std::vector<RemoteConnection> values){run([this,values=std::move(values)](std::stop_token stop){save_remote_connections(values);if(agent_running()){stop_agent(stop);start_agent(stop);}return [this]{navigate(6);};},tr(L"Saving remote connections",L"正在保存远程连接"));};
     page_actions_.Children().Append(button(tr(L"Save and apply",L"保存并应用"),[=,this]{try{auto p=read();validate_remote_connection(p);auto values=*profiles;if(*editing>=0)values.at(*editing)=std::move(p);else values.push_back(std::move(p));save(std::move(values));}catch(...){report(std::current_exception());}},L"RemoteSave"));

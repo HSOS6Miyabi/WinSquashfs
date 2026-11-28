@@ -133,6 +133,12 @@ int cli(std::vector<std::u16string> args) {
     if(command==u"remote-copy"&&(args.size()==5||args.size()==6)){
         copy_remote_file(to_utf8(args[1]),to_utf8(args[2]),to_utf8(args[3]),to_utf8(args[4]),args.size()==6&&args[5]==u"--replace");return 0;
     }
+    if(command==u"remote-retry"&&args.size()==4){
+        recover_remote_file(to_utf8(args[1]),to_utf8(args[2]),to_utf8(args[3]));return 0;
+    }
+    if(command==u"remote-discard"&&args.size()==5&&args[4]==u"--confirm"){
+        recover_remote_file(to_utf8(args[1]),to_utf8(args[2]),to_utf8(args[3]),true);return 0;
+    }
     if(command==u"remote-list"&&args.size()==1){
         for(auto& connection:load_remote_connections())std::cout<<remote_protocol_name(connection.protocol)<<'\t'<<connection.name<<'\n';return 0;
     }

@@ -71,7 +71,7 @@ target_link_libraries(archivefs_core PUBLIC Threads::Threads ${CMAKE_DL_LIBS} Li
 target_include_directories(archivefs_core PRIVATE ${XXHASH_INCLUDE_DIR})
 archivefs_warnings(archivefs_core)
 if(ARCHIVEFS_WITH_REMOTE)
-  target_sources(archivefs_core PRIVATE remote_transport.cpp remote_http.cpp remote_ssh.cpp remote_projection.cpp namespace_projection.cpp)
+  target_sources(archivefs_core PRIVATE remote_transport.cpp remote_http.cpp remote_ssh.cpp remote_projection.cpp namespace_projection.cpp remote_recovery.cpp)
   target_link_libraries(archivefs_core PRIVATE ${ARCHIVEFS_CURL} ${ARCHIVEFS_SSH} LibXml2::LibXml2)
   target_compile_definitions(archivefs_core PUBLIC ARCHIVEFS_WITH_REMOTE=1)
 endif()

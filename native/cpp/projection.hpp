@@ -82,6 +82,8 @@ public:
     virtual void check_delete(const ProjectedNodePtr&){throw std::runtime_error("read-only projection");}
     virtual void remove(const ProjectedNodePtr&){throw std::runtime_error("read-only projection");}
     virtual void rename(const ProjectedNodePtr&,std::u16string_view,bool){throw std::runtime_error("read-only projection");}
+    virtual bool server_copy(const ProjectedNodePtr&,std::u16string_view,bool){return false;}
+    virtual void recover(const ProjectedNodePtr&,bool){throw std::runtime_error("Recovery is unavailable");}
     virtual void operation_error(std::string_view)noexcept{}
 };
 class NamespaceProjection : public Projection {

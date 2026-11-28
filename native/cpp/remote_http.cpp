@@ -12,6 +12,7 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <set>
 #include <utility>
 
 namespace archivefs {
@@ -170,6 +171,32 @@ std::string url_path(std::string_view url){
     if(scheme!=url.npos){auto pos=url.find('/',scheme+3);url=pos==url.npos?std::string_view("/"):url.substr(pos);}
     return decode_url(url);
 }
+std::string query_value(std::string_view value){
+    auto encoded=remote_url_path(value);
+    for(std::size_t i=0;(i=encoded.find('/',i))!=encoded.npos;i+=3)encoded.replace(i,1,"%2F");
+    return encoded;
+}
+std::string xml_escape(std::string_view value){
+    std::string result;
+    for(auto c:value){
+        switch(c){case '&':result+="&amp;";break;case '<':result+="&lt;";break;case '>':result+="&gt;";break;
+        case '"':result+="&quot;";break;case '\'':result+="&apos;";break;default:result+=c;}
+    }
+    return result;
+}
+RemoteInput string_input(std::string data){
+    return [data=std::move(data)](std::uint64_t offset,std::span<std::byte> out){
+        if(offset>data.size())throw std::out_of_range("Upload source offset");
+        auto count=std::min(out.size(),data.size()-static_cast<std::size_t>(offset));
+        std::memcpy(out.data(),data.data()+static_cast<std::size_t>(offset),count);return count;
+    };
+}
+constexpr std::uint64_t s3_mib=1ULL<<20,s3_part_max=5ULL<<30,s3_multipart_threshold=64*s3_mib;
+struct S3Object {
+    std::string key,etag;
+    std::uint64_t size;
+    bool operator==(const S3Object&)const=default;
+};
 std::string strip_slash(std::string s){while(s.size()>1&&s.back()=='/')s.pop_back();return s;}
 std::string object_path(std::string_view root,std::string_view path){
     validate_remote_path(path);
@@ -294,6 +321,9 @@ public:
             catch(const RemoteFailure& e){if(e.code()!=RemoteError::missing)throw;}
         }
         if(is_ftp()&&!revision.empty()&&stat(path).revision!=revision)failure(RemoteError::conflict,"FTP file changed");
+        if(is_s3()&&size>=s3_multipart_threshold){
+            multipart(url(path),size,input,nullptr,revision,exclusive);return;
+        }
         Request req{is_ftp()?"":"PUT",url(path)};
         req.ftp=is_ftp();req.upload=true;req.length=size;req.input=input;
         if(!is_ftp()){
@@ -324,9 +354,31 @@ public:
             if(!overwrite){try{(void)stat(to);failure(RemoteError::exists,"Destination exists");}catch(const RemoteFailure& e){if(e.code()!=RemoteError::missing)throw;}}
             ftp_command({"RNFR "+physical(from),"RNTO "+physical(to)});return;
         }
-        if(stat(from).directory)failure(RemoteError::unsupported,"S3 directory rename requires recursive object migration");
-        if(!copy(from,to,overwrite))failure(RemoteError::unsupported,"Remote copy unsupported");
-        remove(from,false);
+        if(from==to)return;
+        auto source=stat(from);
+        if(source.directory){
+            if(to.starts_with(std::string(from)+"/")||from.starts_with(std::string(to)+"/"))
+                throw std::invalid_argument("Cannot rename overlapping S3 directories");
+            try{(void)stat(to);failure(RemoteError::exists,"S3 directory destination exists");}
+            catch(const RemoteFailure& e){if(e.code()!=RemoteError::missing)throw;}
+            auto source_prefix=physical(from).substr(1)+"/";
+            auto target_prefix=physical(to).substr(1)+"/";
+            auto objects=raw_objects(source_prefix);
+            if(objects.empty())failure(RemoteError::missing,"S3 directory disappeared");
+            for(auto& object:objects){
+                auto key=target_prefix+object.key.substr(source_prefix.size());
+                copy_object(object,key,false);
+            }
+            // Copy every object before deleting anything. Recheck the source
+            // generation and use conditional deletion for each object.
+            if(raw_objects(source_prefix)!=objects)failure(RemoteError::conflict,"S3 directory changed during copy; original objects retained");
+            for(auto& object:objects)delete_object(object);
+            return;
+        }
+        require_etag(source.revision);
+        S3Object object{physical(from).substr(1),source.revision,source.size};
+        copy_object(object,physical(to).substr(1),overwrite);
+        delete_object(object);
     }
     bool copy(std::string_view from,std::string_view to,bool overwrite)override{
         writable();
@@ -334,13 +386,10 @@ public:
             Request req{"COPY",url(from)};req.headers={"Destination: "+url(to),std::string("Overwrite: ")+(overwrite?"T":"F"),"Depth: infinity"};success(request(req));return true;
         }
         if(!is_s3())return false;
-        if(stat(from).directory)return false;
-        Request req{"PUT",url(to)};
-        req.headers={"x-amz-copy-source: /"+c_.bucket+remote_url_path(physical(from))};
-        if(!overwrite)req.headers.push_back("If-None-Match: *");
-        req.upload=true;
-        auto response=request(req);success(response);
-        Xml xml(response.body);if(!named(xml.root(),"CopyObjectResult"))failure(RemoteError::protocol,"S3 CopyObject failed");
+        if(from==to||to=="/")throw std::invalid_argument("Invalid S3 copy destination");
+        auto source=stat(from);
+        if(source.directory)return false;
+        copy_object({physical(from).substr(1),source.revision,source.size},physical(to).substr(1),overwrite);
         return true;
     }
 private:
@@ -362,13 +411,135 @@ private:
         }
         return base_+remote_url_path(p);
     }
+    static void require_etag(std::string_view etag){
+        if(!strong_etag(etag))failure(RemoteError::unsupported,"S3 server did not supply a strong object ETag");
+    }
+    std::string key_url(std::string_view key)const{return base_+"/"+remote_url_path(key);}
+    std::string copy_source(std::string_view key)const{return "/"+c_.bucket+"/"+remote_url_path(key);}
+    void delete_object(const S3Object& object){
+        require_etag(object.etag);
+        Request req{"DELETE",key_url(object.key)};
+        req.headers={"If-Match: "+object.etag};success(request(std::move(req)));
+    }
+    std::vector<S3Object> raw_objects(std::string_view prefix){
+        std::vector<S3Object> result;
+        std::string continuation;
+        for(unsigned page=0;page<10000;++page){
+            auto target=base_+"/?list-type=2&encoding-type=url&prefix="+query_value(prefix);
+            if(!continuation.empty())target+="&continuation-token="+query_value(continuation);
+            auto response=request({"GET",target});success(response);Xml xml(response.body);
+            if(!named(xml.root(),"ListBucketResult"))failure(RemoteError::protocol,"Invalid S3 directory listing");
+            const bool encoded=field(xml.root(),"EncodingType")=="url";
+            for(auto node=xml.root()->children;node;node=node->next)if(named(node,"Contents")){
+                auto key=field(node,"Key");if(encoded)key=decode_url(key);
+                if(!key.starts_with(prefix))failure(RemoteError::protocol,"S3 returned an object outside the requested prefix");
+                // Preserve exact object names, including markers, but do not
+                // allow URL normalization to turn dot components into another key.
+                auto rest=std::string_view(key);
+                while(!rest.empty()){
+                    auto slash=rest.find('/');auto component=rest.substr(0,slash);
+                    if(component=="."||component=="..")failure(RemoteError::unsupported,"S3 key contains a dot path component");
+                    if(slash==rest.npos)break;
+                    rest.remove_prefix(slash+1);
+                }
+                if(key.find('\0')!=key.npos)failure(RemoteError::unsupported,"S3 key contains NUL");
+                auto etag=field(node,"ETag");require_etag(etag);
+                result.push_back({std::move(key),std::move(etag),number(field(node,"Size"))});
+                if(result.size()>100000)failure(RemoteError::unsupported,"S3 directory contains too many objects for one rename");
+            }
+            if(lower(field(xml.root(),"IsTruncated"))!="true"){
+                std::sort(result.begin(),result.end(),[](auto& a,auto& b){return a.key<b.key;});
+                if(std::adjacent_find(result.begin(),result.end(),[](auto& a,auto& b){return a.key==b.key;})!=result.end())
+                    failure(RemoteError::conflict,"S3 directory listing contains duplicate keys");
+                return result;
+            }
+            auto next=field(xml.root(),"NextContinuationToken");
+            if(next.empty()||next==continuation)failure(RemoteError::protocol,"S3 listing did not advance");
+            continuation=std::move(next);
+        }
+        failure(RemoteError::protocol,"S3 pagination exceeds limit");
+    }
+    void copy_object(const S3Object& source,std::string_view key,bool overwrite){
+        require_etag(source.etag);
+        if(source.key==key)throw std::invalid_argument("S3 source and destination are identical");
+        if(!source.size){
+            Request req{"PUT",key_url(key)};req.upload=true;
+            if(!overwrite)req.headers.push_back("If-None-Match: *");
+            success(request(std::move(req)));return;
+        }
+        // CopyObject cannot reliably enforce a destination precondition on
+        // every S3 implementation. Multipart copy commits conditionally.
+        if(!overwrite||source.size>s3_part_max){
+            multipart(key_url(key),source.size,{},&source,{},!overwrite);return;
+        }
+        Request req{"PUT",key_url(key)};
+        req.headers={"x-amz-copy-source: "+copy_source(source.key),"x-amz-copy-source-if-match: "+source.etag};
+        req.upload=true;
+        auto response=request(std::move(req));success(response);
+        Xml xml(response.body);if(!named(xml.root(),"CopyObjectResult"))failure(RemoteError::protocol,"S3 CopyObject failed");
+    }
+    void multipart(const std::string& target,std::uint64_t size,const RemoteInput& input,
+                   const S3Object* source,std::string_view revision,bool exclusive){
+        if(!size||size>s3_part_max*10000)failure(RemoteError::unsupported,"S3 object exceeds multipart limits");
+        auto part_size=std::max(16*s3_mib,((size-1)/10000+1+s3_mib-1)/s3_mib*s3_mib);
+        if(part_size>s3_part_max)failure(RemoteError::unsupported,"S3 part exceeds size limit");
+        Request init{"POST",target+"?uploads"};init.upload=true;
+        auto response=request(std::move(init));success(response);
+        Xml xml(response.body);
+        if(!named(xml.root(),"InitiateMultipartUploadResult"))failure(RemoteError::protocol,"S3 multipart initiation failed");
+        auto id=field(xml.root(),"UploadId");
+        if(id.empty()||id.size()>65536)failure(RemoteError::protocol,"Invalid S3 upload ID");
+        auto encoded_id=query_value(id);
+        auto upload_url=target+"?uploadId="+encoded_id;
+        try{
+            std::string manifest="<CompleteMultipartUpload>";
+            unsigned part=0;
+            for(std::uint64_t offset=0;offset<size;){
+                auto length=std::min(part_size,size-offset);
+                Request req{"PUT",target+"?partNumber="+std::to_string(++part)+"&uploadId="+encoded_id};
+                req.upload=true;
+                if(source){
+                    req.headers={"x-amz-copy-source: "+copy_source(source->key),"x-amz-copy-source-if-match: "+source->etag};
+                    if(offset||length!=size)req.headers.push_back("x-amz-copy-source-range: bytes="+std::to_string(offset)+"-"+std::to_string(offset+length-1));
+                }else{
+                    req.length=length;
+                    req.input=[&input,offset,length](std::uint64_t pos,std::span<std::byte> out){
+                        if(pos>length)throw std::out_of_range("S3 part offset");
+                        return input(offset+pos,out.first(static_cast<std::size_t>(std::min<std::uint64_t>(out.size(),length-pos))));
+                    };
+                }
+                auto result=request(std::move(req));success(result);
+                auto etag=result.header("etag");
+                if(source){
+                    Xml part_xml(result.body);if(!named(part_xml.root(),"CopyPartResult"))failure(RemoteError::protocol,"S3 multipart copy failed");
+                    etag=field(part_xml.root(),"ETag");
+                }
+                require_etag(etag);
+                manifest+="<Part><PartNumber>"+std::to_string(part)+"</PartNumber><ETag>"+xml_escape(etag)+"</ETag></Part>";
+                offset+=length;
+            }
+            manifest+="</CompleteMultipartUpload>";
+            Request finish{"POST",upload_url};finish.upload=true;finish.length=manifest.size();finish.input=string_input(std::move(manifest));
+            finish.headers={"Content-Type: application/xml"};
+            if(exclusive)finish.headers.push_back("If-None-Match: *");
+            else if(strong_etag(revision))finish.headers.push_back("If-Match: "+std::string(revision));
+            auto result=request(std::move(finish));success(result);
+            Xml done(result.body);
+            if(!named(done.root(),"CompleteMultipartUploadResult"))failure(RemoteError::protocol,"S3 multipart completion failed");
+        }catch(...){
+            // A failed completion can be ambiguous. Abort only the upload ID;
+            // never delete the final object or retry its mutation automatically.
+            try{success(request({"DELETE",upload_url}));}catch(...){}
+            throw;
+        }
+    }
     template<class T>void set(CURLoption option,T value){if(curl_easy_setopt(easy_,option,value)!=CURLE_OK)failure(RemoteError::protocol,"Cannot configure remote request");}
     Response request(Request req,bool head=false){
         std::lock_guard lock(mutex_);
         curl_easy_reset(easy_);
         Transfer t{req,{},0,0,0,false,{}};
         List headers,quote;
-        set(CURLOPT_URL,req.url.c_str());set(CURLOPT_NOSIGNAL,1L);
+        set(CURLOPT_URL,req.url.c_str());set(CURLOPT_NOSIGNAL,1L);set(CURLOPT_PATH_AS_IS,1L);
         set(CURLOPT_PROTOCOLS_STR,is_ftp()?"ftp,ftps":"http,https");
         set(CURLOPT_FOLLOWLOCATION,0L);set(CURLOPT_CONNECTTIMEOUT,static_cast<long>(std::min(c_.timeout_seconds,30u)));
         set(CURLOPT_TIMEOUT,static_cast<long>(c_.timeout_seconds));
