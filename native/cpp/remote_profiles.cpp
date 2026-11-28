@@ -54,7 +54,7 @@ std::vector<RemoteConnection> load_remote_connections(){
     for(auto& row:j){
         RemoteConnection c;c.name=row.at("name").get<std::string>();c.protocol=parse_remote_protocol(row.at("protocol").get<std::string>());
         c.endpoint=row.at("endpoint").get<std::string>();c.root=row.value("root",c.root);c.username=row.value("username",c.username);
-        c.region=row.value("region",c.region);c.bucket=row.value("bucket",c.bucket);c.host_key=row.value("host_key",c.host_key);c.private_key=row.value("private_key",c.private_key);c.shell_root=row.value("shell_root",c.shell_root);
+        c.region=row.value("region",c.region);c.bucket=row.value("bucket",c.bucket);c.host_key=row.value("host_key",c.host_key);c.private_key=row.value("private_key",c.private_key);c.shell_root=row.value("shell_root",c.shell_root);c.ca_file=row.value("ca_file",c.ca_file);
         c.read_only=row.value("read_only",c.read_only);c.ssh_helper=row.value("ssh_helper",c.ssh_helper);c.sudo=row.value("sudo",c.sudo);c.partial_put=row.value("partial_put",c.partial_put);c.implicit_tls=row.value("implicit_tls",c.implicit_tls);
         c.cache_mode=row.value("cache_mode",c.cache_mode);c.timeout_seconds=row.value("timeout_seconds",c.timeout_seconds);c.metadata_seconds=row.value("metadata_seconds",c.metadata_seconds);c.cache_mib=row.value("cache_mib",c.cache_mib);c.read_cache_mib=row.value("read_cache_mib",c.read_cache_mib);
         unprotect(c,row.at("credentials").get<std::string>());result.push_back(std::move(c));
@@ -63,7 +63,7 @@ std::vector<RemoteConnection> load_remote_connections(){
 }
 void save_remote_connections(const std::vector<RemoteConnection>& connections){
     validate_all(connections);auto j=Json::array();
-    for(auto& c:connections)j.push_back({{"name",c.name},{"protocol",std::string(remote_protocol_name(c.protocol))},{"endpoint",c.endpoint},{"root",c.root},{"username",c.username},{"region",c.region},{"bucket",c.bucket},{"host_key",c.host_key},{"private_key",c.private_key},{"shell_root",c.shell_root},{"read_only",c.read_only},{"ssh_helper",c.ssh_helper},{"sudo",c.sudo},{"partial_put",c.partial_put},{"implicit_tls",c.implicit_tls},{"cache_mode",c.cache_mode},{"timeout_seconds",c.timeout_seconds},{"metadata_seconds",c.metadata_seconds},{"cache_mib",c.cache_mib},{"read_cache_mib",c.read_cache_mib},{"credentials",protect(c)}});
+    for(auto& c:connections)j.push_back({{"name",c.name},{"protocol",std::string(remote_protocol_name(c.protocol))},{"endpoint",c.endpoint},{"root",c.root},{"username",c.username},{"region",c.region},{"bucket",c.bucket},{"host_key",c.host_key},{"private_key",c.private_key},{"shell_root",c.shell_root},{"ca_file",c.ca_file},{"read_only",c.read_only},{"ssh_helper",c.ssh_helper},{"sudo",c.sudo},{"partial_put",c.partial_put},{"implicit_tls",c.implicit_tls},{"cache_mode",c.cache_mode},{"timeout_seconds",c.timeout_seconds},{"metadata_seconds",c.metadata_seconds},{"cache_mib",c.cache_mib},{"read_cache_mib",c.read_cache_mib},{"credentials",protect(c)}});
     detail::write_text_atomic(settings_directory()/L"remote-connections.json",j.dump(2)+"\n","Save remote connections");
 }
 void copy_remote_file(std::string_view protocol,std::string_view connection,std::string_view from,std::string_view to,bool replace){

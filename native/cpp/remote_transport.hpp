@@ -25,7 +25,7 @@ struct RemoteConnection {
     RemoteProtocol protocol=RemoteProtocol::dav;
     std::string endpoint,root="/",username,secret,session_token;
     std::string region="us-east-1",bucket,host_key,private_key;
-    std::string shell_root;
+    std::string shell_root,ca_file;
     bool read_only=false,ssh_helper=true,sudo=false,partial_put=false;
     bool implicit_tls=false;
     std::string cache_mode="auto";

@@ -55,7 +55,7 @@ struct Request {
     std::uint64_t length=0;
     RemoteOutput output;
     std::size_t body_limit=16u<<20;
-    bool head=false,upload=false,ftp=false,range_abort=false;
+    bool head=false,upload=false,ftp=false,range_abort=false,append=false;
     std::string range;
     std::uint64_t skip_on_full=0;
     std::span<std::byte> exact;
@@ -245,8 +245,18 @@ public:
     }
     bool write_at(std::string_view path,std::uint64_t offset,std::span<const std::byte> bytes,std::string_view revision)override{
         writable();
-        if(!is_dav())return false;
         if(bytes.empty())return true;
+        if(is_ftp()){
+            auto current=stat(path);
+            if(current.directory||current.size!=offset)return false;
+            if(!revision.empty()&&current.revision!=revision)failure(RemoteError::conflict,"FTP file changed");
+            Request req{"",url(path)};req.ftp=true;req.upload=true;req.append=true;req.length=bytes.size();
+            req.input=[bytes](std::uint64_t pos,std::span<std::byte> out){auto n=std::min(out.size(),bytes.size()-static_cast<std::size_t>(pos));std::copy_n(bytes.data()+static_cast<std::size_t>(pos),n,out.data());return n;};
+            auto response=request(req);
+            if(response.code==CURLE_UPLOAD_FAILED&&(response.status==500||response.status==502||response.status==504))return false;
+            success(response);return true;
+        }
+        if(!is_dav())return false;
         if(bytes.size()-1>UINT64_MAX-offset)throw std::out_of_range("Remote write offset overflow");
         auto options=request({"OPTIONS",url(path)});
         if(options.code==CURLE_OK&&(options.status==405||options.status==501)){if(!c_.partial_put)return false;}
@@ -363,6 +373,7 @@ private:
         set(CURLOPT_FOLLOWLOCATION,0L);set(CURLOPT_CONNECTTIMEOUT,static_cast<long>(std::min(c_.timeout_seconds,30u)));
         set(CURLOPT_TIMEOUT,static_cast<long>(c_.timeout_seconds));
         set(CURLOPT_SSL_VERIFYPEER,1L);set(CURLOPT_SSL_VERIFYHOST,2L);
+        if(!c_.ca_file.empty())set(CURLOPT_CAINFO,c_.ca_file.c_str());
         set(CURLOPT_HEADERFUNCTION,&Transfer::header);set(CURLOPT_HEADERDATA,&t);
         set(CURLOPT_WRITEFUNCTION,&Transfer::write);set(CURLOPT_WRITEDATA,&t);
         set(CURLOPT_USERNAME,c_.username.c_str());set(CURLOPT_PASSWORD,c_.secret.c_str());
@@ -378,7 +389,7 @@ private:
         if(!req.range.empty())set(CURLOPT_RANGE,req.range.c_str());
         if(req.upload){
             if(req.length>static_cast<std::uint64_t>(std::numeric_limits<curl_off_t>::max()))failure(RemoteError::unsupported,"Upload exceeds signed 64-bit size");
-            set(CURLOPT_UPLOAD,1L);set(CURLOPT_INFILESIZE_LARGE,static_cast<curl_off_t>(req.length));
+            set(CURLOPT_UPLOAD,1L);if(req.append)set(CURLOPT_APPEND,1L);set(CURLOPT_INFILESIZE_LARGE,static_cast<curl_off_t>(req.length));
             set(CURLOPT_READFUNCTION,&Transfer::read);set(CURLOPT_READDATA,&t);
             set(CURLOPT_SEEKFUNCTION,&Transfer::seek);set(CURLOPT_SEEKDATA,&t);
             headers.add("Expect:");
