@@ -54,7 +54,7 @@ jobs:
           if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
           if(!$vcpkg){throw 'vcpkg is not installed on this runner'}
           $ports=Join-Path $PWD '.deps/vcpkg-installed'
-          & "$vcpkg/vcpkg.exe" install 'libarchive[core,bzip2,lz4,lzma,zstd]' nlohmann-json xxhash 'curl[core,ssl]' 'libxml2[core]' --classic --recurse "--triplet=$triplet" "--x-install-root=$ports"
+          & "$vcpkg/vcpkg.exe" install 'libarchive[core,bzip2,lz4,lzma,zstd]' nlohmann-json xxhash 'curl[core,ssl]' 'libxml2[core]' 'libssh2[core,zlib]' --classic --recurse "--triplet=$triplet" "--x-install-root=$ports"
           if($LASTEXITCODE){exit $LASTEXITCODE}
           cmake -S native/cpp -B build/architecture -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$triplet" "-DVCPKG_INSTALLED_DIR=$ports" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DARCHIVEFS_WITH_DWARFS=OFF -DARCHIVEFS_BUILD_SHELL=ON -DBUILD_TESTING=ON -DVCPKG_MANIFEST_MODE=OFF
           if($LASTEXITCODE){exit $LASTEXITCODE}

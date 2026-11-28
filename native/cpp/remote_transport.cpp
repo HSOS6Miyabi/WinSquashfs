@@ -90,7 +90,7 @@ void validate_remote_connection(const RemoteConnection& c){
 std::shared_ptr<RemoteTransport> make_remote_transport(RemoteConnection connection){
     validate_remote_connection(connection);
     if(connection.protocol==RemoteProtocol::sftp||connection.protocol==RemoteProtocol::scp)
-        throw RemoteFailure(RemoteError::unsupported,"SSH transport is not enabled");
+        return make_ssh_transport(std::move(connection));
     return make_http_ftp_transport(std::move(connection));
 }
 }

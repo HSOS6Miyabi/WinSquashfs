@@ -48,6 +48,7 @@ struct Response {
     std::string header(std::string_view key)const{auto it=headers.find(key);return it==headers.end()?std::string{}:it->second;}
 };
 struct Request {
+    Request(std::string method_value,std::string url_value):method(std::move(method_value)),url(std::move(url_value)){}
     std::string method,url;
     std::vector<std::string> headers,quote;
     RemoteInput input;
@@ -247,7 +248,9 @@ public:
         if(!is_dav())return false;
         if(bytes.empty())return true;
         if(bytes.size()-1>UINT64_MAX-offset)throw std::out_of_range("Remote write offset overflow");
-        auto options=request({"OPTIONS",url(path)});success(options);
+        auto options=request({"OPTIONS",url(path)});
+        if(options.code==CURLE_OK&&(options.status==405||options.status==501)){if(!c_.partial_put)return false;}
+        else success(options);
         bool patch=token(options.header("dav"),"sabredav-partialupdate")||
             token(options.header("accept-patch"),"application/x-sabredav-partialupdate");
         if(!patch&&!c_.partial_put)return false;
@@ -315,6 +318,7 @@ public:
         Request req{"PUT",url(to)};
         req.headers={"x-amz-copy-source: /"+c_.bucket+remote_url_path(physical(from))};
         if(!overwrite)req.headers.push_back("If-None-Match: *");
+        req.upload=true;
         auto response=request(req);success(response);
         Xml xml(response.body);if(!named(xml.root(),"CopyObjectResult"))failure(RemoteError::protocol,"S3 CopyObject failed");
         return true;
@@ -376,7 +380,7 @@ private:
         auto rc=curl_easy_perform(easy_);
         if(t.error)std::rethrow_exception(t.error);
         curl_easy_getinfo(easy_,CURLINFO_RESPONSE_CODE,&t.response.status);
-        if(rc==CURLE_WRITE_ERROR&&t.done)rc=CURLE_OK;
+        if(rc==CURLE_WRITE_ERROR&&t.done){rc=CURLE_OK;if(is_ftp())t.response.status=226;}
         t.response.code=rc;
         if(rc==CURLE_OK&&!req.exact.empty()&&t.received!=req.exact.size()&&
             (t.response.status==200||t.response.status==206||is_ftp()))

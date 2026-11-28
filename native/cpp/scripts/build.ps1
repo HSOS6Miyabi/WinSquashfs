@@ -76,7 +76,7 @@ if ($Stage -eq 'Gui') {
     if (!(Test-Path "$dist/WinArchiveFSPro.exe")) { throw 'Missing WinUI application' }
     return
 }
-Invoke-Checked "$vcpkg/vcpkg.exe" @('install','libarchive[core,bzip2,lz4,lzma,zstd]','nlohmann-json','xxhash','curl[core,ssl]','libxml2[core]','--classic','--recurse',"--triplet=$triplet","--x-install-root=$ports")
+Invoke-Checked "$vcpkg/vcpkg.exe" @('install','libarchive[core,bzip2,lz4,lzma,zstd]','nlohmann-json','xxhash','curl[core,ssl]','libxml2[core]','libssh2[core,zlib]','--classic','--recurse',"--triplet=$triplet","--x-install-root=$ports")
 $env:PKG_CONFIG_PATH = "$ports/$triplet/lib/pkgconfig"
 $env:PATH = "$ports/$triplet/tools/pkgconf;$env:PATH"
 # The test build uses deterministic mock decoder libraries. The application

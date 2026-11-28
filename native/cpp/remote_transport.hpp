@@ -67,4 +67,6 @@ std::string remote_url_path(std::string_view path);
 std::string remote_shell_quote(std::string_view value);
 std::shared_ptr<RemoteTransport> make_remote_transport(RemoteConnection connection);
 std::shared_ptr<RemoteTransport> make_http_ftp_transport(RemoteConnection connection);
+std::shared_ptr<RemoteTransport> make_ssh_transport(RemoteConnection connection);
+std::string probe_ssh_host_key(const RemoteConnection& connection);
 }
