@@ -133,6 +133,9 @@ try{
   Navigate $w 'NavUnc'
   $scroll=(Control $w 'PageScroll').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
   if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,100)}
+  $editor=Control $w 'ExtraShareEditor'
+  $editor.SetFocus()
+  $editor.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
   foreach($id in @('ExtraShareName','ExtraSharePath','AddExtraShare')){
     $element=Control $w $id $false
     $scrollItem=$null

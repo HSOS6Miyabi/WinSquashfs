@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "windows_services.hpp"
+#include "desktop_notifications.hpp"
 #include <limits>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -319,9 +320,13 @@ int run_agent(){
     if(!stop||!ready||!aliases)fail("CreateEventW");
     ResetEvent(ready.value);ResetEvent(stop.value);
     auto settings=Settings::load();
+    const bool chinese=settings.language=="zh-CN"||(settings.language=="system"&&PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_CHINESE);
+    auto notifications=std::make_shared<DesktopNotifications>(application_directory(),chinese);
+    OpenProgressSink progress;
+    if(settings.show_open_progress)progress=[notifications](std::shared_ptr<OpenProgress> p){notifications->opening(std::move(p));};
     auto open_source=make_archive_source_opener(application_directory(),static_cast<std::size_t>(settings.cache_mib)<<20,static_cast<std::size_t>(settings.total_cache_mib)<<20);
     auto pool=std::make_shared<ImagePool>([open_source](const fs::path& path,SourcePolicy policy){return open_source(open_file_source(path,policy));},
-        ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images},open_source);
+        ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images},open_source,std::move(progress));
     auto shares=settings.shares();
     std::map<std::u16string,std::unique_ptr<NativeMount>,WindowsNameLess> mounts;
     auto update_mounts=[&](const std::vector<Share>& current,bool initial){
@@ -343,7 +348,15 @@ int run_agent(){
     auto reserved=shares;
     for(auto server:{u"sfs$",u"sfs.localhost"})for(auto kind:{u"mtp",u"adb",u"adb.r"})reserved.push_back({kind,{},false,server});
     for(auto const& kind:enabled_device_shares(settings)){
-        auto projection=device_projection(make_device_provider(kind,settings),pool,kind);
+        auto projection=device_projection(make_device_provider(kind,settings),pool,kind,[notifications,kind,chinese,port=settings.adb_port](const DeviceFailure& e){
+            auto title=kind+(chinese?u" 设备访问失败":u" device access failed");
+            std::u16string message;
+            if(kind!=u"mtp"&&e.code()==DeviceError::unavailable)
+                message=(chinese?u"无法连接本地 ADB Server（127.0.0.1:":u"Cannot connect to the local ADB Server (127.0.0.1:")+to_utf16(std::to_string(port))+
+                    (chinese?u"）。请先启动 ADB 服务，再重新打开目录。":u"). Start the existing ADB service before reopening this folder.");
+            else message=to_utf16(e.what());
+            notifications->error(std::move(title),std::move(message));
+        });
         for(auto server:{u"sfs$",u"sfs.localhost"})
             device_mounts.push_back(std::make_unique<NativeMount>(projection,u"",std::u16string(u"\\")+server+u"\\"+kind));
     }
