@@ -41,14 +41,14 @@ def test(mode):
     commands = []
     def server():
         try:
-            count = 1 if mode in ("empty", "timeout") else 2 if mode == "denied" else 4 if mode == "root" else 5
+            count = 1 if mode in ("empty", "timeout", "cancel") else 2 if mode == "denied" else 4 if mode == "root" else 5
             for n in range(count):
                 conn, _ = sock.accept()
                 with conn:
                     conn.settimeout(4)
                     if n == 0:
                         assert service(conn) == "host:devices-l"
-                        if mode == "timeout":
+                        if mode in ("timeout", "cancel"):
                             time.sleep(1.7)
                             return
                         payload = b"" if mode == "empty" else DEVICES
@@ -124,6 +124,6 @@ def test(mode):
         raise errors[0]
     assert not thread.is_alive()
 
-for mode in ("absent", "empty", "normal", "sync", "root", "denied", "timeout"):
+for mode in ("absent", "empty", "normal", "sync", "root", "denied", "timeout", "cancel"):
     test(mode)
-print("PASS ADB server absence, empty list, UTF-8, binary range, Root authorization and deadlines")
+print("PASS ADB server absence, empty list, UTF-8, binary range, Root authorization, deadlines and cancellation")

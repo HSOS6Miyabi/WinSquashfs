@@ -158,6 +158,7 @@ std::optional<RemoteAlias> source_alias(const fs::path& source){
        value.starts_with(u"\\\\.\\"))return std::nullopt;
     auto host_end=value.find(u'\\',2);
     if(host_end==std::u16string::npos)return std::nullopt;
+    if(reserved_host(std::u16string_view(value).substr(2,host_end-2)))return std::nullopt;
     auto share_end=value.find(u'\\',host_end+1);
     if(share_end==std::u16string::npos||share_end==value.size()-1)return std::nullopt;
     return parse_alias(value.substr(2,host_end-2),value.substr(host_end+1,share_end-host_end-1));
@@ -387,7 +388,6 @@ int run_agent(){
 }
 std::u16string register_unc_alias(const fs::path& source,std::stop_token stop){
     auto fallback=Settings::load().unc_path(source);
-    if(fallback==source.u16string()&&(fallback.starts_with(u"\\\\sfs$\\")||fallback.starts_with(u"\\\\sfs.localhost\\")||fallback.starts_with(u"\\\\sfs.")))return fallback;
     auto alias=source_alias(source);
     if(!alias)return fallback;
     start_agent(stop);

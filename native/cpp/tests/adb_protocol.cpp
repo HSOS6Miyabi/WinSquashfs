@@ -2,6 +2,8 @@
 #include "../device_provider.hpp"
 #include <array>
 #include <iostream>
+#include <thread>
+#include <chrono>
 using namespace archivefs;
 int main(int argc,char** argv){
     if(argc!=3)return 99;
@@ -9,6 +11,14 @@ int main(int argc,char** argv){
     auto mode=std::string(argv[2]);options.root=mode=="root"||mode=="denied";
     auto provider=make_adb_provider(options);
     try{
+        if(mode=="cancel"){
+            const auto started=std::chrono::steady_clock::now();
+            std::jthread canceller([&]{std::this_thread::sleep_for(std::chrono::milliseconds(150));provider->cancel();});
+            try{(void)provider->devices();return 93;}
+            catch(const DeviceFailure& e){
+                return e.code()==DeviceError::offline&&std::chrono::steady_clock::now()-started<std::chrono::milliseconds(900)?0:92;
+            }
+        }
         auto devices=provider->devices();
         if(mode=="empty")return devices.empty()?0:98;
         if(devices.size()!=2||devices.front().id!="serial-1"||devices.back().state!="offline")return 97;

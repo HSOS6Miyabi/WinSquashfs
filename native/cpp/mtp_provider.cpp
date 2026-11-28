@@ -80,7 +80,8 @@ std::vector<RemoteDevice> attached(){
     for(DWORD i=0;i<count;++i){
         if(!ids[i])continue;
         DWORD n=0;std::string name;
-        if(SUCCEEDED(manager->GetDeviceFriendlyName(ids[i],nullptr,&n))&&n>0&&n<32768){
+        manager->GetDeviceFriendlyName(ids[i],nullptr,&n);
+        if(n>0&&n<32768){
             std::wstring label(n,L'\0');
             if(SUCCEEDED(manager->GetDeviceFriendlyName(ids[i],label.data(),&n)))name=utf8(std::wstring_view(label.c_str()));
         }
@@ -200,17 +201,22 @@ public:
                 if(progress&&(force||reported==Clock::time_point::min()||now-reported>=250ms)){progress(state.position);reported=now;}
             };
             if(state.position!=offset){
-                LARGE_INTEGER move{};move.QuadPart=static_cast<LONGLONG>(offset);
-                ULARGE_INTEGER actual{};
-                if(SUCCEEDED(state.stream->Seek(move,STREAM_SEEK_SET,&actual))&&actual.QuadPart==offset){state.position=offset;report(true);}
-                else{
-                    // Some PTP/MTP devices implement only sequential resources.
-                    // Reuse the current stream when possible; never materialize a file.
-                    if(offset<state.position)reopen();
-                    else {
-                        LARGE_INTEGER zero{};ULARGE_INTEGER current{};
-                        if(FAILED(state.stream->Seek(zero,STREAM_SEEK_CUR,&current))||current.QuadPart!=state.position)reopen();
+                bool positioned=false;
+                if(state.seekable){
+                    LARGE_INTEGER move{};move.QuadPart=static_cast<LONGLONG>(offset);
+                    ULARGE_INTEGER actual{};
+                    auto hr=state.stream->Seek(move,STREAM_SEEK_SET,&actual);
+                    if(SUCCEEDED(hr)&&actual.QuadPart==offset){
+                        state.position=offset;positioned=true;report(true);
+                    }else{
+                        state.seekable=false;
+                        // A failed seek can leave the stream position undefined.
+                        // Reopen once, then retain the sequential stream for forward reads.
+                        reopen();
                     }
+                }
+                if(!positioned){
+                    if(offset<state.position)reopen();
                     std::vector<std::byte> scratch(std::clamp<std::size_t>(state.buffer,64u<<10,4u<<20));
                     while(state.position<offset){auto amount=static_cast<ULONG>(std::min<std::uint64_t>(scratch.size(),offset-state.position));ULONG got=0;check(state.stream->Read(scratch.data(),amount,&got),"Seek portable device stream");if(!got||got>amount)failure(DeviceError::offline,"Portable device stream ended while seeking");state.position+=got;report();}
                 }
@@ -224,7 +230,7 @@ public:
         }catch(...){streams_.erase(object);throw;}
     }
 private:
-    struct Stream{ComPtr<IStream> stream;std::uint64_t position=0;DWORD buffer=0;};
+    struct Stream{ComPtr<IStream> stream;std::uint64_t position=0;DWORD buffer=0;bool seekable=true;};
     std::string id_;
     ComPtr<IPortableDevice> device_;ComPtr<IPortableDeviceContent> content_;
     ComPtr<IPortableDeviceProperties> properties_;ComPtr<IPortableDeviceResources> resources_;
