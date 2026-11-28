@@ -220,6 +220,10 @@ Section "WinArchiveFSPro"
   SetShellVarContext all
   SetOutPath "$INSTDIR\app"
   File /r "..\artifacts\dist\*"
+  ExecWait '"$INSTDIR\app\archivefs.exe" migrate-settings' $1
+  ${If} $1 != 0
+    DetailPrint "User settings will be imported when the application starts."
+  ${EndIf}
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   CreateDirectory "$SMPROGRAMS\WinArchiveFSPro"
   CreateShortCut "$SMPROGRAMS\WinArchiveFSPro\WinArchiveFSPro.lnk" "$INSTDIR\app\WinArchiveFSPro.exe"

@@ -21,6 +21,7 @@ std::vector<std::filesystem::path> recent_images();
 void remember_image(const std::filesystem::path& path);
 void clear_recent_images();
 void open_in_explorer(std::u16string_view path);
+void migrate_settings();
 void start_agent(std::stop_token stop={});
 void stop_agent(std::stop_token stop={});
 bool agent_running();
