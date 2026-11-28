@@ -4,6 +4,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <cstddef>
+#include <vector>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -62,7 +66,8 @@ inline void write_text_atomic(const fs::path& path,std::string_view text,const c
         temp=path;
         temp+=L"."+std::to_wstring(GetCurrentProcessId())+L"."+
             std::to_wstring(GetCurrentThreadId())+L"."+std::to_wstring(++sequence)+L".tmp";
-        raw=CreateFileW(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,
+        raw=CreateFileW(temp.c_str(),GENERIC_WRITE|DELETE,
+                       FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,CREATE_NEW,
                        FILE_ATTRIBUTE_NORMAL,nullptr);
         if(raw!=INVALID_HANDLE_VALUE)break;
         auto code=GetLastError();
@@ -84,13 +89,38 @@ inline void write_text_atomic(const fs::path& path,std::string_view text,const c
         offset+=n;
     }
     if(!FlushFileBuffers(file.value))file_error(GetLastError(),action);
-    file.close();
+    // FileRenameInfoEx with POSIX semantics preserves open reader handles to the
+    // old file while publishing the new directory entry. Use the SDK layout
+    // even when targeting Windows versions predating the named Flags member.
+    struct RenameInfo {DWORD flags;HANDLE root;DWORD name_length;wchar_t name[1];};
+    static_assert(offsetof(RenameInfo,name)==offsetof(FILE_RENAME_INFO,FileName));
+    auto destination=fs::absolute(path).wstring();
+    if(destination.size()>32767)throw std::length_error("settings path too long");
+    const auto bytes=offsetof(RenameInfo,name)+(destination.size()+1)*sizeof(wchar_t);
+    std::vector<std::max_align_t> storage((bytes+sizeof(std::max_align_t)-1)/sizeof(std::max_align_t));
+    auto* rename=reinterpret_cast<RenameInfo*>(storage.data());
+    rename->flags=0x1u|0x2u; // REPLACE_IF_EXISTS | POSIX_SEMANTICS
+    rename->root=nullptr;
+    rename->name_length=static_cast<DWORD>(destination.size()*sizeof(wchar_t));
+    std::memcpy(rename->name,destination.c_str(),(destination.size()+1)*sizeof(wchar_t));
     const auto deadline=std::chrono::steady_clock::now()+timeout;
     auto delay=10ms;
+    bool extended=true;
     for(;;){
-        if(MoveFileExW(temp.c_str(),path.c_str(),
-                       MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return;
-        const auto error=GetLastError();
+        DWORD error=ERROR_SUCCESS;
+        if(extended){
+            if(SetFileInformationByHandle(file.value,FileRenameInfoEx,rename,static_cast<DWORD>(bytes)))return;
+            error=GetLastError();
+            if(error==ERROR_INVALID_PARAMETER||error==ERROR_NOT_SUPPORTED||error==ERROR_INVALID_FUNCTION){
+                extended=false;
+                file.close();
+            }
+        }
+        if(!extended){
+            if(MoveFileExW(temp.c_str(),path.c_str(),
+                           MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return;
+            error=GetLastError();
+        }
         if((error!=ERROR_ACCESS_DENIED&&error!=ERROR_SHARING_VIOLATION&&
             error!=ERROR_LOCK_VIOLATION)||std::chrono::steady_clock::now()>=deadline)
             file_error(error,action);
