@@ -27,6 +27,7 @@ public:
     };
     using NodePtr = std::shared_ptr<const Node>;
     struct VerifyReport { std::uint64_t files = 0, bytes = 0; };
+    struct SearchReport { std::vector<NodePtr> nodes; bool truncated=false; };
 
     explicit ArchiveTree(std::shared_ptr<ArchiveReader> reader);
     NodePtr root() const { return root_; }
@@ -35,6 +36,9 @@ public:
     bool source_changed() const noexcept { return reader_->source_changed(); }
     std::vector<NodePtr> children(const NodePtr& directory) const;
     NodePtr find(std::u16string_view path) const;
+    std::u16string path_of(const NodePtr& node) const;
+    SearchReport search(const NodePtr& directory,std::u16string_view query,
+                        std::size_t limit=10000,std::stop_token token={}) const;
     std::size_t read(const NodePtr& node, std::uint64_t offset, std::span<std::byte> output,
                      std::stop_token token = {}) const;
     VerifyReport verify(std::stop_token token = {}) const;

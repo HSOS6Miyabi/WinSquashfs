@@ -27,10 +27,13 @@ The Windows workflow builds the official DwarFS library, runs the core tests and
 ```text
 archivefs info IMAGE
 archivefs list IMAGE [DIRECTORY]
+archivefs search IMAGE QUERY [DIRECTORY]
 archivefs read IMAGE ENTRY OFFSET COUNT
 archivefs verify IMAGE
 archivefs unpack IMAGE DESTINATION
+archivefs batch-unpack OUTPUT_DIRECTORY IMAGE...
 archivefs create SquashFS|DwarFS|EROFS PRESET OUTPUT SOURCE...
+archivefs batch-create SquashFS|DwarFS|EROFS PRESET OUTPUT_DIRECTORY SOURCE...
 archivefs pack SOURCE OUTPUT [CODEC]
 archivefs mount IMAGE [DRIVE:]
 archivefs eject DRIVE:
@@ -38,6 +41,7 @@ archivefs unc-start
 archivefs unc-stop
 archivefs unc-status
 archivefs unc-path IMAGE
+archivefs unc-alias IMAGE
 archivefs unc-open IMAGE
 archivefs serve ALIAS ROOT [IDLE_SECONDS]
 archivefs doctor
@@ -50,10 +54,10 @@ Use `--lang en-US`, `--lang zh-CN` or `--lang system` to select the command-line
 - `RandomAccessSource` and `ReadSession`: positioned reads, scoped source handles and identity validation; Windows opportunistic locks release transient sources when conflicting operations occur.
 - `ArchiveBackend`: format-specific metadata and regular-file access, including the official DwarFS file-view interface.
 - `ArchiveReader`: concurrent page caching, capacity-based eviction and request coalescing.
-- `ArchiveTree`: directory indexing, Windows filename encoding, verification and extraction.
-- `ImageCreator`: eight compression presets, format-specific options, multiple sources, binary TAR streaming, child-process cancellation and atomic output publication.
-- `Projection` and `ImagePool`: read-only drive and UNC namespace projection, concurrent image opening, active leases and idle expiration.
+- `ArchiveTree`: directory indexing, Windows filename encoding, recursive search, verification and extraction.
+- `ImageCreator`: eight compression presets, format-specific options, multiple sources, individual archive batches, binary TAR streaming, child-process cancellation and atomic output publication.
+- `Projection` and `ImagePool`: read-only drive and UNC namespace projection, concurrent image opening, active leases, aggregate decoded-data cache reservations and idle expiration.
 - `NativeMount`: WinFsp native callbacks and volume lifecycle.
-- `Settings`, `MountedVolume` and the UNC agent: per-user settings, background access, mount management and Explorer integration.
+- `Settings`, `MountedVolume` and the UNC agent: per-user settings, background access, notification area controls, mount management and Explorer integration.
 
 The UNC agent exposes exact registered prefixes such as `\\sfs$\C`, `\\sfs$\UNC`, `\\sfs.localhost\C` and the configured alias. Network images can be opened through `\\sfs$\UNC\SERVER\SHARE\IMAGE`. Both host aliases use the same image pool. No extracted file tree is stored on disk to serve filesystem reads.

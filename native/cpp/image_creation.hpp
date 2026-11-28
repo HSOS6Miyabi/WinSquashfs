@@ -24,11 +24,15 @@ struct CreationOptions {
     static CreationOptions for_preset(ArchiveFormat format,CompressionPreset preset);
     std::vector<std::filesystem::path::string_type> arguments() const;
 };
+std::vector<std::filesystem::path> plan_batch_outputs(const std::vector<std::filesystem::path>& sources,
+    const std::filesystem::path& directory,std::u16string_view suffix);
 class ImageCreator {
 public:
     ImageCreator(std::filesystem::path tools,std::filesystem::path decoders):tools_(std::move(tools)),decoders_(std::move(decoders)){}
     void create(const std::vector<std::filesystem::path>& sources,const std::filesystem::path& destination,
                 CreationOptions options,LogSink log={},std::stop_token stop={}) const;
+    std::vector<std::filesystem::path> create_batch(const std::vector<std::filesystem::path>& sources,
+        const std::filesystem::path& directory,CreationOptions options,LogSink log={},std::stop_token stop={}) const;
 private:
     std::filesystem::path tools_,decoders_;
 };

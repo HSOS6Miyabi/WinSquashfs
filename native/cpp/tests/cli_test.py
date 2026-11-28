@@ -31,6 +31,12 @@ with tempfile.TemporaryDirectory(prefix='archivefs-cli-') as work:
         assert run('info', image).startswith(name + ' ')
         assert 'File\t8193\tdata.bin' in run('list', image)
         assert 'File\t20\tsmall.txt' in run('list', image, 'folder')
+        assert run('search', image, 'SMALL.TXT') == 'File\t20\t/folder/small.txt'
+        assert run('search', image, 'DATA', 'folder') == ''
+        assert run('search', image, 'data') == 'File\t8193\t/data.bin'
+        assert run('search', image, 'not-found') == ''
+        run('search', image, '', success=False)
+        run('search', image, 'txt', 'missing', success=False)
         assert '文件\t8193\tdata.bin' in run('--lang', 'zh-CN', 'list', image)
         assert run('read', image, 'data.bin', 1000, 97) == data[1000:1097].hex().upper()
         assert run('read', image, 'data.bin', 8190, 20) == data[8190:].hex().upper()
@@ -42,5 +48,16 @@ with tempfile.TemporaryDirectory(prefix='archivefs-cli-') as work:
         run('unpack', image, output, success=False)
         run('read', image, 'data.bin', -1, 1, success=False)
         run('read', image, 'data.bin', 0, 16777217, success=False)
+    extracted = directory / 'batch-extracted'
+    extracted.mkdir()
+    inputs = [directory / f'{name}.img' for name in ['SquashFS', 'DwarFS', 'EROFS']]
+    run('batch-unpack', extracted, *inputs)
+    for image in inputs:
+        assert (extracted / (image.name + '.extracted') / 'data.bin').read_bytes() == data
+    run('batch-unpack', extracted, *inputs, success=False)
+    empty = directory / 'duplicates'
+    empty.mkdir()
+    run('batch-unpack', empty, inputs[0], inputs[0], success=False)
+    assert not list(empty.iterdir())
     run('info', directory / 'missing.img', success=False)
 print('PASS CLI format dispatch, Unicode output, random reads, verification, extraction and argument validation')

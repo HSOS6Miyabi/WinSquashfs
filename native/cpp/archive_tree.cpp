@@ -286,6 +286,50 @@ ArchiveTree::NodePtr ArchiveTree::find(std::u16string_view path) const {
     reader_->stat(current->info.inode);
     return current;
 }
+std::u16string ArchiveTree::path_of(const NodePtr& node) const {
+    validate_node(node);
+    std::vector<NodePtr> components;
+    for(auto current=node;current&&current!=root_;current=current->parent.lock())components.push_back(current);
+    std::u16string path;
+    for(auto it=components.rbegin();it!=components.rend();++it){path+=u'/';path+=(*it)->windows_name;}
+    return path.empty()?u"/":path;
+}
+ArchiveTree::SearchReport ArchiveTree::search(const NodePtr& directory,std::u16string_view query,
+                                               std::size_t limit,std::stop_token token) const {
+    validate_node(directory);check_stop(token);
+    if(directory->info.kind!=FileKind::directory||query.empty()||!limit)
+        throw std::invalid_argument("invalid search parameters");
+    auto matches=[query](std::u16string_view value){
+        if(value.size()<query.size())return false;
+        WindowsNameLess less;
+        for(std::size_t i=0;i<=value.size()-query.size();++i){
+            auto candidate=value.substr(i,query.size());
+            if(!less(candidate,query)&&!less(query,candidate))return true;
+        }
+        return false;
+    };
+    SearchReport result;
+    std::vector<NodePtr> pending{directory};
+    std::unordered_set<InodeId> visited;
+    while(!pending.empty()){
+        check_stop(token);
+        auto current=std::move(pending.back());pending.pop_back();
+        if(!visited.insert(current->info.inode).second)throw std::runtime_error("archive directory cycle");
+        auto entries=children(current);
+        for(auto& node:entries){
+            check_stop(token);
+            bool matched=matches(node->windows_name);
+            if(!matched){try{matched=matches(to_utf16(node->name));}catch(const std::invalid_argument&){}}
+            if(matched){
+                if(result.nodes.size()==limit){result.truncated=true;return result;}
+                result.nodes.push_back(node);
+            }
+        }
+        for(auto it=entries.rbegin();it!=entries.rend();++it)
+            if((*it)->info.kind==FileKind::directory)pending.push_back(*it);
+    }
+    return result;
+}
 std::size_t ArchiveTree::read(const NodePtr& node,std::uint64_t offset,std::span<std::byte> output,std::stop_token token) const {
     validate_node(node);
     return reader_->read_at(node->info.inode,offset,output,token);
@@ -293,12 +337,13 @@ std::size_t ArchiveTree::read(const NodePtr& node,std::uint64_t offset,std::span
 ArchiveTree::VerifyReport ArchiveTree::verify(std::stop_token token) const {
     VerifyReport report;
     std::vector<NodePtr> pending{root_};
-    std::unordered_set<InodeId> seen;
+    std::unordered_set<InodeId> seen,visited_dirs;
     std::vector<std::byte> buffer(1u<<20);
     while(!pending.empty()) {
         check_stop(token);
         auto node=std::move(pending.back());pending.pop_back();
         if(node->info.kind==FileKind::directory) {
+            if(!visited_dirs.insert(node->info.inode).second)throw std::runtime_error("archive directory cycle");
             for(auto& child:children(node)) pending.push_back(std::move(child));
         } else if(node->info.kind==FileKind::regular&&seen.insert(node->info.inode).second) {
             for(std::uint64_t offset=0;offset<node->info.size;) {
@@ -340,9 +385,11 @@ void ArchiveTree::extract(const NodePtr& node,const std::filesystem::path& desti
         std::filesystem::create_directory(payload);
         using Item=std::pair<NodePtr,std::filesystem::path>;
         std::vector<Item> pending{{node,payload}}, directories;
+        std::unordered_set<InodeId> visited_dirs;
         while(!pending.empty()) {
             check_stop(token);
             auto item=std::move(pending.back());pending.pop_back();
+            if(!visited_dirs.insert(item.first->info.inode).second)throw std::runtime_error("archive directory cycle");
             directories.push_back(item);
             for(auto& child:children(item.first)) {
                 check_stop(token);

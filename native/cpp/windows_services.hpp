@@ -4,17 +4,23 @@
 #include <filesystem>
 #include <stop_token>
 namespace archivefs {
+struct LocalAlias {std::u16string name;std::filesystem::path root;};
 struct Settings {
     std::filesystem::path root;
+    std::vector<LocalAlias> extra_shares;
     std::u16string alias=u"path";
-    bool include_drives=true,start_at_login=false;
-    unsigned idle_seconds=60,max_idle_images=8,cache_mib=64;
-    std::string language="system";
+    bool include_drives=true,start_at_login=false,show_tray_icon=true;
+    bool enable_mtp=true,enable_adb=true,enable_adb_root=true,show_open_progress=true;
+    unsigned adb_port=5037;
+    unsigned idle_seconds=60,max_idle_images=8,cache_mib=64,total_cache_mib=512;
+    std::string language="system",theme="system";
     static Settings load();
     void save() const;
     std::vector<Share> shares()const;
     std::u16string unc_path(const std::filesystem::path& source)const;
 };
+std::shared_ptr<DeviceProvider> make_device_provider(std::u16string_view kind,const Settings& settings);
+std::vector<std::u16string> enabled_device_shares(const Settings& settings);
 std::filesystem::path application_directory();
 std::filesystem::path settings_directory();
 std::vector<std::filesystem::path> recent_images();

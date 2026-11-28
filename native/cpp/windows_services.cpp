@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "windows_services.hpp"
+#include "desktop_notifications.hpp"
+#include <limits>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -47,7 +49,19 @@ std::wstring eject_name(std::u16string_view drive,std::wstring_view suffix){
 }
 fs::path known_folder(REFKNOWNFOLDERID folder){PWSTR p=nullptr;if(FAILED(SHGetKnownFolderPath(folder,0,nullptr,&p)))throw std::runtime_error("cannot resolve user folder");fs::path result(p);CoTaskMemFree(p);return result;}
 void cancelled(std::stop_token s){if(s.stop_requested())throw std::runtime_error("operation cancelled");}
-void validate(const Settings& s){if(s.root.empty()||!s.root.is_absolute()||s.alias.empty()||s.alias.size()>64||s.alias.find_first_of(u"\\/:*?\"<>| ")!=std::u16string::npos||s.alias==u"."||s.alias==u".."||(!WindowsNameLess{}(s.alias,u"UNC")&&!WindowsNameLess{}(u"UNC",s.alias))||s.idle_seconds>86400||s.max_idle_images>1024||s.cache_mib>4096)throw std::invalid_argument("invalid UNC settings");if(s.language!="system"&&s.language!="en-US"&&s.language!="zh-CN")throw std::invalid_argument("invalid language");}
+void validate(const Settings& s){
+    auto valid_alias=[](std::u16string_view alias){return !alias.empty()&&alias.size()<=64&&alias.find_first_of(u"\\/:*?\"<>| ")==std::u16string_view::npos&&alias!=u"."&&alias!=u".."&&alias.back()!=u'.'&&
+        !std::any_of(alias.begin(),alias.end(),[](char16_t c){return c<32;});};
+    std::set<std::u16string,WindowsNameLess> aliases{u"UNC",u"mtp",u"adb",u"adb.r"};
+    if(!s.adb_port||s.adb_port>65535)throw std::invalid_argument("invalid ADB Server port");
+    if(s.root.empty()||!s.root.is_absolute()||!valid_alias(s.alias)||!aliases.insert(s.alias).second||
+       s.idle_seconds>86400||s.max_idle_images>1024||s.cache_mib>4096||s.cache_mib>(std::numeric_limits<std::size_t>::max()>>20)||s.total_cache_mib>4096||s.total_cache_mib>(std::numeric_limits<std::size_t>::max()>>20)||s.extra_shares.size()>64)throw std::invalid_argument("invalid UNC settings");
+    for(auto const& extra:s.extra_shares)
+        if(extra.root.empty()||!extra.root.is_absolute()||!valid_alias(extra.name)||!aliases.insert(extra.name).second)
+            throw std::invalid_argument("invalid or duplicate directory alias");
+    if(s.language!="system"&&s.language!="en-US"&&s.language!="zh-CN")throw std::invalid_argument("invalid language");
+    if(s.theme!="system"&&s.theme!="light"&&s.theme!="dark")throw std::invalid_argument("invalid theme");
+}
 void autostart(bool enable){HKEY key=nullptr;auto rc=RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr);if(rc!=ERROR_SUCCESS)throw std::system_error(static_cast<int>(rc),std::system_category(),"login startup registry");struct Key{HKEY h;~Key(){RegCloseKey(h);}}guard{key};if(enable){auto value=L"\""+(application_directory()/L"WinArchiveFSPro.Unc.exe").wstring()+L"\"";rc=RegSetValueExW(key,L"WinArchiveFSProUNC",0,REG_SZ,reinterpret_cast<const BYTE*>(value.c_str()),static_cast<DWORD>((value.size()+1)*sizeof(wchar_t)));}else{rc=RegDeleteValueW(key,L"WinArchiveFSProUNC");if(rc==ERROR_FILE_NOT_FOUND)rc=ERROR_SUCCESS;}if(rc!=ERROR_SUCCESS)throw std::system_error(static_cast<int>(rc),std::system_category(),"login startup registry");}
 bool instance_stopped(){auto name=agent_name(L"Instance");Handle h(OpenMutexW(SYNCHRONIZE|MUTEX_MODIFY_STATE,FALSE,name.c_str()));if(!h){if(GetLastError()==ERROR_FILE_NOT_FOUND)return true;fail("OpenMutexW");}auto wait=WaitForSingleObject(h.value,0);if(wait==WAIT_OBJECT_0||wait==WAIT_ABANDONED){ReleaseMutex(h.value);return true;}if(wait==WAIT_TIMEOUT)return false;fail("WaitForSingleObject");}
 }
@@ -67,8 +81,8 @@ void save_recent(const std::vector<fs::path>& paths){
 std::vector<fs::path> recent_images(){try{auto path=settings_directory()/L"recent.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"recent.json";if(!fs::exists(path)||fs::file_size(path)>1u<<20)return {};std::ifstream input(path,std::ios::binary);auto json=nlohmann::json::parse(input);std::vector<fs::path> paths;for(auto& value:json){if(paths.size()==15)break;paths.emplace_back(to_utf16(value.get<std::string>()));}return paths;}catch(...){return {};}}
 void remember_image(const fs::path& path){try{auto paths=recent_images();auto full=fs::absolute(path).lexically_normal();auto name=full.u16string();std::erase_if(paths,[&](auto& p){auto other=p.u16string();WindowsNameLess less;return !less(name,other)&&!less(other,name);});paths.insert(paths.begin(),full);if(paths.size()>15)paths.resize(15);save_recent(paths);}catch(...){}}
 void clear_recent_images(){save_recent({});}
-Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){std::ifstream in(path,std::ios::binary);auto j=nlohmann::json::parse(in);s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.language=j.value("Language",std::string("system"));}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
-void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";auto temporary=path;temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";struct Cleanup{fs::path path;~Cleanup(){std::error_code ec;fs::remove(path,ec);}}cleanup{temporary};nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"Language",language}};{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::badbit|std::ios::failbit);out<<j.dump(2)<<'\n';out.close();}if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save settings");autostart(start_at_login);}
+Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){std::ifstream in(path,std::ios::binary);auto j=nlohmann::json::parse(in);s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.show_tray_icon=j.value("ShowTrayIcon",true);s.enable_mtp=j.value("EnableMtp",true);s.enable_adb=j.value("EnableAdb",true);s.enable_adb_root=j.value("EnableAdbRoot",true);s.show_open_progress=j.value("ShowOpenProgress",true);s.adb_port=j.value("AdbPort",5037u);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.total_cache_mib=j.value("TotalCacheMiB",512u);s.language=j.value("Language",std::string("system"));s.theme=j.value("Theme",std::string("system"));for(auto const& item:j.value("ExtraShares",nlohmann::json::array()))s.extra_shares.push_back({to_utf16(item.at("Alias").get<std::string>()),fs::path(to_utf16(item.at("Root").get<std::string>()))});}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
+void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";auto temporary=path;temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";struct Cleanup{fs::path path;~Cleanup(){std::error_code ec;fs::remove(path,ec);}}cleanup{temporary};nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"ShowTrayIcon",show_tray_icon},{"EnableMtp",enable_mtp},{"EnableAdb",enable_adb},{"EnableAdbRoot",enable_adb_root},{"ShowOpenProgress",show_open_progress},{"AdbPort",adb_port},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"TotalCacheMiB",total_cache_mib},{"Language",language},{"Theme",theme}};j["ExtraShares"]=nlohmann::json::array();for(auto const& extra:extra_shares)j["ExtraShares"].push_back({{"Alias",to_utf8(extra.name)},{"Root",to_utf8(extra.root.u16string())}});{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::badbit|std::ios::failbit);out<<j.dump(2)<<'\n';out.close();}if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save settings");autostart(start_at_login);}
 void migrate_settings(){
     auto current=settings_directory();
     auto legacy=current.parent_path()/L"WinSquashfs";
@@ -76,8 +90,28 @@ void migrate_settings(){
        (fs::exists(legacy/L"unc.json")||fs::exists(legacy/L"language.txt")))Settings::load().save();
     if(!fs::exists(current/L"recent.json")&&fs::exists(legacy/L"recent.json"))save_recent(recent_images());
 }
-std::vector<Share> Settings::shares()const{validate(*this);std::vector<Share> result;for(auto server:{u"sfs$",u"sfs.localhost"}){result.push_back({alias,root,false,server});if(include_drives){auto mask=GetLogicalDrives();for(unsigned i=0;i<26;++i){if(!(mask&(1u<<i)))continue;std::u16string name(1,static_cast<char16_t>(u'A'+i));if(!WindowsNameLess{}(name,alias)&&!WindowsNameLess{}(alias,name))throw std::invalid_argument("UNC alias conflicts with drive letter");auto drive=fs::path(name+u":\\");wchar_t format[64]{};if(GetVolumeInformationW(drive.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)&&(!_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS")))continue;result.push_back({name,drive,false,server});}}result.push_back({u"UNC",{},true,server});}return result;}
-std::u16string Settings::unc_path(const fs::path& source)const{auto p=fs::absolute(source).lexically_normal();if(p.u16string().starts_with(u"\\\\?\\UNC\\"))p=fs::path(u"\\\\"+p.u16string().substr(8));bool remote=p.u16string().starts_with(u"\\\\");for(auto& s:shares())if(s.server==u"sfs$"&&s.network==remote)if(auto path=image_unc_path(s,p))return *path;throw std::invalid_argument("image is outside the configured UNC shares");}
+std::vector<Share> Settings::shares()const{validate(*this);std::vector<Share> result;for(auto server:{u"sfs$",u"sfs.localhost"}){result.push_back({alias,root,false,server});for(auto const& extra:extra_shares)result.push_back({extra.name,extra.root,false,server});if(include_drives){auto mask=GetLogicalDrives();for(unsigned i=0;i<26;++i){if(!(mask&(1u<<i)))continue;std::u16string name(1,static_cast<char16_t>(u'A'+i));if(std::any_of(result.begin(),result.end(),[&](auto const& share){WindowsNameLess less;return share.server==server&&!less(share.name,name)&&!less(name,share.name);}))continue;auto drive=fs::path(name+u":\\");wchar_t format[64]{};if(GetVolumeInformationW(drive.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)&&(!_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS")))continue;result.push_back({name,drive,false,server});}}result.push_back({u"UNC",{},true,server});}return result;}
+std::u16string Settings::unc_path(const fs::path& source)const{auto p=fs::absolute(source).lexically_normal();if(p.u16string().starts_with(u"\\\\?\\UNC\\"))p=fs::path(u"\\\\"+p.u16string().substr(8));bool remote=p.u16string().starts_with(u"\\\\");
+    if(remote){
+        auto value=p.u16string();auto end=value.find(u'\\',2);
+        if(end!=value.npos){
+            auto host=std::u16string_view(value).substr(2,end-2);
+            WindowsNameLess less;auto equal=[&](std::u16string_view a,std::u16string_view b){return !less(a,b)&&!less(b,a);};
+            if(equal(host,u"sfs$")||equal(host,u"sfs.localhost")||(host.size()>14&&equal(host.substr(0,4),u"sfs.")&&equal(host.substr(host.size()-10),u".localhost")))return value;
+        }
+    }for(auto& s:shares())if(s.server==u"sfs$"&&s.network==remote)if(auto path=image_unc_path(s,p))return *path;throw std::invalid_argument("image is outside the configured UNC shares");}
+std::vector<std::u16string> enabled_device_shares(const Settings& settings){
+    std::vector<std::u16string> result;
+    if(settings.enable_mtp)result.push_back(u"mtp");
+    if(settings.enable_adb)result.push_back(u"adb");
+    if(settings.enable_adb_root)result.push_back(u"adb.r");
+    return result;
+}
+std::shared_ptr<DeviceProvider> make_device_provider(std::u16string_view kind,const Settings& settings){
+    if(kind==u"mtp")return make_mtp_provider();
+    if(kind==u"adb"||kind==u"adb.r"){AdbOptions options;options.root=kind==u"adb.r";options.port=static_cast<std::uint16_t>(settings.adb_port);return make_adb_provider(options);}
+    throw std::invalid_argument("unknown device namespace");
+}
 void open_in_explorer(std::u16string_view path){auto p=wide(path);auto result=ShellExecuteW(nullptr,L"open",p.c_str(),nullptr,nullptr,SW_SHOWNORMAL);if(reinterpret_cast<INT_PTR>(result)<=32)throw std::runtime_error("Explorer could not open the path");}
 bool agent_running(){Handle h(OpenEventW(SYNCHRONIZE,FALSE,agent_name(L"Ready").c_str()));return h&&WaitForSingleObject(h.value,0)==WAIT_OBJECT_0;}
 void start_agent(std::stop_token stop){cancelled(stop);if(agent_running())return;winfsp_runtime_info();auto executable=application_directory()/L"WinArchiveFSPro.Unc.exe";auto command=L"\""+executable.wstring()+L"\"";STARTUPINFOW si{};si.cb=sizeof(si);PROCESS_INFORMATION pi{};if(!CreateProcessW(executable.c_str(),command.data(),nullptr,nullptr,FALSE,DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP,nullptr,executable.parent_path().c_str(),&si,&pi))fail("start UNC agent");Handle proc(pi.hProcess),thread(pi.hThread);std::stop_callback cancel_start(stop,[&] noexcept {try{if(!agent_running())TerminateProcess(proc.value,1);}catch(...){TerminateProcess(proc.value,1);}});for(unsigned i=0;i<300;++i){if(agent_running())return;cancelled(stop);if(WaitForSingleObject(proc.value,50)==WAIT_OBJECT_0){if(instance_stopped())break;std::this_thread::sleep_for(50ms);}}if(!agent_running()&&WaitForSingleObject(proc.value,0)==WAIT_TIMEOUT)TerminateProcess(proc.value,1);throw std::runtime_error("UNC agent did not become ready; see unc.log in application settings");}
@@ -124,6 +158,7 @@ std::optional<RemoteAlias> source_alias(const fs::path& source){
        value.starts_with(u"\\\\.\\"))return std::nullopt;
     auto host_end=value.find(u'\\',2);
     if(host_end==std::u16string::npos)return std::nullopt;
+    if(reserved_host(std::u16string_view(value).substr(2,host_end-2)))return std::nullopt;
     auto share_end=value.find(u'\\',host_end+1);
     if(share_end==std::u16string::npos||share_end==value.size()-1)return std::nullopt;
     return parse_alias(value.substr(2,host_end-2),value.substr(host_end+1,share_end-host_end-1));
@@ -178,8 +213,11 @@ bool alias_active(std::u16string_view prefix){
 }
 class RemoteAliasMounts {
 public:
-    explicit RemoteAliasMounts(std::shared_ptr<ImagePool> pool,const std::vector<Share>& builtin):pool_(std::move(pool)){
+    explicit RemoteAliasMounts(std::shared_ptr<ImagePool> pool,const std::vector<Share>& builtin,bool reserve_drives):pool_(std::move(pool)){
         for(auto& share:builtin)reserved_.insert(u"\\"+share.server+u"\\"+share.name);
+        if(reserve_drives)for(auto server:{u"sfs$",u"sfs.localhost"})
+            for(char16_t letter=u'A';letter<=u'Z';++letter)
+                reserved_.insert(std::u16string(u"\\")+server+u"\\"+letter);
     }
     void refresh(){
         AliasLock lock;
@@ -210,6 +248,64 @@ private:
 };
 }
 
+namespace {
+class AgentTray {
+public:
+    AgentTray(HANDLE stop,bool enabled,bool chinese)noexcept:stop_(stop),chinese_(chinese){
+        if(!enabled)return;
+        try{
+            HINSTANCE instance=GetModuleHandleW(nullptr);
+            WNDCLASSW cls{};cls.lpfnWndProc=&window_proc;cls.hInstance=instance;cls.lpszClassName=class_name;
+            if(!RegisterClassW(&cls)&&GetLastError()!=ERROR_CLASS_ALREADY_EXISTS)return;
+            taskbar_created_=RegisterWindowMessageW(L"TaskbarCreated");
+            auto path=application_directory()/L"Assets"/L"app-icon.ico";
+            icon_=static_cast<HICON>(LoadImageW(nullptr,path.c_str(),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_LOADFROMFILE));
+            owns_icon_=icon_!=nullptr;
+            if(!icon_)icon_=LoadIconW(nullptr,MAKEINTRESOURCEW(32512));
+            window_=CreateWindowExW(WS_EX_TOOLWINDOW,class_name,L"WinArchiveFSPro UNC",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,this);
+            if(window_)add_icon();
+        }catch(...){}
+    }
+    AgentTray(const AgentTray&)=delete;
+    AgentTray& operator=(const AgentTray&)=delete;
+    ~AgentTray(){if(window_){NOTIFYICONDATAW data{};data.cbSize=sizeof(data);data.hWnd=window_;data.uID=1;Shell_NotifyIconW(NIM_DELETE,&data);DestroyWindow(window_);}if(owns_icon_&&icon_)DestroyIcon(icon_);}
+    static void dispatch(){MSG msg{};while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
+private:
+    static constexpr wchar_t class_name[]=L"WinArchiveFSPro.Unc.Tray";
+    static constexpr UINT callback=WM_APP+1;
+    HANDLE stop_;bool chinese_,owns_icon_=false;HWND window_=nullptr;HICON icon_=nullptr;UINT taskbar_created_=0;
+    void add_icon()noexcept{
+        NOTIFYICONDATAW data{};data.cbSize=sizeof(data);data.hWnd=window_;data.uID=1;data.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;data.uCallbackMessage=callback;data.hIcon=icon_;
+        lstrcpynW(data.szTip,chinese_?L"WinArchiveFSPro — UNC 访问运行中":L"WinArchiveFSPro — UNC access running",static_cast<int>(std::size(data.szTip)));
+        Shell_NotifyIconW(NIM_ADD,&data);
+    }
+    void open_gui()noexcept{try{auto path=application_directory()/L"WinArchiveFSPro.exe";ShellExecuteW(window_,L"open",path.c_str(),nullptr,nullptr,SW_SHOWNORMAL);}catch(...){}}
+    void menu()noexcept{
+        POINT cursor{};if(!GetCursorPos(&cursor))return;
+        HMENU menu=CreatePopupMenu();if(!menu)return;
+        AppendMenuW(menu,MF_STRING,1,chinese_?L"打开 WinArchiveFSPro":L"Open WinArchiveFSPro");
+        AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+        AppendMenuW(menu,MF_STRING,2,chinese_?L"停止 UNC 访问":L"Stop UNC access");
+        SetForegroundWindow(window_);
+        auto timer=SetTimer(window_,1,100,nullptr);
+        auto choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,window_,nullptr);
+        if(timer)KillTimer(window_,timer);
+        DestroyMenu(menu);PostMessageW(window_,WM_NULL,0,0);
+        if(choice==1)open_gui();else if(choice==2)SetEvent(stop_);
+    }
+    static LRESULT CALLBACK window_proc(HWND hwnd,UINT msg,WPARAM wparam,LPARAM lparam){
+        if(msg==WM_NCCREATE){auto create=reinterpret_cast<CREATESTRUCTW*>(lparam);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(create->lpCreateParams));}
+        auto self=reinterpret_cast<AgentTray*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));
+        if(self){
+            if(self->taskbar_created_&&msg==self->taskbar_created_){self->add_icon();return 0;}
+            if(msg==callback){if(lparam==WM_LBUTTONDBLCLK)self->open_gui();else if(lparam==WM_RBUTTONUP||lparam==WM_CONTEXTMENU)self->menu();return 0;}
+            if(msg==WM_TIMER&&wparam==1){if(WaitForSingleObject(self->stop_,0)==WAIT_OBJECT_0)EndMenu();return 0;}
+            if(msg==WM_CLOSE)return 0;
+        }
+        return DefWindowProcW(hwnd,msg,wparam,lparam);
+    }
+};
+}
 int run_agent(){
     winfsp_runtime_info();
     UserSecurity security;
@@ -225,23 +321,68 @@ int run_agent(){
     if(!stop||!ready||!aliases)fail("CreateEventW");
     ResetEvent(ready.value);ResetEvent(stop.value);
     auto settings=Settings::load();
-    auto pool=std::make_shared<ImagePool>(make_archive_opener(application_directory(),
-        static_cast<std::size_t>(settings.cache_mib)<<20),
-        ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images});
+    const bool chinese=settings.language=="zh-CN"||(settings.language=="system"&&PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_CHINESE);
+    auto notifications=std::make_shared<DesktopNotifications>(application_directory(),chinese);
+    OpenProgressSink progress;
+    if(settings.show_open_progress)progress=[notifications](std::shared_ptr<OpenProgress> p){notifications->opening(std::move(p));};
+    auto open_source=make_archive_source_opener(application_directory(),static_cast<std::size_t>(settings.cache_mib)<<20,static_cast<std::size_t>(settings.total_cache_mib)<<20);
+    auto pool=std::make_shared<ImagePool>([open_source](const fs::path& path,SourcePolicy policy){return open_source(open_file_source(path,policy));},
+        ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images},open_source,std::move(progress));
     auto shares=settings.shares();
-    std::vector<std::unique_ptr<NativeMount>> mounts;
-    for(auto& share:shares)mounts.push_back(std::make_unique<NativeMount>(
-        unc_projection(share,pool),u"",u"\\"+share.server+u"\\"+share.name));
-    RemoteAliasMounts remote(pool,shares);
+    std::map<std::u16string,std::unique_ptr<NativeMount>,WindowsNameLess> mounts;
+    auto update_mounts=[&](const std::vector<Share>& current,bool initial){
+        std::set<std::u16string,WindowsNameLess> wanted;
+        bool complete=true;
+        for(auto& share:current){
+            auto prefix=u"\\"+share.server+u"\\"+share.name;
+            wanted.insert(prefix);
+            if(mounts.contains(prefix))continue;
+            try{mounts.emplace(prefix,std::make_unique<NativeMount>(unc_projection(share,pool),u"",prefix));}
+            catch(...){if(initial)throw;complete=false;}
+        }
+        std::erase_if(mounts,[&](const auto& entry){return !wanted.contains(entry.first);});
+        return complete;
+    };
+    update_mounts(shares,true);
+    DWORD drive_mask=GetLogicalDrives();
+    std::vector<std::unique_ptr<NativeMount>> device_mounts;
+    std::vector<std::shared_ptr<DeviceProvider>> providers;
+    // Cancel active device I/O before destroying the WinFsp dispatchers.
+    struct CancelProviders{std::vector<std::shared_ptr<DeviceProvider>>& providers;~CancelProviders(){for(auto& p:providers)p->cancel();}} cancel_providers{providers};
+    auto reserved=shares;
+    for(auto server:{u"sfs$",u"sfs.localhost"})for(auto kind:{u"mtp",u"adb",u"adb.r"})reserved.push_back({kind,{},false,server});
+    for(auto const& kind:enabled_device_shares(settings)){
+        auto provider=make_device_provider(kind,settings);providers.push_back(provider);
+        auto projection=device_projection(std::move(provider),pool,kind,[notifications,kind,chinese,port=settings.adb_port](const DeviceFailure& e){
+            auto title=kind+(chinese?u" 设备访问失败":u" device access failed");
+            std::u16string message;
+            if(kind!=u"mtp"&&e.code()==DeviceError::unavailable)
+                message=(chinese?u"无法连接本地 ADB Server（127.0.0.1:":u"Cannot connect to the local ADB Server (127.0.0.1:")+to_utf16(std::to_string(port))+
+                    (chinese?u"）。请先启动 ADB 服务，再重新打开目录。":u"). Start the existing ADB service before reopening this folder.");
+            else message=to_utf16(e.what());
+            notifications->error(std::move(title),std::move(message));
+        });
+        for(auto server:{u"sfs$",u"sfs.localhost"})
+            device_mounts.push_back(std::make_unique<NativeMount>(projection,u"",std::u16string(u"\\")+server+u"\\"+kind));
+    }
+    RemoteAliasMounts remote(pool,reserved,settings.include_drives);
     try{remote.refresh();}catch(const std::exception&){}
+    AgentTray tray(stop.value,settings.show_tray_icon,settings.language=="zh-CN"||(settings.language=="system"&&PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_CHINESE));
     if(!SetEvent(ready.value))fail("SetEvent");
     struct ResetReady{HANDLE event;~ResetReady(){ResetEvent(event);}}reset_ready{ready.value};
     HANDLE events[]{stop.value,aliases.value};
     for(;;){
-        auto result=WaitForMultipleObjects(2,events,FALSE,INFINITE);
-        if(result==WAIT_OBJECT_0)break;
-        if(result!=WAIT_OBJECT_0+1)fail("wait for UNC agent");
-        try{remote.refresh();}catch(const std::exception&){}
+        auto result=MsgWaitForMultipleObjectsEx(2,events,settings.include_drives?1000:INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
+        if(result==WAIT_OBJECT_0){for(auto& provider:providers)provider->cancel();break;}
+        if(result==WAIT_OBJECT_0+1){try{remote.refresh();}catch(const std::exception&){}}
+        else if(result==WAIT_OBJECT_0+2)AgentTray::dispatch();
+        else if(result!=WAIT_TIMEOUT)fail("wait for UNC agent");
+        if(settings.include_drives){
+            auto mask=GetLogicalDrives();
+            if(mask&&mask!=drive_mask){
+                try{if(update_mounts(settings.shares(),false))drive_mask=mask;}catch(const std::exception&){}
+            }
+        }
     }
     return 0;
 }
@@ -285,5 +426,5 @@ bool MountedVolume::mounted()const noexcept{return WaitForSingleObject(impl_->do
 void MountedVolume::wait(std::stop_token token){std::stop_callback callback(token,[this]{SetEvent(impl_->stop.value);});if(WaitForSingleObject(impl_->done.value,INFINITE)!=WAIT_OBJECT_0)fail("wait for unmount");}
 void MountedVolume::unmount(){SetEvent(impl_->stop.value);wait();}
 void eject_volume(std::u16string_view drive){Handle done(OpenEventW(SYNCHRONIZE,FALSE,eject_name(drive,L"Done").c_str()));if(!done)fail("find mounted image");Handle stop(OpenEventW(EVENT_MODIFY_STATE,FALSE,eject_name(drive,L"Stop").c_str()));if(!stop)fail("find mounted image");if(!SetEvent(stop.value))fail("request eject");if(WaitForSingleObject(done.value,20000)!=WAIT_OBJECT_0)throw std::runtime_error("eject did not finish");}
-void serve_share(Share share,const fs::path& decoders,unsigned idle_seconds,std::stop_token stop){if(idle_seconds>86400)throw std::invalid_argument("invalid idle timeout");winfsp_runtime_info();auto pool=std::make_shared<ImagePool>(make_archive_opener(decoders),ImagePool::Settings{std::chrono::seconds(idle_seconds),8});NativeMount mount(unc_projection(share,pool),u"",u"\\"+share.server+u"\\"+share.name);std::mutex mutex;std::condition_variable_any cv;std::unique_lock lock(mutex);cv.wait(lock,stop,[]{return false;});}
+void serve_share(Share share,const fs::path& decoders,unsigned idle_seconds,std::stop_token stop){if(idle_seconds>86400)throw std::invalid_argument("invalid idle timeout");winfsp_runtime_info();auto open_source=make_archive_source_opener(decoders);auto pool=std::make_shared<ImagePool>([open_source](const fs::path& path,SourcePolicy policy){return open_source(open_file_source(path,policy));},ImagePool::Settings{std::chrono::seconds(idle_seconds),8},open_source);NativeMount mount(unc_projection(share,pool),u"",u"\\"+share.server+u"\\"+share.name);std::mutex mutex;std::condition_variable_any cv;std::unique_lock lock(mutex);cv.wait(lock,stop,[]{return false;});}
 }

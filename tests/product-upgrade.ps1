@@ -15,6 +15,13 @@ try {
     if($p.ExitCode){throw "Previous installer exit $($p.ExitCode)"}
     $old=(Get-ItemProperty 'HKLM:\Software\WinSquashfs').InstallDir
     if(!(Test-Path "$old\app\WinSquashfs.exe")){throw 'Previous product was not installed'}
+    $benchmark=Join-Path $PSScriptRoot '../native/cpp/scripts/windows_mount_benchmark.py'
+    $benchRoot=Join-Path $root 'benchmark'
+    $benchOut=Join-Path (Get-Location) 'artifacts/mount-comparison'
+    python $benchmark prepare --root $benchRoot
+    if($LASTEXITCODE){throw 'Cannot prepare benchmark'}
+    python $benchmark measure --root $benchRoot --cli "$old\app\winsqfs.exe" --label legacy --output "$benchOut\legacy.json"
+    if($LASTEXITCODE){throw 'Previous product benchmark failed'}
     [IO.File]::WriteAllText("$oldSettings\unc.json",(@{Root=$root;Alias='upgrade-test';IncludeDrives=$false;IdleSeconds=47;MaxIdleImages=3;StartAtLogin=$true}|ConvertTo-Json -Compress))
     [IO.File]::WriteAllText("$oldSettings\language.txt",'zh-CN')
     $image=Join-Path $root 'migrated.squashfs'
@@ -26,6 +33,10 @@ try {
     if($p.ExitCode){throw "Upgrade installer exit $($p.ExitCode)"}
     $new=(Get-ItemProperty 'HKLM:\Software\WinArchiveFSPro').InstallDir
     $app=Join-Path $new 'app'
+    python $benchmark measure --root $benchRoot --cli "$app\archivefs.exe" --label native --output "$benchOut\native.json"
+    if($LASTEXITCODE){throw 'Native product benchmark failed'}
+    python $benchmark compare --root $benchOut --output "$benchOut\comparison.json"
+    if($LASTEXITCODE){throw 'Benchmark comparison failed'}
     if(Test-Path 'HKLM:\Software\WinSquashfs'){throw 'Previous product registration remains'}
     if(Test-Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\WinSquashfs'){throw 'Previous uninstall entry remains'}
     $cfg=Get-Content "$newSettings\unc.json" -Raw|ConvertFrom-Json

@@ -39,24 +39,79 @@ try{
     Choose $w 'ImageFormat' $format
     $image=Join-Path $root ('gui.'+$format.ToLowerInvariant())
     Set-Value $w 'PackOutput' $image
+    if($format -eq 'SquashFS'){
+      $advanced=(Control $w 'AdvancedParameters').GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+      $advanced.Expand()
+      (Control $w 'OverridePreset').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+      Choose $w 'PackCodec' 'xz'
+      Choose $w 'PackCodec' 'gzip'
+      Save-WindowScreenshot $p 'create-SquashFS-advanced'
+      $advanced.Collapse()
+    }
     Save-WindowScreenshot $p ('create-'+$format)
     $button=Control $w 'CreateImage';if($button.Current.IsOffscreen){throw 'Creation button is offscreen'}
     Invoke-Control $w 'CreateImage'
     $null=Wait-Until {Test-Path $image} "create $format" 180
     $null=Control $w 'CreateImage'
     & $cli verify $image;if($LASTEXITCODE){throw "Invalid GUI-created $format"}
+    if($format -eq 'SquashFS'){
+      $info=& $cli info $image
+      if($LASTEXITCODE -or $info -notmatch '^SquashFS gzip '){throw "Codec switch failed: $info"}
+    }
     $images+=$image
   }
+  $batch=Join-Path $root 'batch'
+  New-Item -ItemType Directory $batch|Out-Null
+  Choose $w 'ImageFormat' 'SquashFS'
+  (Control $w 'SeparateArchives').GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle()
+  Set-Value $w 'PackOutput' $batch
+  Invoke-Control $w 'CreateImage'
+  $null=Wait-Until {(Test-Path "$batch\source.squashfs") -and (Test-Path "$batch\extra.txt.squashfs")} 'separate archive creation' 180
+  $null=Control $w 'CreateImage'
+  foreach($created in @("$batch\source.squashfs","$batch\extra.txt.squashfs")){
+    & $cli verify $created;if($LASTEXITCODE){throw "Invalid batch-created image: $created"}
+  }
+  Save-WindowScreenshot $p 'batch-create'
   Close-Gui
   $image=$images[0]
   $p=Start-Process $gui -ArgumentList @('--open',('"'+$image+'"')) -PassThru
   $w=Window $p 'FileList'
+  Assert-WindowDpiAwareness $p
   $null=Control $w 'MountImage'
+  Set-Value $w 'FileFilter' 'hello.txt'
+  Invoke-Control $w 'SearchSubtree'
+  $null=Wait-Until {foreach($item in (Items $w 'FileList')){if($item.Current.Name -like '*hello.txt*'){return $item}}} 'recursive file search'
+  Save-WindowScreenshot $p 'search-subfolders'
+  Set-Value $w 'FileFilter' ''
+  foreach($id in @('CloseImage','VerifyImage','ExtractAll','OpenUnc','CopyUnc')) {
+    if(!(Control $w $id $false).Current.IsEnabled){throw "Open image action disabled: $id"}
+  }
+  foreach($id in @('UpDirectory','ExtractSelected')) {
+    if((Control $w $id $false).Current.IsEnabled){throw "Root or unselected action enabled: $id"}
+  }
   $entry=Wait-Until {foreach($item in (Items $w 'FileList')){if($item.Current.Name -like 'extra.txt*'){return $item}}} 'file list entry'
   $entry.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
   $null=Wait-Until {(Value $w 'FilePreview') -like '*second selected file*'} 'file preview'
+  $null=Control $w 'ExtractSelected'
   Save-WindowScreenshot $p 'browser-preview'
   if((Control $w 'FilePreview' $false).Current.IsOffscreen){throw 'Preview is offscreen at the default desktop resolution'}
+  Save-WindowScreenshot $p 'browser-compact' 820 560
+  foreach($id in @('MountImage','ExtractSelected','ExtractAll')){
+    if((Control $w $id).Current.IsOffscreen){throw "Compact window action is offscreen: $id"}
+  }
+  Save-WindowScreenshot $p 'browser-restored'
+  $screenIndex=0
+  foreach($screen in [System.Windows.Forms.Screen]::AllScreens){
+    if(!$screen.Primary){
+      Save-WindowScreenshot $p "browser-display-$screenIndex" 1200 780 $screen
+      Assert-WindowDpiAwareness $p
+      foreach($id in @('MountImage','ExtractSelected','ExtractAll')){
+        if((Control $w $id).Current.IsOffscreen){throw "Monitor transition hid $id"}
+      }
+    }
+    $screenIndex++
+  }
+  Save-WindowScreenshot $p 'browser-primary'
   $before=@([IO.DriveInfo]::GetDrives().Name)
   Invoke-Control $w 'MountImage'
   $drive=Wait-Until {foreach($d in [IO.DriveInfo]::GetDrives()){if($d.Name -notin $before -and [IO.File]::Exists($d.Name+'extra.txt')){return $d.Name}}} 'mounted drive'
@@ -67,16 +122,72 @@ try{
   Save-WindowScreenshot $p 'mounted'
   Invoke-Control $w 'UnmountImage'
   $null=Wait-Until {!([IO.Directory]::Exists($drive))} 'eject drive'
+  $null=Wait-Until {!(Control $w 'UnmountImage' $false).Current.IsEnabled} 'eject disabled after unmount'
+  if((Control $w 'OpenMountedImage' $false).Current.IsEnabled){throw 'Open mount enabled without selection'}
+  Save-WindowScreenshot $p 'mount-empty'
+  Navigate $w 'NavTools'
+  Invoke-Control $w 'ThemeDark'
+  $null=Wait-Until {(Get-Content $settings -Raw|ConvertFrom-Json).Theme -eq 'dark'} 'dark theme preference'
+  Navigate $w 'NavBrowse'
+  Save-WindowScreenshot $p 'browser-dark'
   Navigate $w 'NavUnc'
+  $scroll=(Control $w 'PageScroll').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+  if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,0)}
+  $editor=Control $w 'ExtraShareEditor'
+  $editor.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+  foreach($id in @('ExtraShareName','ExtraSharePath','AddExtraShare')){
+    $element=Control $w $id $false
+    $scrollItem=$null
+    if($element.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern,[ref]$scrollItem)){$scrollItem.ScrollIntoView()}
+  }
+  Set-Value $w 'ExtraShareName' 'ui-extra'
+  Set-Value $w 'ExtraSharePath' $root
+  $null=Wait-Until {(Value $w 'ExtraShareName') -eq 'ui-extra' -and (Value $w 'ExtraSharePath') -eq $root} 'entered directory alias values'
+  $add=Control $w 'AddExtraShare'
+  $add.SetFocus()
+  Invoke-Control $w 'AddExtraShare'
+  try {
+    $null=Wait-Until {(Value $w 'ExtraShareName') -eq '' -and (Value $w 'ExtraSharePath') -eq ''} 'directory alias added'
+  } catch {
+    Save-WindowScreenshot $p 'alias-add-error'
+    throw "Directory alias addition failed: $((Control $w 'StatusText' $false).Current.Name)"
+  }
+  Save-WindowScreenshot $p 'unc-alias-editor'
+  Invoke-Control $w 'ApplyUnc'
+  try {
+    $null=Wait-Until {@((Get-Content $settings -Raw|ConvertFrom-Json).ExtraShares|Where-Object {$_.Alias -eq 'ui-extra' -and $_.Root -eq $root}).Count -eq 1} 'saved additional share'
+  } catch {
+    Save-WindowScreenshot $p 'alias-save-error'
+    throw "Directory alias save failed: $((Control $w 'StatusText' $false).Current.Name)"
+  }
+  $editor.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
+  $null=Control $w 'PageScroll'
+  if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,0)}
   Invoke-Control $w 'StartUnc'
   $unc='\\sfs$\'+$alias+'\'+[IO.Path]::GetFileName($image)
   $null=Wait-Until {[IO.File]::Exists($unc+'\extra.txt')} 'UNC start'
   if([IO.File]::ReadAllText($unc+'\extra.txt') -ne 'second selected file'){throw 'Wrong UNC file data'}
-  Save-WindowScreenshot $p 'unc'
+  $extraUnc='\\sfs$\ui-extra\'+[IO.Path]::GetFileName($image)+'\extra.txt'
+  if([IO.File]::ReadAllText($extraUnc) -ne 'second selected file'){throw 'Wrong additional alias data'}
+  Save-WindowScreenshot $p 'unc-dark'
+  foreach($id in @('UncImagePath','OpenUnc','CopyUnc','ApplyUnc','StartUnc','StopUnc')){
+    if((Control $w $id $false).Current.IsOffscreen){throw "UNC action is offscreen: $id"}
+  }
   Invoke-Control $w 'StopUnc'
   $null=Wait-Until {!([IO.Directory]::Exists($unc))} 'UNC stop'
   Invoke-Control $w 'StartUnc'
   $null=Wait-Until {[IO.File]::Exists($unc+'\extra.txt')} 'UNC restart'
+  Navigate $w 'NavDevices'
+  $null=Control $w 'RefreshDevices'
+  foreach($id in @('DeviceMtp','DeviceAdb','DeviceAdbRoot','AdbPort','OpenProgress','DeviceList','OpenMtp','OpenAdb','OpenAdbRoot','ApplyDevices')){
+    $null=Control $w $id $false
+  }
+  Save-WindowScreenshot $p 'devices'
+  Navigate $w 'NavBrowse'
+  Invoke-Control $w 'CloseImage'
+  foreach($id in @('MountImage','CloseImage','VerifyImage','ExtractSelected','ExtractAll','OpenUnc','CopyUnc','UpDirectory')) {
+    if((Control $w $id $false).Current.IsEnabled){throw "Closed image action enabled: $id"}
+  }
   Close-Gui
   if([IO.File]::ReadAllText($unc+'\extra.txt') -ne 'second selected file'){throw 'GUI exit stopped UNC service'}
   & $cli unc-stop;if($LASTEXITCODE){throw 'UNC stop failed'}

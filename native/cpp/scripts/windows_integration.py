@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import socket
+from mock_adb import Server as MockAdb, COMPONENT as MOCK_COMPONENT
 
 app = Path(sys.argv[1]).resolve()
 cli = app / 'archivefs.exe'
@@ -61,6 +63,27 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             assert (output/'目录'/'empty.txt').stat().st_size == 0
             if preset == 4:
                 images.append(image)
+    # Mutate real decoder inputs, rather than testing signatures alone.
+    # Corruption may still describe a valid image; the CLI must either verify
+    # it or reject it through a normal error path without crashing or hanging.
+    malformed = root / 'malformed.img'
+    mutations = 0
+    for image in images:
+        original = image.read_bytes()
+        candidates = [original[:n] for n in (0, 3, 6, 96, 1028, len(original)//2)]
+        for _ in range(16):
+            changed = bytearray(original)
+            for _ in range(1 + rng.randrange(4)):
+                at = rng.randrange(len(changed))
+                changed[at] ^= 1 << rng.randrange(8)
+            candidates.append(changed)
+        for candidate in candidates:
+            malformed.write_bytes(candidate)
+            result = subprocess.run([str(cli), 'verify', str(malformed)], capture_output=True, timeout=20)
+            assert result.returncode in (0, 1, 2), (image.name, mutations, result.returncode, result.stderr[-2000:])
+            mutations += 1
+    malformed.unlink()
+    print(f'PASS {mutations} truncated or mutated real archives')
     for image in images:
         process = subprocess.Popen([str(cli),'mount',str(image)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8')
         try:
@@ -155,9 +178,81 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             settings_path.write_bytes(old_settings)
         else:
             settings_path.unlink(missing_ok=True)
+    # Recursive archive projection never opens the agent's own UNC filesystem
+    # as a decoder source; the inner images are read through their outer reader.
+    nested_source = root / 'nested-source'
+    nested_source.mkdir()
+    for image in images:
+        shutil.copyfile(image,nested_source / image.name)
+    outer = root / 'nested.squashfs'
+    invoke('create','SquashFS',4,outer,*list(nested_source.iterdir()))
+    # Exercise the real UNC filesystem with a local ADB smart-socket server.
+    # Use an ephemeral port, leaving any real ADB server untouched.
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1",0))
+        port=probe.getsockname()[1]
+    mock=None
+    invoke('unc-stop')
+    try:
+        settings_path.write_text(json.dumps({'Root':str(root),'Alias':'path-test','IncludeDrives':False,
+            'AdbPort':port,'EnableMtp':True,'EnableAdb':True,'EnableAdbRoot':True,
+            'ShowOpenProgress':False,'StartAtLogin':False,'Language':'en-US'}),encoding='utf-8')
+        invoke('unc-start')
+        adb=Path(r'\\sfs$\adb')
+        adb_root=Path(r'\\sfs$\adb.r')
+        for path in (adb,adb_root):
+            try:
+                list(path.iterdir())
+            except OSError as error:
+                assert error.winerror is not None, error
+                print(f"PASS absent ADB Server rejected {path}: {error.winerror}")
+            else:
+                raise AssertionError("Missing ADB Server returned a directory")
+        invoke('devices','mtp')  # Physical hardware may be absent on the runner.
+        mtp=Path(r'\\sfs$\mtp')
+        assert mtp.is_dir()
+        list(mtp.iterdir())
+        mock=MockAdb(port,{'/中文文件😀.bin':data,'/nested.squashfs':outer.read_bytes()})
+        wait_until(lambda: adb.is_dir())
+        assert list(adb.iterdir())==[]
+        assert list(adb_root.iterdir())==[]
+        mock.attached=True
+        device=adb/MOCK_COMPONENT
+        privileged=adb_root/MOCK_COMPONENT
+        wait_until(device.is_dir)
+        wait_until(privileged.is_dir)
+        assert (device/'中文文件😀.bin').read_bytes()==data
+        assert (privileged/'中文文件😀.bin').read_bytes()==data
+        assert not (device/'root-only.txt').exists()
+        assert (privileged/'root-only.txt').read_bytes()==b'root authorized'
+        for image in images:
+            nested=device/'nested.squashfs'/image.name/'文件.bin'
+            assert nested.read_bytes()==data
+        def device_read(offset):
+            with (device/'中文文件😀.bin').open('rb') as stream:
+                stream.seek(offset)
+                return stream.read(4096)
+        offsets=[rng.randrange(0,len(data)-4096) for _ in range(64)]
+        with concurrent.futures.ThreadPoolExecutor(8) as workers:
+            assert list(workers.map(device_read,offsets))==[data[n:n+4096] for n in offsets]
+        assert any(command.startswith('shell,v2,raw:su -c ') for command in mock.commands)
+        assert 'sync:' in mock.commands
+        assert all('start-server' not in command and 'host:kill' not in command for command in mock.commands)
+        print("PASS ADB UNC absence/empty/device states, Unicode, Root, concurrent reads and nested images")
+    finally:
+        invoke('unc-stop')
+        if mock is not None:mock.close()
+        if old_settings is not None:settings_path.write_bytes(old_settings)
+        elif settings_path.exists():settings_path.unlink()
     # Explicit temporary share exercises both first access and source deletion.
     process = subprocess.Popen([str(cli),'serve','test-native',str(root),'1'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
     try:
+        for image in images:
+            nested_path=Path(r'\\sfs$\test-native')/outer.name/image.name/'文件.bin'
+            wait_until(nested_path.is_file)
+            assert nested_path.read_bytes()==data, nested_path
+        outer.unlink()
+        wait_until(lambda:not nested_path.exists())
         for image in images:
             path=Path(r'\\sfs$\test-native')/image.name/'文件.bin'
             wait_until(path.is_file)
@@ -166,4 +261,4 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             wait_until(lambda:not path.exists())
     finally:
         process.terminate();process.communicate(timeout=30)
-print('PASS real codec creation, Unicode extraction, random access, WinFsp mounting, eject and UNC source removal')
+print('PASS real codec creation, Unicode extraction, malformed images, random access, WinFsp mounting, eject and UNC source removal')
