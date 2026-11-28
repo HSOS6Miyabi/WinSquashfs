@@ -53,9 +53,8 @@ inline std::string read_text(const fs::path& path,std::size_t limit){
     }
     return text;
 }
-// Write and flush a unique temporary file in the destination directory. Rename
-// only after closing the file; briefly wait for external readers (e.g. Explorer,
-// antivirus, PowerShell) which did not request FILE_SHARE_DELETE.
+// Write and flush a unique temporary file in the destination directory.
+// Replace the destination atomically and retry transient sharing conflicts.
 inline void write_text_atomic(const fs::path& path,std::string_view text,const char* action,
                               std::chrono::milliseconds timeout=2500ms){
     fs::create_directories(path.parent_path());

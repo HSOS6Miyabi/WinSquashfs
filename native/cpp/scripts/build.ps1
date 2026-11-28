@@ -36,6 +36,33 @@ if ($Stage -in @('All','ConfigureDependencies','Dependencies')) {
             $source=$source.Replace('set(MSVC_USE_STATIC_RUNTIME ON CACHE BOOL "static build")','set(MSVC_USE_STATIC_RUNTIME OFF CACHE BOOL "dynamic CRT" FORCE)')
             [IO.File]::WriteAllText($file,$source,[Text.UTF8Encoding]::new($false))
         }
+        if ($Architecture -eq 'x86') {
+            # Use two 32-bit scans for the 64-bit FSST input on Win32.
+            $file=Join-Path $dwarfs 'fsst/fsst.h'
+            $source=[IO.File]::ReadAllText($file)
+            $old='_BitScanForward64(&ret, x);'
+            $new=@'
+#if defined(_M_IX86)
+    if (_BitScanForward(&ret, (unsigned long)x)) return (int)ret;
+    if (_BitScanForward(&ret, (unsigned long)(x >> 32))) return 32+(int)ret;
+    return 64;
+#else
+    if (!_BitScanForward64(&ret, x)) return 64;
+#endif
+'@
+            if (!$source.Contains('#if defined(_M_IX86)')) {
+                if (!$source.Contains($old)) { throw 'Unexpected FSST bit-scan implementation' }
+                $source=$source.Replace($old,$new)
+                [IO.File]::WriteAllText($file,$source,[Text.UTF8Encoding]::new($false))
+            }
+            # Convert through the unsigned native pointer width before widening.
+            $file=Join-Path $dwarfs 'frozen/thrift/lib/cpp2/frozen/Frozen.h'
+            $source=[IO.File]::ReadAllText($file)
+            $old='reinterpret_cast<int64_t>(start) * 8 + bitOffset'
+            $new='static_cast<int64_t>(reinterpret_cast<uintptr_t>(start)) * 8 + static_cast<int64_t>(bitOffset)'
+            if ($source.Contains($old)) { $source=$source.Replace($old,$new); [IO.File]::WriteAllText($file,$source,[Text.UTF8Encoding]::new($false)) }
+            elseif (!$source.Contains($new)) { throw 'Unexpected Frozen pointer conversion' }
+        }
         Invoke-Checked cmake (@('-S',$dwarfs,'-B',"$deps/dwarfs-build","-DCMAKE_INSTALL_PREFIX=$prefix",'-DWITH_TOOLS=ON','-DWITH_FUSE_DRIVER=OFF','-DWITH_TESTS=OFF','-DWITH_BENCHMARKS=OFF','-DWITH_DESKTOP_INTEGRATION=OFF','-DWITH_MAN_OPTION=OFF','-DWITH_PXATTR=OFF','-DENABLE_STACKTRACE=OFF','-DBUILD_SHARED_LIBS=OFF')+$flags)
         if ($Stage -eq 'ConfigureDependencies') { return }
         Invoke-Checked cmake @('--build',"$deps/dwarfs-build",'--target','install','--parallel','4')

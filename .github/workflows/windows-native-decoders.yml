@@ -76,15 +76,38 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ matrix.arch }}
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: dwarfs-cache
         with:
           path: |
             .deps/${{ matrix.arch }}/dwarfs-install
             .deps/${{ matrix.arch }}/vcpkg-installed
-          key: archivefs-native-dwarfs-v0.15.10-${{ matrix.arch }}-v1
+          key: archivefs-native-dwarfs-v0.15.10-${{ matrix.arch }}-v2
+      - uses: actions/cache/restore@v4
+        id: dwarfs-ports
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true'
+        with:
+          path: .deps/${{ matrix.arch }}/vcpkg-installed
+          key: archivefs-native-dwarfs-ports-v0.15.10-${{ matrix.arch }}-v1
+      - name: Configure official DwarFS dependencies
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage ConfigureDependencies -Architecture ${{ matrix.arch }}
+      - uses: actions/cache/save@v4
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true' && steps.dwarfs-ports.outputs.cache-hit != 'true'
+        with:
+          path: .deps/${{ matrix.arch }}/vcpkg-installed
+          key: ${{ steps.dwarfs-ports.outputs.cache-primary-key }}
       - name: Build official DwarFS library and tools
         shell: pwsh
         run: ./native/cpp/scripts/build.ps1 -Stage Dependencies -Architecture ${{ matrix.arch }}
+      - uses: actions/cache/save@v4
+        if: steps.dwarfs-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            .deps/${{ matrix.arch }}/dwarfs-install
+            .deps/${{ matrix.arch }}/vcpkg-installed
+          key: ${{ steps.dwarfs-cache.outputs.cache-primary-key }}
       - name: Build production core with official DwarFS
         shell: pwsh
         run: |

@@ -152,7 +152,7 @@ Exclusions load_exclusions(const std::optional<fs::path>& path){
 Args native_squash_arguments(const CreationOptions& settings){
     // Use the existing option validator before translating to the native tool.
     (void)settings.arguments();
-    Args args;add(args,"-q");add(args,"-s");add(args,"-c",settings.codec);add_num(args,"-b",settings.block_size);
+    Args args;add(args,"-q");add(args,"-s");add(args,"-S");add(args,"-c",settings.codec);add_num(args,"-b",settings.block_size);
     flag(args,!settings.no_exports,"-e");
     flag(args,settings.no_xattrs,"-x");
     flag(args,!settings.always_fragments,"-T");
