@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param([ValidateSet('x64','arm64','x86')][string]$Architecture='x64',
       [string]$KitRoot,
+      [string]$KitVersion,
       [string]$OutputDirectory,
       [string]$Altitude,
       [switch]$IncludeUnqualified)
@@ -23,13 +24,16 @@ if($KitRoot){
 }
 function Find-KitFile([string]$name,[string]$suffix){
     $items=@(foreach($root in $roots){Get-ChildItem -LiteralPath $root -Filter $name -Recurse -File -ErrorAction Stop |
-        Where-Object { $_.FullName.EndsWith($suffix,[StringComparison]::OrdinalIgnoreCase) }})
+        Where-Object { $_.FullName.EndsWith($suffix,[StringComparison]::OrdinalIgnoreCase) -and
+            (!$KitVersion -or $_.FullName -like "*\$KitVersion\*") }})
     if(!$items){throw "WDK file not found: $suffix"}
     $items | Sort-Object FullName -Descending | Select-Object -First 1
 }
+$libs=(Find-KitFile ntoskrnl.lib "\km\$Architecture\ntoskrnl.lib").Directory.FullName
+$KitVersion=(Get-Item $libs).Parent.Parent.Name
 $km=(Find-KitFile fltKernel.h '\km\fltKernel.h').Directory.FullName
 $shared=(Find-KitFile ntdef.h '\shared\ntdef.h').Directory.FullName
-$libs=(Find-KitFile ntoskrnl.lib "\km\$Architecture\ntoskrnl.lib").Directory.FullName
+Write-Host "Building with WDK/SDK $KitVersion for $Architecture"
 foreach($name in @('fltmgr.lib','hal.lib','BufferOverflowFastFailK.lib','libcntpr.lib')){
     if(!(Test-Path (Join-Path $libs $name))){throw "Missing WDK library: $name"}
 }

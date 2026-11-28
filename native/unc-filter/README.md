@@ -20,8 +20,8 @@ names. Relative opens on an existing redirected file handle pass through.
 
 ## Build and validate
 
-The independent **Native UNC alias filter** workflow compiles unsigned x64
-and ARM64 binaries with the Microsoft WDK and runs the same portable name
+The independent **Native UNC alias filter** workflow builds unsigned x64,
+ARM64 and x86 binaries with the Microsoft WDK and runs the same portable name
 parser under ASan/UBSan. To build locally, use a Visual Studio C++ command
 prompt for the target architecture and run:
 

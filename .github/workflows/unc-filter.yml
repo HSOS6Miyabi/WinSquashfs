@@ -29,31 +29,45 @@ jobs:
           - arch: arm64
             compiler: x64_arm64
             package: Microsoft.Windows.WDK.ARM64
+          - arch: x86
+            compiler: x86
+            package: ''
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ matrix.compiler }}
       - uses: actions/cache@v4
+        if: matrix.arch != 'x86'
         with:
           path: .deps/unc-wdk
           key: unc-wdk-${{ matrix.arch }}-26100.6584
       - name: Restore official WDK headers and libraries
+        if: matrix.arch != 'x86'
         shell: pwsh
         run: |
           nuget install '${{ matrix.package }}' -Version 10.0.26100.6584 -ExcludeVersion -NonInteractive -OutputDirectory .deps/unc-wdk -Source https://api.nuget.org/v3/index.json
           if($LASTEXITCODE){exit $LASTEXITCODE}
+      - name: Install official x86-compatible WDK 22621
+        if: matrix.arch == 'x86'
+        shell: pwsh
+        timeout-minutes: 40
+        run: ./native/unc-filter/install-x86-wdk.ps1
       - name: Compile native minifilter
         shell: pwsh
         run: |
-          ./native/unc-filter/build.ps1 -Architecture '${{ matrix.arch }}' -KitRoot .deps/unc-wdk
+          if('${{ matrix.arch }}' -eq 'x86'){
+            ./native/unc-filter/build.ps1 -Architecture x86 -KitVersion 10.0.22621.0
+          }else{
+            ./native/unc-filter/build.ps1 -Architecture '${{ matrix.arch }}' -KitRoot .deps/unc-wdk
+          }
           if($LASTEXITCODE){exit $LASTEXITCODE}
           $driver="artifacts/unc-filter-${{ matrix.arch }}/ArchiveFsUncFilter.sys"
           $headers=dumpbin /headers $driver | Out-String
           if($LASTEXITCODE){exit $LASTEXITCODE}
-          $expected=if('${{ matrix.arch }}' -eq 'arm64'){'AA64'}else{'8664'}
+          $expected=@{x64='8664';arm64='AA64';x86='14C'}['${{ matrix.arch }}']
           if($headers -notmatch "(?im)^\s*$expected\s+machine" -or $headers -notmatch '(?im)\bNative\b'){throw 'Unexpected driver PE architecture or subsystem'}
           dumpbin /imports $driver
       - uses: actions/upload-artifact@v4
