@@ -23,7 +23,7 @@ inline bool unc_filter_unqualified_policy()noexcept{
 #endif
 }
 inline bool reserved_archive_host(std::u16string_view host,bool unqualified)noexcept{
-    if(ascii_host_equal(host,u"sfs$")||ascii_host_equal(host,u"sfs.localhost"))return true;
+    if(ascii_host_equal(host,u"sfs$")||ascii_host_equal(host,u"$sfs")||ascii_host_equal(host,u"sfs.localhost"))return true;
     return host.size()>4&&ascii_host_equal(host.substr(0,4),u"sfs.")&&
         (unqualified||(host.size()>14&&ascii_host_equal(host.substr(host.size()-10),u".localhost")));
 }

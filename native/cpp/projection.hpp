@@ -47,6 +47,7 @@ private:
     std::jthread worker_;
 };
 struct ProjectionInfo {bool directory;std::uint64_t size;std::int64_t modified;std::uint64_t index;bool unavailable=false;};
+struct RemoteFileState;
 struct ProjectedNode {
     std::u16string name,path;
     std::filesystem::path physical;
@@ -57,6 +58,7 @@ struct ProjectedNode {
     bool synthetic=false;
     std::shared_ptr<const RandomAccessSource> source;
     std::string device_id,object_id;
+    std::shared_ptr<RemoteFileState> remote;
 };
 using ProjectedNodePtr=std::shared_ptr<const ProjectedNode>;
 class Projection {
@@ -66,7 +68,18 @@ public:
     virtual std::vector<ProjectedNodePtr> list(const ProjectedNodePtr& directory)const=0;
     virtual std::uint64_t capacity()const=0;
     virtual void validate(const ProjectedNodePtr& node)const;
-    std::size_t read(const ProjectedNodePtr& node,std::uint64_t offset,std::span<std::byte> output)const;
+    virtual std::size_t read(const ProjectedNodePtr& node,std::uint64_t offset,std::span<std::byte> output)const;
+    virtual ProjectionInfo query_info(const ProjectedNodePtr& node)const{validate(node);return node->info;}
+    virtual bool writable_volume()const noexcept{return false;}
+    virtual bool writable(const ProjectedNodePtr&)const noexcept{return false;}
+    virtual ProjectedNodePtr create_file(std::u16string_view,bool){throw std::runtime_error("read-only projection");}
+    virtual std::size_t write(const ProjectedNodePtr&,std::uint64_t,std::span<const std::byte>,bool,bool){throw std::runtime_error("read-only projection");}
+    virtual void resize(const ProjectedNodePtr&,std::uint64_t){throw std::runtime_error("read-only projection");}
+    virtual void flush(const ProjectedNodePtr&){}
+    virtual void check_delete(const ProjectedNodePtr&){throw std::runtime_error("read-only projection");}
+    virtual void remove(const ProjectedNodePtr&){throw std::runtime_error("read-only projection");}
+    virtual void rename(const ProjectedNodePtr&,std::u16string_view,bool){throw std::runtime_error("read-only projection");}
+    virtual void operation_error(std::string_view)noexcept{}
 };
 std::shared_ptr<Projection> mount_projection(std::shared_ptr<ArchiveTree> tree);
 struct Share {std::u16string name;std::filesystem::path root;bool network=false;std::u16string server=u"sfs$";};

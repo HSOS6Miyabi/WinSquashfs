@@ -28,7 +28,8 @@ struct RemoteConnection {
     std::string shell_root;
     bool read_only=false,ssh_helper=true,sudo=false,partial_put=false;
     bool implicit_tls=false;
-    unsigned timeout_seconds=60,metadata_seconds=5,cache_mib=512;
+    std::string cache_mode="auto";
+    unsigned timeout_seconds=60,metadata_seconds=5,cache_mib=512,read_cache_mib=32;
 };
 struct RemoteStat {
     std::string name;

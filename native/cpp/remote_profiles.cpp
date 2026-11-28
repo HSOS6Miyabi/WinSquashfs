@@ -1,0 +1,80 @@
+// SPDX-License-Identifier: GPL-3.0-only
+#include "windows_services.hpp"
+#include "windows_atomic_file.hpp"
+#include <wincrypt.h>
+#include <nlohmann/json.hpp>
+#include <set>
+#include <utility>
+
+namespace archivefs {
+namespace {
+using Json=nlohmann::json;
+std::string hex(std::span<const BYTE> data){
+    constexpr char digits[]="0123456789abcdef";std::string out;out.reserve(data.size()*2);
+    for(auto c:data){out+=digits[c>>4];out+=digits[c&15];}return out;
+}
+std::vector<BYTE> unhex(std::string_view s){
+    if(s.size()%2||s.size()>2u<<20)throw std::invalid_argument("Invalid encrypted credentials");
+    auto digit=[](char c)->unsigned{if(c>='0'&&c<='9')return c-'0';if(c>='a'&&c<='f')return c-'a'+10;throw std::invalid_argument("Invalid encrypted credentials");};
+    std::vector<BYTE> data(s.size()/2);for(std::size_t i=0;i<data.size();++i)data[i]=static_cast<BYTE>((digit(s[2*i])<<4)|digit(s[2*i+1]));return data;
+}
+struct ProtectedBlob{DATA_BLOB data{};~ProtectedBlob(){if(data.pbData){SecureZeroMemory(data.pbData,data.cbData);LocalFree(data.pbData);}}};
+std::string protect(const RemoteConnection& c){
+    auto plain=Json{{"secret",c.secret},{"session_token",c.session_token}}.dump();
+    struct Clear{std::string& s;~Clear(){if(!s.empty())SecureZeroMemory(s.data(),s.size());}} clear{plain};
+    DATA_BLOB input{static_cast<DWORD>(plain.size()),reinterpret_cast<BYTE*>(plain.data())};
+    ProtectedBlob output;
+    if(!CryptProtectData(&input,L"WinArchiveFSPro remote connection",nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&output.data))
+        throw std::system_error(static_cast<int>(GetLastError()),std::system_category(),"Encrypt remote credentials");
+    return hex(std::span(output.data.pbData,output.data.cbData));
+}
+void unprotect(RemoteConnection& c,std::string_view value){
+    auto encrypted=unhex(value);DATA_BLOB input{static_cast<DWORD>(encrypted.size()),encrypted.data()};ProtectedBlob output;
+    if(!CryptUnprotectData(&input,nullptr,nullptr,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&output.data))
+        throw std::system_error(static_cast<int>(GetLastError()),std::system_category(),"Decrypt remote credentials");
+    auto p=Json::parse(output.data.pbData,output.data.pbData+output.data.cbData);
+    c.secret=p.at("secret").get<std::string>();c.session_token=p.value("session_token",std::string{});
+}
+void validate_all(const std::vector<RemoteConnection>& connections){
+    if(connections.size()>256)throw std::invalid_argument("Too many remote connections");
+    std::set<std::u16string,WindowsNameLess> names;
+    for(auto& c:connections){
+        validate_remote_connection(c);auto name=to_utf16(c.name);
+        if(encode_windows_name(c.name)!=name||!names.insert(to_utf16(std::string(remote_protocol_name(c.protocol)))+u"/"+name).second)
+            throw std::invalid_argument("Invalid or duplicate remote connection name");
+    }
+}
+}
+std::vector<RemoteConnection> load_remote_connections(){
+    auto file=settings_directory()/L"remote-connections.json";
+    if(!std::filesystem::exists(file))return {};
+    auto j=Json::parse(detail::read_text(file,8u<<20));
+    if(!j.is_array()||j.size()>256)throw std::invalid_argument("Invalid remote connection store");
+    std::vector<RemoteConnection> result;
+    for(auto& row:j){
+        RemoteConnection c;c.name=row.at("name").get<std::string>();c.protocol=parse_remote_protocol(row.at("protocol").get<std::string>());
+        c.endpoint=row.at("endpoint").get<std::string>();c.root=row.value("root",c.root);c.username=row.value("username",c.username);
+        c.region=row.value("region",c.region);c.bucket=row.value("bucket",c.bucket);c.host_key=row.value("host_key",c.host_key);c.private_key=row.value("private_key",c.private_key);c.shell_root=row.value("shell_root",c.shell_root);
+        c.read_only=row.value("read_only",c.read_only);c.ssh_helper=row.value("ssh_helper",c.ssh_helper);c.sudo=row.value("sudo",c.sudo);c.partial_put=row.value("partial_put",c.partial_put);c.implicit_tls=row.value("implicit_tls",c.implicit_tls);
+        c.cache_mode=row.value("cache_mode",c.cache_mode);c.timeout_seconds=row.value("timeout_seconds",c.timeout_seconds);c.metadata_seconds=row.value("metadata_seconds",c.metadata_seconds);c.cache_mib=row.value("cache_mib",c.cache_mib);c.read_cache_mib=row.value("read_cache_mib",c.read_cache_mib);
+        unprotect(c,row.at("credentials").get<std::string>());result.push_back(std::move(c));
+    }
+    validate_all(result);return result;
+}
+void save_remote_connections(const std::vector<RemoteConnection>& connections){
+    validate_all(connections);auto j=Json::array();
+    for(auto& c:connections)j.push_back({{"name",c.name},{"protocol",std::string(remote_protocol_name(c.protocol))},{"endpoint",c.endpoint},{"root",c.root},{"username",c.username},{"region",c.region},{"bucket",c.bucket},{"host_key",c.host_key},{"private_key",c.private_key},{"shell_root",c.shell_root},{"read_only",c.read_only},{"ssh_helper",c.ssh_helper},{"sudo",c.sudo},{"partial_put",c.partial_put},{"implicit_tls",c.implicit_tls},{"cache_mode",c.cache_mode},{"timeout_seconds",c.timeout_seconds},{"metadata_seconds",c.metadata_seconds},{"cache_mib",c.cache_mib},{"read_cache_mib",c.read_cache_mib},{"credentials",protect(c)}});
+    detail::write_text_atomic(settings_directory()/L"remote-connections.json",j.dump(2)+"\n","Save remote connections");
+}
+void copy_remote_file(std::string_view protocol,std::string_view connection,std::string_view from,std::string_view to,bool replace){
+    auto profiles=load_remote_connections();auto p=parse_remote_protocol(protocol);
+    for(auto& c:profiles){
+        if(c.protocol!=p||c.name!=connection)continue;
+        if(c.read_only)throw RemoteFailure(RemoteError::permission,"Remote connection is read-only");
+        auto transport=make_remote_transport(c);validate_remote_path(from);validate_remote_path(to);
+        if(!transport->copy(from,to,replace))throw RemoteFailure(RemoteError::unsupported,"Server-side copy is unavailable");
+        return;
+    }
+    throw RemoteFailure(RemoteError::missing,"Saved remote connection not found");
+}
+}

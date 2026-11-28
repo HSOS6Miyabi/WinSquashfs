@@ -66,8 +66,9 @@ void validate_remote_connection(const RemoteConnection& c){
         throw std::invalid_argument("Endpoint must not include credentials, query or fragment");
     validate_remote_path(c.root);
     if(!c.shell_root.empty())validate_remote_path(c.shell_root);
-    if(c.timeout_seconds<1||c.timeout_seconds>3600||c.metadata_seconds>3600||c.cache_mib>32768)
+    if(c.timeout_seconds<1||c.timeout_seconds>3600||c.metadata_seconds>3600||c.cache_mib>32768||c.read_cache_mib>1024)
         throw std::invalid_argument("Invalid connection cache or timeout");
+    if(c.cache_mode!="auto"&&c.cache_mode!="writeback"&&c.cache_mode!="direct")throw std::invalid_argument("Invalid remote cache mode");
     if(c.username.size()>4096||c.secret.size()>65536||c.session_token.size()>65536||
        control(c.username)||c.secret.find('\0')!=c.secret.npos||control(c.session_token))
         throw std::invalid_argument("Invalid remote credentials");

@@ -127,7 +127,7 @@ public:
         if(c.host_key!=host_key_)fail(RemoteError::permission,"SSH host key differs from the pinned fingerprint");
         int rc=0;
         if(!c.private_key.empty()){
-            auto path=std::filesystem::u8path(c.private_key);
+            auto path=std::filesystem::path(std::u8string(c.private_key.begin(),c.private_key.end()));
             auto size=std::filesystem::file_size(path);
             if(size>1u<<20)throw std::invalid_argument("SSH private key exceeds size limit");
             std::ifstream in(path,std::ios::binary);std::string key(static_cast<std::size_t>(size),'\0');
@@ -258,7 +258,7 @@ public:
     }
     void read(Handle& h,std::uint64_t offset,std::span<std::byte> data){
         while(!data.empty()){
-            auto count=static_cast<std::uint32_t>(std::min<std::size_t>(data.size(),256u<<10));
+            auto count=static_cast<std::uint32_t>(std::min<std::size_t>(data.size(),64u<<10));
             Bytes args;string(args,h.value);u64(args,offset);u32(args,count);
             auto response=call(fxp_read,args);Parser p(response);auto type=p.byte();
             if(type==fxp_status){auto code=p.u32();if(code==fx_eof)fail(RemoteError::protocol,"Short SFTP read");sftp_error(code);}
@@ -268,7 +268,7 @@ public:
         }
     }
     void write(Handle& h,std::uint64_t offset,std::span<const std::byte> data){
-        while(!data.empty()){auto count=std::min<std::size_t>(data.size(),256u<<10);Bytes args;string(args,h.value);u64(args,offset);string(args,data.first(count));status(fxp_write,args);offset+=count;data=data.subspan(count);}
+        while(!data.empty()){auto count=std::min<std::size_t>(data.size(),64u<<10);Bytes args;string(args,h.value);u64(args,offset);string(args,data.first(count));status(fxp_write,args);offset+=count;data=data.subspan(count);}
     }
     void resize(Handle& h,std::uint64_t size){Bytes args;string(args,h.value);u32(args,1);u64(args,size);status(fxp_fsetstat,args);}
     void mkdir(std::string_view path){Bytes args;string(args,path);u32(args,4);u32(args,0777);status(fxp_mkdir,args);}
@@ -348,7 +348,7 @@ public:
         writable(path);std::lock_guard lock(mutex_);ensure();check_revision(path,revision);
         if(sftp_){
             auto handle=sftp_->open(physical(c_.root,path),fx_write|fx_create|(exclusive?fx_exclusive:fx_truncate));
-            std::array<std::byte,256u<<10> bytes{};std::uint64_t offset=0;
+            std::array<std::byte,64u<<10> bytes{};std::uint64_t offset=0;
             while(offset<size){auto n=static_cast<std::size_t>(std::min<std::uint64_t>(bytes.size(),size-offset));auto got=input(offset,std::span(bytes).first(n));if(!got||got>n)fail(RemoteError::protocol,"Short upload source");sftp_->write(handle,offset,std::span(bytes).first(got));offset+=got;}
             handle.close();return;
         }
@@ -363,7 +363,7 @@ public:
         Session::check(libssh2_channel_exec(channel.get(),cmd.c_str()),"Cannot start SCP receiver");
         scp_ack(channel.get());
         write_all(channel.get(),"C0600 "+std::to_string(size)+" "+remote_name(target)+"\n");scp_ack(channel.get());
-        std::array<std::byte,256u<<10> bytes{};std::uint64_t offset=0;
+        std::array<std::byte,64u<<10> bytes{};std::uint64_t offset=0;
         while(offset<size){auto n=static_cast<std::size_t>(std::min<std::uint64_t>(bytes.size(),size-offset));auto got=input(offset,std::span(bytes).first(n));if(!got||got>n)fail(RemoteError::protocol,"Short SCP upload source");write_all(channel.get(),std::span(bytes).first(got));offset+=got;}
         std::array<std::byte,1> end{};write_all(channel.get(),end);scp_ack(channel.get());
         finish(channel.get());

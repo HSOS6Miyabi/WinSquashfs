@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
 #include "winfsp_native.hpp"
+#include "remote_transport.hpp"
 #include <filesystem>
 #include <stop_token>
 namespace archivefs {
@@ -23,6 +24,9 @@ std::shared_ptr<DeviceProvider> make_device_provider(std::u16string_view kind,co
 std::vector<std::u16string> enabled_device_shares(const Settings& settings);
 std::filesystem::path application_directory();
 std::filesystem::path settings_directory();
+std::vector<RemoteConnection> load_remote_connections();
+void save_remote_connections(const std::vector<RemoteConnection>& connections);
+void copy_remote_file(std::string_view protocol,std::string_view connection,std::string_view from,std::string_view to,bool replace=false);
 std::vector<std::filesystem::path> recent_images();
 void remember_image(const std::filesystem::path& path);
 void clear_recent_images();

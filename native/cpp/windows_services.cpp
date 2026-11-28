@@ -3,6 +3,7 @@
 #include "desktop_notifications.hpp"
 #include "windows_atomic_file.hpp"
 #include "unc_alias_policy.hpp"
+#include "remote_projection.hpp"
 #include <limits>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -54,7 +55,7 @@ void cancelled(std::stop_token s){if(s.stop_requested())throw std::runtime_error
 void validate(const Settings& s){
     auto valid_alias=[](std::u16string_view alias){return !alias.empty()&&alias.size()<=64&&alias.find_first_of(u"\\/:*?\"<>| ")==std::u16string_view::npos&&alias!=u"."&&alias!=u".."&&alias.back()!=u'.'&&
         !std::any_of(alias.begin(),alias.end(),[](char16_t c){return c<32;});};
-    std::set<std::u16string,WindowsNameLess> aliases{u"UNC",u"mtp",u"adb",u"adb.r"};
+    std::set<std::u16string,WindowsNameLess> aliases{u"UNC",u"mtp",u"adb",u"adb.r",u"dav",u"s3",u"ftp",u"ftps",u"sftp",u"scp",u"root"};
     if(!s.adb_port||s.adb_port>65535)throw std::invalid_argument("invalid ADB Server port");
     if(s.root.empty()||!s.root.is_absolute()||!valid_alias(s.alias)||!aliases.insert(s.alias).second||
        s.idle_seconds>86400||s.max_idle_images>1024||s.cache_mib>4096||s.cache_mib>(std::numeric_limits<std::size_t>::max()>>20)||s.total_cache_mib>4096||s.total_cache_mib>(std::numeric_limits<std::size_t>::max()>>20)||s.extra_shares.size()>64)throw std::invalid_argument("invalid UNC settings");
@@ -89,7 +90,7 @@ void migrate_settings(){
        (fs::exists(legacy/L"unc.json")||fs::exists(legacy/L"language.txt")))Settings::load().save();
     if(!fs::exists(current/L"recent.json")&&fs::exists(legacy/L"recent.json"))save_recent(recent_images());
 }
-std::vector<Share> Settings::shares()const{validate(*this);std::vector<Share> result;for(auto server:{u"sfs$",u"sfs.localhost"}){result.push_back({alias,root,false,server});for(auto const& extra:extra_shares)result.push_back({extra.name,extra.root,false,server});if(include_drives){auto mask=GetLogicalDrives();for(unsigned i=0;i<26;++i){if(!(mask&(1u<<i)))continue;std::u16string name(1,static_cast<char16_t>(u'A'+i));if(std::any_of(result.begin(),result.end(),[&](auto const& share){WindowsNameLess less;return share.server==server&&!less(share.name,name)&&!less(name,share.name);}))continue;auto drive=fs::path(name+u":\\");wchar_t format[64]{};if(GetVolumeInformationW(drive.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)&&(!_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS")))continue;result.push_back({name,drive,false,server});}}result.push_back({u"UNC",{},true,server});}return result;}
+std::vector<Share> Settings::shares()const{validate(*this);std::vector<Share> result;for(auto server:{u"sfs$",u"$sfs",u"sfs.localhost"}){result.push_back({alias,root,false,server});for(auto const& extra:extra_shares)result.push_back({extra.name,extra.root,false,server});if(include_drives){auto mask=GetLogicalDrives();for(unsigned i=0;i<26;++i){if(!(mask&(1u<<i)))continue;std::u16string name(1,static_cast<char16_t>(u'A'+i));if(std::any_of(result.begin(),result.end(),[&](auto const& share){WindowsNameLess less;return share.server==server&&!less(share.name,name)&&!less(name,share.name);}))continue;auto drive=fs::path(name+u":\\");wchar_t format[64]{};if(GetVolumeInformationW(drive.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)&&(!_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS")))continue;result.push_back({name,drive,false,server});}}result.push_back({u"UNC",{},true,server});}return result;}
 std::u16string Settings::unc_path(const fs::path& source)const{auto p=fs::absolute(source).lexically_normal();if(p.u16string().starts_with(u"\\\\?\\UNC\\"))p=fs::path(u"\\\\"+p.u16string().substr(8));bool remote=p.u16string().starts_with(u"\\\\");
     if(remote){
         auto value=p.u16string();auto end=value.find(u'\\',2);
@@ -200,7 +201,7 @@ class RemoteAliasMounts {
 public:
     explicit RemoteAliasMounts(std::shared_ptr<ImagePool> pool,const std::vector<Share>& builtin,bool reserve_drives):pool_(std::move(pool)){
         for(auto& share:builtin)reserved_.insert(u"\\"+share.server+u"\\"+share.name);
-        if(reserve_drives)for(auto server:{u"sfs$",u"sfs.localhost"})
+        if(reserve_drives)for(auto server:{u"sfs$",u"$sfs",u"sfs.localhost"})
             for(char16_t letter=u'A';letter<=u'Z';++letter)
                 reserved_.insert(std::u16string(u"\\")+server+u"\\"+letter);
     }
@@ -335,7 +336,7 @@ int run_agent(){
     // Cancel active device I/O before destroying the WinFsp dispatchers.
     struct CancelProviders{std::vector<std::shared_ptr<DeviceProvider>>& providers;~CancelProviders(){for(auto& p:providers)p->cancel();}} cancel_providers{providers};
     auto reserved=shares;
-    for(auto server:{u"sfs$",u"sfs.localhost"})for(auto kind:{u"mtp",u"adb",u"adb.r"})reserved.push_back({kind,{},false,server});
+    for(auto server:{u"sfs$",u"$sfs",u"sfs.localhost"})for(auto kind:{u"mtp",u"adb",u"adb.r"})reserved.push_back({kind,{},false,server});
     for(auto const& kind:enabled_device_shares(settings)){
         auto provider=make_device_provider(kind,settings);providers.push_back(provider);
         auto projection=device_projection(std::move(provider),pool,kind,[notifications,kind,chinese,port=settings.adb_port](const DeviceFailure& e){
@@ -347,8 +348,19 @@ int run_agent(){
             else message=to_utf16(e.what());
             notifications->error(std::move(title),std::move(message));
         });
-        for(auto server:{u"sfs$",u"sfs.localhost"})
+        for(auto server:{u"sfs$",u"$sfs",u"sfs.localhost"})
             device_mounts.push_back(std::make_unique<NativeMount>(projection,u"",std::u16string(u"\\")+server+u"\\"+kind));
+    }
+    std::vector<RemoteConnection> remote_connections;
+    try{remote_connections=load_remote_connections();}catch(const std::exception& e){notifications->error(u"Remote connections",to_utf16(e.what()));}
+    for(auto protocol:{RemoteProtocol::dav,RemoteProtocol::s3,RemoteProtocol::ftp,RemoteProtocol::ftps,RemoteProtocol::sftp,RemoteProtocol::scp}){
+        auto kind=to_utf16(std::string(remote_protocol_name(protocol)));
+        auto projection=remote_projection(protocol,remote_connections,settings_directory()/L"remote-cache",
+            [notifications,kind](std::string_view error){notifications->error(kind+u" remote filesystem",to_utf16(error));});
+        for(auto server:{u"sfs$",u"$sfs",u"sfs.localhost"}){
+            reserved.push_back({kind,{},false,server});
+            device_mounts.push_back(std::make_unique<NativeMount>(projection,u"",std::u16string(u"\\")+server+u"\\"+kind));
+        }
     }
     RemoteAliasMounts remote(pool,reserved,settings.include_drives);
     try{remote.refresh();}catch(const std::exception&){}
