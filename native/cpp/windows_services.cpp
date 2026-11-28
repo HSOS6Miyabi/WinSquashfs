@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "windows_services.hpp"
 #include "desktop_notifications.hpp"
+#include "windows_atomic_file.hpp"
 #include <limits>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -71,18 +72,15 @@ namespace {
 void save_recent(const std::vector<fs::path>& paths){
     fs::create_directories(settings_directory());
     auto path=settings_directory()/L"recent.json";
-    auto temp=path;temp+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";
-    struct Cleanup{fs::path p;~Cleanup(){std::error_code ec;fs::remove(p,ec);}}cleanup{temp};
     auto json=nlohmann::json::array();for(auto& p:paths)json.push_back(to_utf8(p.u16string()));
-    {std::ofstream out(temp,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::failbit|std::ios::badbit);out<<json.dump(2);out.close();}
-    if(!MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save recent images");
+    detail::write_text_atomic(path,json.dump(2),"save recent images");
 }
 }
-std::vector<fs::path> recent_images(){try{auto path=settings_directory()/L"recent.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"recent.json";if(!fs::exists(path)||fs::file_size(path)>1u<<20)return {};std::ifstream input(path,std::ios::binary);auto json=nlohmann::json::parse(input);std::vector<fs::path> paths;for(auto& value:json){if(paths.size()==15)break;paths.emplace_back(to_utf16(value.get<std::string>()));}return paths;}catch(...){return {};}}
+std::vector<fs::path> recent_images(){try{auto path=settings_directory()/L"recent.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"recent.json";if(!fs::exists(path)||fs::file_size(path)>1u<<20)return {};auto json=nlohmann::json::parse(detail::read_text(path,1u<<20));std::vector<fs::path> paths;for(auto& value:json){if(paths.size()==15)break;paths.emplace_back(to_utf16(value.get<std::string>()));}return paths;}catch(...){return {};}}
 void remember_image(const fs::path& path){try{auto paths=recent_images();auto full=fs::absolute(path).lexically_normal();auto name=full.u16string();std::erase_if(paths,[&](auto& p){auto other=p.u16string();WindowsNameLess less;return !less(name,other)&&!less(other,name);});paths.insert(paths.begin(),full);if(paths.size()>15)paths.resize(15);save_recent(paths);}catch(...){}}
 void clear_recent_images(){save_recent({});}
-Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){std::ifstream in(path,std::ios::binary);auto j=nlohmann::json::parse(in);s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.show_tray_icon=j.value("ShowTrayIcon",true);s.enable_mtp=j.value("EnableMtp",true);s.enable_adb=j.value("EnableAdb",true);s.enable_adb_root=j.value("EnableAdbRoot",true);s.show_open_progress=j.value("ShowOpenProgress",true);s.adb_port=j.value("AdbPort",5037u);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.total_cache_mib=j.value("TotalCacheMiB",512u);s.language=j.value("Language",std::string("system"));s.theme=j.value("Theme",std::string("system"));for(auto const& item:j.value("ExtraShares",nlohmann::json::array()))s.extra_shares.push_back({to_utf16(item.at("Alias").get<std::string>()),fs::path(to_utf16(item.at("Root").get<std::string>()))});}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
-void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";auto temporary=path;temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";struct Cleanup{fs::path path;~Cleanup(){std::error_code ec;fs::remove(path,ec);}}cleanup{temporary};nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"ShowTrayIcon",show_tray_icon},{"EnableMtp",enable_mtp},{"EnableAdb",enable_adb},{"EnableAdbRoot",enable_adb_root},{"ShowOpenProgress",show_open_progress},{"AdbPort",adb_port},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"TotalCacheMiB",total_cache_mib},{"Language",language},{"Theme",theme}};j["ExtraShares"]=nlohmann::json::array();for(auto const& extra:extra_shares)j["ExtraShares"].push_back({{"Alias",to_utf8(extra.name)},{"Root",to_utf8(extra.root.u16string())}});{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::badbit|std::ios::failbit);out<<j.dump(2)<<'\n';out.close();}if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save settings");autostart(start_at_login);}
+Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){auto j=nlohmann::json::parse(detail::read_text(path,4u<<20));s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.show_tray_icon=j.value("ShowTrayIcon",true);s.enable_mtp=j.value("EnableMtp",true);s.enable_adb=j.value("EnableAdb",true);s.enable_adb_root=j.value("EnableAdbRoot",true);s.show_open_progress=j.value("ShowOpenProgress",true);s.adb_port=j.value("AdbPort",5037u);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.total_cache_mib=j.value("TotalCacheMiB",512u);s.language=j.value("Language",std::string("system"));s.theme=j.value("Theme",std::string("system"));for(auto const& item:j.value("ExtraShares",nlohmann::json::array()))s.extra_shares.push_back({to_utf16(item.at("Alias").get<std::string>()),fs::path(to_utf16(item.at("Root").get<std::string>()))});}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
+void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"ShowTrayIcon",show_tray_icon},{"EnableMtp",enable_mtp},{"EnableAdb",enable_adb},{"EnableAdbRoot",enable_adb_root},{"ShowOpenProgress",show_open_progress},{"AdbPort",adb_port},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"TotalCacheMiB",total_cache_mib},{"Language",language},{"Theme",theme}};j["ExtraShares"]=nlohmann::json::array();for(auto const& extra:extra_shares)j["ExtraShares"].push_back({{"Alias",to_utf8(extra.name)},{"Root",to_utf8(extra.root.u16string())}});detail::write_text_atomic(path,j.dump(2)+"\n","save settings");autostart(start_at_login);}
 void migrate_settings(){
     auto current=settings_directory();
     auto legacy=current.parent_path()/L"WinSquashfs";
@@ -181,20 +179,12 @@ fs::path alias_status(){
 }
 nlohmann::json read_alias_json(const fs::path& file){
     if(!fs::exists(file))return nlohmann::json::array();
-    if(fs::file_size(file)>4u<<20)throw std::runtime_error("remote alias registry is too large");
-    std::ifstream stream(file,std::ios::binary);
-    auto json=nlohmann::json::parse(stream);
+    auto json=nlohmann::json::parse(detail::read_text(file,4u<<20));
     if(!json.is_array())throw std::runtime_error("invalid remote alias registry");
     return json;
 }
 void write_alias_json(const fs::path& file,const nlohmann::json& json){
-    fs::create_directories(file.parent_path());
-    auto temp=file;temp+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";
-    struct Cleanup{fs::path p;~Cleanup(){std::error_code ec;fs::remove(p,ec);}}cleanup{temp};
-    {std::ofstream stream(temp,std::ios::binary|std::ios::trunc);
-        stream.exceptions(std::ios::failbit|std::ios::badbit);stream<<json.dump(2)<<'\n';stream.close();}
-    if(!MoveFileExW(temp.c_str(),file.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))
-        fail("save remote alias registry");
+    detail::write_text_atomic(file,json.dump(2)+"\n","save remote alias registry");
 }
 void request_alias(const RemoteAlias& alias){
     AliasLock lock;

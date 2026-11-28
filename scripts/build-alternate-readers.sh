@@ -20,6 +20,8 @@ mkdir -p "$deps" "$out/tools" "$out/licenses"
 git clone --depth 1 --branch v1.3.2 https://github.com/AgentD/squashfs-tools-ng.git "$sq"
 (
   cd "$sq"
+  # Explicitly declare wctype() with both MinGW CRT header variants.
+  sed -i '/^#include <stdlib.h>$/a #include <wctype.h>' lib/compat/fnmatch.c
   autoreconf -fi
   ./configure --host="$host" --prefix="$prefix" --enable-shared --disable-static \
     --with-gzip --with-xz --with-lzo --with-lz4 --with-zstd --without-selinux
