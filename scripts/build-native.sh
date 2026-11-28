@@ -16,6 +16,8 @@ cp "$root"/bin/*.dll artifacts/native/
 g++ -std=c++17 -O2 -Wall -Wextra -Werror -shared -static -finput-charset=UTF-8 \
   native/shell-eject.cpp -lole32 -lshell32 -ladvapi32 -luuid -luser32 \
   -o artifacts/native/winsqfs-shell.dll
+mkdir -p artifacts/native-tests
+g++ -std=c++17 -O2 -municode -static native/tests/pack-shell.cpp -lole32 -lshell32 -luuid -luser32 -o artifacts/native-tests/pack-shell.exe
 for exe in mksquashfs unsquashfs sqfscat sqfstar; do
   cp "/usr/bin/$exe.exe" artifacts/native/tools/
 done

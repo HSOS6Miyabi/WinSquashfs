@@ -2,7 +2,7 @@
 
 [简体中文](README.zh-CN.md) | English
 
-A WinUI 3 desktop application for SquashFS images on Windows x64. Browse image contents, preview files, build new images, extract files or mount a read-only drive using WinFsp.
+A WinUI 3 desktop application for SquashFS, DwarFS and EROFS images on Windows x64. Browse image contents, preview files, build new images, extract files or mount a read-only drive using WinFsp.
 
 ## Features
 
@@ -10,11 +10,25 @@ A WinUI 3 desktop application for SquashFS images on Windows x64. Browse image c
 - Direct UNC access without assigning drive letters: configured directory aliases and local drives, image caching and login startup.
 - Recent images, drag-and-drop opening, image readability verification, and selected file or directory extraction.
 - WinFsp read-only drive mounting with automatic or explicit drive-letter selection and multiple concurrent mounts.
-- Direct random reads from compressed images through libsquashfs. Data and fragment blocks are decompressed in memory. No temporary extraction directory is created by browsing or mounting.
+- Direct random reads from compressed images through native filesystem readers. Data and fragment blocks are decompressed in memory. No temporary extraction directory is created by browsing or mounting.
 - SquashFS 4.0 reading: gzip, XZ, LZO, LZ4, Zstandard and legacy LZMA where supported by the bundled decoder.
 - Linux squashfs-tools Windows ports: mksquashfs, unsquashfs, sqfscat and sqfstar. Image creation uses mksquashfs; Windows-safe extraction uses the archive reader.
 - Advanced image creation: compressor, compression level, block size, worker count, memory limit, timestamps, exclusions, fragments, duplicate detection, sparse detection, ownership, export table, and compressor-specific parameters.
-- NSIS installation, file associations for .squashfs, .sqfs and .sfs, and Explorer commands to browse, mount, extract or create an image.
+- NSIS installation, file associations for .squashfs, .sqfs, .sfs, .dwarfs and .erofs, and Explorer commands to browse, mount, extract or create an image.
+
+## Image formats
+
+| Format | Creation engine | Reading |
+| --- | --- | --- |
+| SquashFS 4.0 | mksquashfs | libsquashfs |
+| DwarFS | mkdwarfs 0.12.4 | native Rust reader, filesystem versions 2.3–2.5, null/Zstandard/LZ4/LZMA |
+| EROFS | mkfs.erofs | native liberofs, single-device raw filesystem images |
+
+All three use the same browser, preview, verification, extraction, WinFsp and UNC interface. Multi-source DwarFS creation assembles a temporary source tree using hard links where possible and copies across filesystems; EROFS streams a TAR representation to its creation tool. Browsing and mounting do not extract the image to disk.
+
+The eighth preset uses XZ with the largest SquashFS block and BCJ filter trials, LZMA extreme with large DwarFS blocks and dictionaries, or EROFS LZMA preset 9 extreme with maximum physical clusters and deduplication. Compression ratio varies with input data.
+
+Example: `winsqfs create DwarFS 8 output.dwarfs file1.txt file2.txt folder`.
 
 ## Installation
 
@@ -30,7 +44,7 @@ The installer supports English and Simplified Chinese and registers Explorer men
 
 Open an image from the browser or Explorer. Select files for previews or extraction, double-click a folder to navigate, and choose Mount image to expose it as a read-only drive. Mounted images remain active while the application instance is open. Unmount them from the Mounted images page or use **Eject (WinSquashfs)** in the drive's Explorer context menu (Show more options on Windows 11). The installed shell command is scoped to SquashFS volumes. `winsqfs eject X:` also works with portable installations.
 
-Create image accepts a source directory and a new output path. Zstandard is the default. Advanced parameters are optional. Files with Windows-incompatible names receive deterministic Windows-safe names; the browser preserves the original names for display. Linux symbolic links, sockets and devices are listed as metadata; they are omitted from the mounted filesystem and Windows-safe extraction. The original unsquashfs executable is available for Linux-oriented extraction behavior.
+Create image accepts multiple files and folders, including drag-and-drop, and a new output path. A single source directory contributes its contents; multiple inputs retain their names at the image root. Select SquashFS, DwarFS or EROFS, then choose one of eight compression presets from Store to Extreme or customize the format-specific controls. Extreme prioritizes compression ratio and does not impose an additional memory budget. Right-click multiple items in Explorer and choose **Create archive with WinSquashfs** (Show more options on Windows 11). Files with Windows-incompatible names receive deterministic Windows-safe names; the browser preserves the original names for display. Linux symbolic links, sockets and devices are listed as metadata; they are omitted from the mounted filesystem and Windows-safe extraction. The original unsquashfs executable is available for Linux-oriented extraction behavior.
 
 ## File associations
 

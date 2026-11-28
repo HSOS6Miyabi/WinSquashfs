@@ -185,7 +185,7 @@ public sealed partial class MainWindow
             DwarfsExtreme.IsChecked=o.Extreme;
             ErofsFragments.IsChecked=o.Fragments;ErofsDedupe.IsChecked=o.Deduplicate;
             UpdateCodec();
-            LevelBox.Value=s?.Level??o.Level??double.NaN;
+            LevelBox.Value=(double?)(s?.Level??o.Level)??double.NaN;
             PresetHelp.Text=Localization.T(preset switch {
                 CompressionPreset.Store=>"Store data without compression.",
                 CompressionPreset.Fastest=>"Favor creation speed and low CPU use.",

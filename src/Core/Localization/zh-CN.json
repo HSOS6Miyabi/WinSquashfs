@@ -213,7 +213,6 @@
   "WinFsp runtime": "WinFsp 运行时",
   "Checking WinFsp runtime…": "正在检查 WinFsp 运行时…",
   "Check the installed driver library before mounting or using UNC access.": "检查已安装的驱动程序库，以便使用挂载和 UNC 访问功能。",
-  "Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...": "用法：winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ...",
   "Unable to eject the SquashFS volume {0}.": "无法弹出 SquashFS 卷 {0}。",
   "No active WinSquashfs mount was found at {0}.": "未找到位于 {0} 的 WinSquashfs 挂载卷。",
   "Eject operation timed out for {0}.": "弹出 {0} 的操作超时。",
@@ -283,5 +282,6 @@
   "Creating image…": "正在创建镜像…",
   "Open an image to explore its contents.": "打开镜像以浏览其内容。",
   "Open or drop an image to begin.": "打开或拖入镜像开始浏览。",
-  "Drop one image.": "请拖入一个镜像文件。"
+  "Drop one image.": "请拖入一个镜像文件。",
+  "Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|create|unpack ...": "用法：winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|create|unpack ..."
 }

@@ -22,7 +22,7 @@ try
             break;
         case ["info", var image]:
             using (var archive = new Archive(image))
-                Console.WriteLine($"{archive.Codec} {archive.BlockSize} {archive.ImageSize}");
+                Console.WriteLine($"{archive.Format} {archive.Codec} {archive.BlockSize} {archive.ImageSize}");
             break;
         case ["list", var image, ..] when args.Length is 2 or 3:
             using (var archive = new Archive(image))
@@ -97,7 +97,7 @@ try
             await SquashTools.UnpackAsync(image, output, Console.WriteLine);
             break;
         default:
-            Console.Error.WriteLine(Localization.T("Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|unpack ..."));
+            Console.Error.WriteLine(Localization.T("Usage: winsqfs [--lang en-US|zh-CN|system] --version|doctor|info|list|read|mount|eject|serve|unc-start|unc-stop|unc-status|unc-path|verify|pack|create|unpack ..."));
             return 2;
     }
     return 0;

@@ -99,6 +99,37 @@ try {
   for($i=0;$i -lt 120 -and !(Test-Path $img);$i++){Start-Sleep -Milliseconds 250}
   if(!(Test-Path $img)){throw 'GUI did not create image'}
   $null=Wait-Control $window 'CreateImage' $true
+  function Select-Combo($window,[string]$id,[string]$name){
+    $box=Wait-Control $window $id $true
+    $box.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+    $cond=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$name)
+    $item=$null
+    for($j=0;$j -lt 60;$j++){
+      $item=$box.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$cond)
+      if(!$item){$item=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$cond)}
+      if($item){break}
+      Start-Sleep -Milliseconds 100
+    }
+    if(!$item){throw "Combo option not found: $id / $name"}
+    $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+    try{$box.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()}catch{}
+    Start-Sleep -Milliseconds 250
+  }
+  foreach($format in @('DwarFS','EROFS')){
+    Select-Combo $window 'ImageFormat' $format
+    $balanced=if($Language -eq 'zh-CN'){'4 · 均衡'}else{'4 · Balanced'}
+    Select-Combo $window 'CompressionPreset' $balanced
+    $target=Join-Path $root ("ui-"+$format+"."+$format.ToLowerInvariant())
+    Set-Value $window 'PackOutput' $target
+    Save-WindowScreenshot $p ("02c-"+$format+"-creation")
+    Assert-Visible $window 'CreateImage'
+    Invoke-Control $window 'CreateImage'
+    for($i=0;$i -lt 120 -and !(Test-Path $target);$i++){Start-Sleep -Milliseconds 250}
+    if(!(Test-Path $target)){throw "GUI did not create $format"}
+    $null=Wait-Control $window 'CreateImage' $true
+    & "$AppDirectory\winsqfs.exe" verify $target
+    if($LASTEXITCODE){throw "GUI $format image failed verification"}
+  }
   $p.CloseMainWindow()|Out-Null
   if(!$p.WaitForExit(10000)){throw 'GUI did not close'}
   $p=Start-Process "$AppDirectory\WinSquashfs.exe" -ArgumentList @('--open',('"' + $img + '"')) -WorkingDirectory $AppDirectory -PassThru

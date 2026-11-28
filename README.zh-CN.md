@@ -2,7 +2,7 @@
 
 简体中文 | [English](README.md)
 
-WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI 3 和 WinFsp，可直接浏览镜像、预览文件、提取内容、创建镜像及挂载只读卷。
+WinSquashfs 是适用于 Windows x64 的 SquashFS、DwarFS 和 EROFS 镜像管理器，采用 WinUI 3 和 WinFsp，可直接浏览镜像、预览文件、提取内容、创建镜像及挂载只读卷。
 
 ## 主要功能
 
@@ -14,6 +14,22 @@ WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI
 - 支持镜像校验、最近打开记录、拖放打开、文件和目录提取。
 - 安装程序注册文件关联及资源管理器右键菜单。
 
+## 存档格式及创建
+
+| 格式 | 创建工具 | 读取模块 |
+| --- | --- | --- |
+| SquashFS 4.0 | mksquashfs | libsquashfs |
+| DwarFS | mkdwarfs 0.12.4 | Rust 原生读取模块，支持文件系统版本 2.3～2.5 及不压缩、Zstandard、LZ4、LZMA |
+| EROFS | mkfs.erofs | liberofs，支持单设备原始文件系统镜像 |
+
+三种格式共用镜像浏览、预览、校验、提取、盘符挂载和 UNC 访问功能，浏览及挂载时直接随机读取镜像数据，无需提取到磁盘。
+
+创建面板支持添加多个文件、文件夹及拖放操作。单独选择一个目录时，镜像根目录包含该目录的内容；选择多个源文件或目录时，保留各项名称。可在资源管理器中选中多个项目，右键选择“使用 WinSquashfs 创建存档”。
+
+八个压缩预设依次为不压缩、最快、快速、均衡、高压缩、超高压缩、最大压缩和极限压缩。极限压缩使用格式支持的高压缩率算法及参数，不额外限制内存预算。最终压缩率随数据内容变化。DwarFS 多源创建优先使用硬链接构造临时源目录，跨文件系统时复制源文件；EROFS 通过标准输入传输 TAR 数据流。
+
+命令行示例：`winsqfs create DwarFS 8 output.dwarfs file1.txt file2.txt folder`。
+
 ## 安装及语言设置
 
 从 [Releases](https://github.com/HSOS6Miyabi/WinSquashfs/releases) 或 [Actions](https://github.com/HSOS6Miyabi/WinSquashfs/actions) 下载 Windows x64 安装程序或便携版。挂载与 UNC 访问需要 WinFsp 2.2.26323（WinFsp 2026）或兼容的更新 2.x 版本。安装程序会在需要时安装或升级 WinFsp。便携版包含 prerequisites\WinFsp.msi，可离线安装驱动程序。可运行 `winsqfs doctor` 或在“工具与关于”中点击“检查 WinFsp 运行时”查看当前安装情况。
@@ -22,7 +38,7 @@ WinSquashfs 是适用于 Windows x64 的 SquashFS 镜像管理器，采用 WinUI
 
 ## 弹出挂载卷
 
-可在资源管理器中右键点击 SquashFS 盘符，选择“弹出（WinSquashfs）”。Windows 11 可通过“显示更多选项”找到该命令。也可在挂载管理页面卸载，或执行 `winsqfs eject X:`。
+可在资源管理器中右键点击已挂载的镜像盘符，选择“弹出（WinSquashfs）”。Windows 11 可通过“显示更多选项”找到该命令。也可在挂载管理页面卸载，或执行 `winsqfs eject X:`。
 
 ## 文件关联
 

@@ -131,11 +131,15 @@ jobs:
           $install=Join-Path $env:ProgramFiles 'WinSquashfs'
           if (!(Test-Path "$install/app/WinSquashfs.exe")) { throw 'Missing GUI' }
           if (!(Test-Path "$install/app/tools/unsquashfs.exe")) { throw 'Missing unsquashfs' }
+          foreach($extension in @('.dwarfs','.erofs')){
+            if(!(Test-Path "HKLM:\Software\Classes\SystemFileAssociations\$extension\shell\WinSquashfs.Unc\command")){throw "Missing $extension association"}
+          }
+          ./tests/pack-shell.ps1 -AppDirectory "$install/app" -Harness (Resolve-Path artifacts/native-tests/pack-shell.exe).Path
           if (!(Test-Path "$install/app/WinSquashfs.Unc.exe")) { throw 'Missing UNC background application' }
           if (!(Test-Path 'HKLM:\Software\Classes\SystemFileAssociations\.squashfs\shell\WinSquashfs.Unc\command')) { throw 'Missing UNC verb' }
           if (!(Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image\shell\open\command')) { throw 'Missing file association' }
           if (!(Test-Path 'HKLM:\Software\Classes\SystemFileAssociations\.squashfs\shell\WinSquashfs.Mount\command')) { throw 'Missing mount verb' }
-          if (!(Test-Path 'HKLM:\Software\Classes\Directory\shell\WinSquashfs.Pack\command')) { throw 'Missing pack verb' }
+          if (!(Test-Path 'HKLM:\Software\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\WinSquashfs.Pack')) { throw 'Missing pack verb' }
           $registered=(Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\WinSquashfs').DisplayVersion
           if ($registered -ne $version) { throw "Installed version mismatch: $registered" }
           $key=Get-Item 'HKLM:\Software\Classes\SystemFileAssociations\.squashfs\shell\WinSquashfs.Browse'
@@ -198,6 +202,7 @@ jobs:
           if(Test-Path 'HKLM:\Software\Classes\Drive\shellex\ContextMenuHandlers\WinSquashfs.Eject'){throw 'Eject menu was not removed'}
           if(Test-Path 'HKLM:\Software\Classes\CLSID\{9B20352F-1BC4-48E6-AE3B-146F32657DA9}'){throw 'Eject COM class was not removed'}
           if(Test-Path 'HKLM:\Software\Classes\WinSquashfs.Image'){throw 'File association was not removed'}
+          if(Test-Path 'HKLM:\Software\Classes\AllFilesystemObjects\shellex\ContextMenuHandlers\WinSquashfs.Pack'){throw 'Creation menu was not removed'}
       - name: Upload installed application screenshots
         if: always()
         uses: actions/upload-artifact@v4

@@ -33,9 +33,10 @@ if [[ -n "$tag_refs" ]]; then
 fi
 
 test -f output/WinSquashfs-Setup-x64.exe
-for name in WinSquashfs.exe winsqfs.exe WinSquashfs.Unc.exe winsqfs-native.dll README.md README.zh-CN.md LICENSE THIRD-PARTY.md tools/mksquashfs.exe tools/unsquashfs.exe prerequisites/WinFsp.msi "winsqfs-shell-$version.dll"; do
+for name in WinSquashfs.exe winsqfs.exe WinSquashfs.Unc.exe winsqfs-native.dll winsqfs-dwarfs.dll winsqfs-erofs.dll tools/mkfs.erofs.exe tools/fsck.erofs.exe README.md README.zh-CN.md LICENSE THIRD-PARTY.md tools/mksquashfs.exe tools/unsquashfs.exe prerequisites/WinFsp.msi "winsqfs-shell-$version.dll"; do
   test -f "output/dist/$name"
 done
+test -f output/dist/tools/dwarfs-universal.exe || test -f output/dist/tools/mkdwarfs.exe
 mkdir -p release
 cp output/WinSquashfs-Setup-x64.exe release/WinSquashfs-Setup-x64.exe
 (cd output/dist && zip -qr ../../release/WinSquashfs-portable-x64.zip .)
