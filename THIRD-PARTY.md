@@ -7,7 +7,7 @@
 - MSYS2 runtime and codec DLLs: exact installed versions are recorded in licenses/msys2-versions.txt. License files are copied from the MSYS2 installation and the upstream SquashFS Windows archive.
 - DwarFS 0.15.10: https://github.com/mhx/dwarfs/tree/v0.15.10 (upstream GPL-3.0 and component-specific terms). Official C++ reader and creation tools.
 - erofs-utils: https://github.com/erofs/erofs-utils/tree/7e52cbffa83fbe9eb10bbf110cb12d503a048081 (GPL-2.0-or-later/MIT per source file). Native Windows builds include the upstream library and compression dependencies.
-- libarchive: https://github.com/libarchive/libarchive (BSD-2-Clause and component-specific terms), used for TAR input.
+- libarchive: https://github.com/libarchive/libarchive (BSD-2-Clause and component-specific terms), used for TAR input and general archive decoding.
 - nlohmann/json: https://github.com/nlohmann/json (MIT), used for settings.
 - Microsoft Windows App SDK, C++/WinRT and Visual C++ redistributable libraries retain their respective license terms.
 - vcpkg dependency licenses are included in licenses/vcpkg.

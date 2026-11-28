@@ -103,6 +103,8 @@ if(BUILD_TESTING)
     add_test(NAME native_cli COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_test.py"
       "$<TARGET_FILE:archivefs-read>" "$<TARGET_FILE_DIR:mock_winsqfs-native>")
     set_tests_properties(native_cli PROPERTIES TIMEOUT 90)
+    add_test(NAME common_archives COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/common_archives.py" "$<TARGET_FILE:archivefs-read>")
+    set_tests_properties(common_archives PROPERTIES TIMEOUT 120)
     add_test(NAME adb_protocol COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/adb_protocol.py" "$<TARGET_FILE:adb_protocol_tests>")
     set_tests_properties(adb_protocol PROPERTIES TIMEOUT 45)
   endif()

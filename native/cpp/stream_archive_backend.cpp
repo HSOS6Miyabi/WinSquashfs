@@ -50,6 +50,20 @@ public:
                           archive_read_support_filter_lzip,archive_read_support_filter_lz4,
                           archive_read_support_filter_zstd})
             if(support(a)!=ARCHIVE_OK)throw std::runtime_error("required in-process archive filter is unavailable: "+error_text(a));
+        // A recognized signature selects its own parser, including for archives
+        // containing other archive signatures in their member data.
+        switch(hint){
+        case ArchiveFormat::tar:check(archive_read_support_format_tar(a));break;
+        case ArchiveFormat::zip:check(archive_read_support_format_zip(a));break;
+        case ArchiveFormat::seven_zip:check(archive_read_support_format_7zip(a));break;
+        case ArchiveFormat::rar:check(archive_read_support_format_rar(a));check(archive_read_support_format_rar5(a));break;
+        case ArchiveFormat::cpio:check(archive_read_support_format_cpio(a));break;
+        case ArchiveFormat::cab:check(archive_read_support_format_cab(a));break;
+        case ArchiveFormat::iso9660:check(archive_read_support_format_iso9660(a));break;
+        case ArchiveFormat::ar:check(archive_read_support_format_ar(a));break;
+        case ArchiveFormat::lha:check(archive_read_support_format_lha(a));break;
+        case ArchiveFormat::compressed_stream:check(archive_read_support_format_raw(a));check(archive_read_support_format_empty(a));break;
+        default:
         for(auto support:{archive_read_support_format_tar,archive_read_support_format_zip,
                           archive_read_support_format_7zip,archive_read_support_format_rar,
                           archive_read_support_format_rar5,archive_read_support_format_cpio,
@@ -57,6 +71,8 @@ public:
                           archive_read_support_format_ar,archive_read_support_format_lha,
                           archive_read_support_format_raw,archive_read_support_format_empty})
             if(support(a)!=ARCHIVE_OK)throw std::runtime_error(error_text(a));
+        break;
+        }
         check(archive_read_set_callback_data(a,this));
         check(archive_read_set_read_callback(a,&read_source));
         check(archive_read_set_skip_callback(a,&skip_source));
@@ -244,6 +260,7 @@ public:
             auto* a=cursor.handle();
             auto f=format_of(a);
             if(f==ArchiveFormat::unknown)throw UnknownArchiveFormat();
+            if(hint_!=ArchiveFormat::unknown&&f!=hint_)throw std::runtime_error("archive signature and decoded format differ");
             if(info_.format==ArchiveFormat::unknown)
                 info_={f,1,source_->size(),256u<<10,static_cast<std::uint32_t>(archive_filter_code(a,0))};
             if(f!=info_.format)throw std::runtime_error("archive format changed during scan");

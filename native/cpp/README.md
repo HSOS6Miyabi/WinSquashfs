@@ -16,6 +16,12 @@ The test configuration builds independent deterministic decoder and creator impl
 
 For a Windows application build, set `ARCHIVEFS_WITH_DWARFS=ON` and provide the official DwarFS 0.15.10 CMake package. The SquashFS and EROFS libraries use the existing native decoder interfaces. The SquashFS adapter provides independent read contexts for parallel decompression.
 
+### Additional archive formats
+
+ZIP (including ZIP64), 7z, RAR, TAR, CPIO, CAB, ISO9660, AR and LHA are available through the same read-only browser, CLI, drive mounts and UNC namespace. TAR supports gzip, bzip2, xz, Zstandard, LZ4, LZMA, lzip and Unix compress filters; standalone compressed streams appear as a single file. Ordinary TAR entries use indexed physical offsets, including sparse extent maps. Compressed TAR and solid archives require sequential decompression; decoder cursors and bounded decoded-page caches accelerate repeated reads. A backward cache miss can require replaying a stream. No extracted files or intermediate TAR files are written for reads.
+
+Archive creation remains available for SquashFS, DwarFS and EROFS. Encrypted archives requiring passwords, split/multi-volume archives and UDF-only discs are not supported. The installer offers archive-specific Explorer commands without changing existing default archive applications.
+
 ## Windows distribution
 
 Build the native SquashFS and EROFS dependencies with `scripts/build-native.sh` (MSYS2) and `scripts/build-erofs.sh` (Linux with Docker). Install WinFsp using `scripts/install-winfsp.ps1`, then use `native/cpp/scripts/build.ps1` in an MSVC developer environment. The build produces the native DLL, `archivefs.exe`, `WinArchiveFSPro.exe`, `WinArchiveFSPro.Unc.exe`, and the required compression tools in `artifacts/dist`.

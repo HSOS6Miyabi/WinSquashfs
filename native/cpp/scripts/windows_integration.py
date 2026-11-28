@@ -16,6 +16,7 @@ import time
 import socket
 import io
 import tarfile
+import zipfile
 from mock_adb import Server as MockAdb, COMPONENT as MOCK_COMPONENT
 
 faulthandler.enable()
@@ -69,6 +70,28 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             print(f'PASS {fmt} preset {preset}', flush=True)
             if preset == 4:
                 images.append(image)
+    # Exercise general archive readers using independently generated fixtures.
+    for suffix, mode in [('zip',None),('tar','w'),('tar.gz','w:gz'),('tar.xz','w:xz')]:
+        image=root/('common.'+suffix)
+        if mode is None:
+            with zipfile.ZipFile(image,'w',compression=zipfile.ZIP_DEFLATED,allowZip64=True) as z:
+                z.write(src/'文件.bin','文件.bin')
+                for child in other.iterdir():z.write(child,'目录/'+child.name)
+        else:
+            with tarfile.open(image,mode,format=tarfile.PAX_FORMAT) as tar:
+                tar.add(src/'文件.bin',arcname='文件.bin')
+                tar.add(other,arcname='目录')
+        assert invoke('info',image).startswith(('ZIP' if mode is None else 'TAR')+' ')
+        assert invoke('verify',image).startswith('Verified 3 files')
+        for start,size in [(0,1),(65530,37),(len(data)-8,16),(len(data),64)]:
+            assert invoke('read',image,'文件.bin',start,size)==data[start:start+size].hex().upper()
+        output=root/('extract-common-'+suffix)
+        invoke('unpack',image,output)
+        assert (output/'文件.bin').read_bytes()==data
+        assert (output/'目录'/'hello.txt').read_bytes()==(other/'hello.txt').read_bytes()
+        assert (output/'目录'/'empty.txt').stat().st_size==0
+        images.append(image)
+        print('PASS common archive '+suffix,flush=True)
     # Real Linux metadata fixtures: preserve exact symlink targets in TAR
     # rather than depending on the host's ability to represent POSIX devices.
     link_tar=io.BytesIO()

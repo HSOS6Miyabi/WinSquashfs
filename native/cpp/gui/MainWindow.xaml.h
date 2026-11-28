@@ -53,7 +53,7 @@ private:
     fire_and_forget check_source();
     fire_and_forget accept_drop(Microsoft::UI::Xaml::DragEventArgs args,bool create);
     void refresh_sources();void refresh_mounts();
-    std::vector<std::filesystem::path> pick(bool folder,bool multi=false,bool save=false);
+    std::vector<std::filesystem::path> pick(bool folder,bool multi=false,bool save=false,bool archives=false);
 };
 }
 namespace winrt::WinArchiveFSPro::factory_implementation {struct MainWindow:MainWindowT<MainWindow,implementation::MainWindow>{};}

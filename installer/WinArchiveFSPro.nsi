@@ -87,10 +87,10 @@ LangString UncVerb ${LANG_ENGLISH} "Open via archive UNC path"
 LangString UncVerb ${LANG_SIMPCHINESE} "通过存档 UNC 路径打开"
 LangString PackVerb ${LANG_ENGLISH} "Create archive image"
 LangString PackVerb ${LANG_SIMPCHINESE} "创建存档镜像"
-LangString Description ${LANG_ENGLISH} "Browse, create and mount SquashFS, DwarFS and EROFS images."
-LangString Description ${LANG_SIMPCHINESE} "浏览、创建和挂载 SquashFS、DwarFS 及 EROFS 镜像。"
-LangString ImageType ${LANG_ENGLISH} "Read-only filesystem image"
-LangString ImageType ${LANG_SIMPCHINESE} "只读文件系统镜像"
+LangString Description ${LANG_ENGLISH} "Browse and mount archives and filesystem images; create SquashFS, DwarFS and EROFS images."
+LangString Description ${LANG_SIMPCHINESE} "浏览和挂载存档及文件系统镜像，创建 SquashFS、DwarFS 和 EROFS 镜像。"
+LangString ImageType ${LANG_ENGLISH} "Read-only archive or filesystem image"
+LangString ImageType ${LANG_SIMPCHINESE} "只读存档或文件系统镜像"
 LangString EditVerb ${LANG_ENGLISH} "Edit with WinArchiveFSPro"
 LangString EditVerb ${LANG_SIMPCHINESE} "使用 WinArchiveFSPro 编辑"
 LangString UninstallLink ${LANG_ENGLISH} "Uninstall"
@@ -127,11 +127,13 @@ Function .onInit
   ${EndIf}
 FunctionEnd
 
-!macro RegisterExtension EXT
+!macro RegisterExtension EXT CLAIM_DEFAULT
+  !if ${CLAIM_DEFAULT} == 1
   ReadRegStr $0 HKLM "Software\Classes\${EXT}" ""
   ${If} $0 == ""
     WriteRegStr HKLM "Software\Classes\${EXT}" "" "${PROGID}"
   ${EndIf}
+  !endif
   WriteRegStr HKLM "Software\Classes\${EXT}\OpenWithProgids" "${PROGID}" ""
   WriteRegStr HKLM "Software\WinArchiveFSPro\Capabilities\FileAssociations" "${EXT}" "${PROGID}"
   WriteRegStr HKLM "Software\Classes\SystemFileAssociations\${EXT}\shell\WinArchiveFSPro.Browse" "" "$(BrowseVerb)"
@@ -263,11 +265,37 @@ Section "WinArchiveFSPro"
   WriteRegStr HKLM "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\app\WinArchiveFSPro.exe" --unc "%1"'
   WriteRegStr HKLM "Software\Classes\${PROGID}\shell\edit" "" "$(EditVerb)"
   WriteRegStr HKLM "Software\Classes\${PROGID}\shell\edit\command" "" '"$INSTDIR\app\WinArchiveFSPro.exe" --open "%1"'
-  !insertmacro RegisterExtension ".squashfs"
-  !insertmacro RegisterExtension ".sqfs"
-  !insertmacro RegisterExtension ".sfs"
-  !insertmacro RegisterExtension ".dwarfs"
-  !insertmacro RegisterExtension ".erofs"
+  !insertmacro RegisterExtension ".squashfs" 1
+  !insertmacro RegisterExtension ".sqfs" 1
+  !insertmacro RegisterExtension ".sfs" 1
+  !insertmacro RegisterExtension ".dwarfs" 1
+  !insertmacro RegisterExtension ".erofs" 1
+  !insertmacro RegisterExtension ".zip" 0
+  !insertmacro RegisterExtension ".zipx" 0
+  !insertmacro RegisterExtension ".7z" 0
+  !insertmacro RegisterExtension ".rar" 0
+  !insertmacro RegisterExtension ".tar" 0
+  !insertmacro RegisterExtension ".tgz" 0
+  !insertmacro RegisterExtension ".tbz" 0
+  !insertmacro RegisterExtension ".tbz2" 0
+  !insertmacro RegisterExtension ".txz" 0
+  !insertmacro RegisterExtension ".tzst" 0
+  !insertmacro RegisterExtension ".tlz" 0
+  !insertmacro RegisterExtension ".gz" 0
+  !insertmacro RegisterExtension ".bz2" 0
+  !insertmacro RegisterExtension ".xz" 0
+  !insertmacro RegisterExtension ".zst" 0
+  !insertmacro RegisterExtension ".lz4" 0
+  !insertmacro RegisterExtension ".lz" 0
+  !insertmacro RegisterExtension ".lzma" 0
+  !insertmacro RegisterExtension ".z" 0
+  !insertmacro RegisterExtension ".cpio" 0
+  !insertmacro RegisterExtension ".cab" 0
+  !insertmacro RegisterExtension ".iso" 0
+  !insertmacro RegisterExtension ".ar" 0
+  !insertmacro RegisterExtension ".deb" 0
+  !insertmacro RegisterExtension ".lha" 0
+  !insertmacro RegisterExtension ".lzh" 0
   DeleteRegKey HKLM "Software\Classes\Drive\shell\WinArchiveFSPro.Eject"
   WriteRegStr HKLM "Software\Classes\CLSID\${EJECT_CLSID}" "" "WinArchiveFSPro Eject"
   WriteRegStr HKLM "Software\Classes\CLSID\${EJECT_CLSID}\InprocServer32" "" "$INSTDIR\app\winsqfs-shell-${PRODUCT_VERSION}.dll"
@@ -314,6 +342,32 @@ Section "Uninstall"
   !insertmacro UnregisterExtension ".sfs"
   !insertmacro UnregisterExtension ".dwarfs"
   !insertmacro UnregisterExtension ".erofs"
+  !insertmacro UnregisterExtension ".zip"
+  !insertmacro UnregisterExtension ".zipx"
+  !insertmacro UnregisterExtension ".7z"
+  !insertmacro UnregisterExtension ".rar"
+  !insertmacro UnregisterExtension ".tar"
+  !insertmacro UnregisterExtension ".tgz"
+  !insertmacro UnregisterExtension ".tbz"
+  !insertmacro UnregisterExtension ".tbz2"
+  !insertmacro UnregisterExtension ".txz"
+  !insertmacro UnregisterExtension ".tzst"
+  !insertmacro UnregisterExtension ".tlz"
+  !insertmacro UnregisterExtension ".gz"
+  !insertmacro UnregisterExtension ".bz2"
+  !insertmacro UnregisterExtension ".xz"
+  !insertmacro UnregisterExtension ".zst"
+  !insertmacro UnregisterExtension ".lz4"
+  !insertmacro UnregisterExtension ".lz"
+  !insertmacro UnregisterExtension ".lzma"
+  !insertmacro UnregisterExtension ".z"
+  !insertmacro UnregisterExtension ".cpio"
+  !insertmacro UnregisterExtension ".cab"
+  !insertmacro UnregisterExtension ".iso"
+  !insertmacro UnregisterExtension ".ar"
+  !insertmacro UnregisterExtension ".deb"
+  !insertmacro UnregisterExtension ".lha"
+  !insertmacro UnregisterExtension ".lzh"
   DeleteRegKey HKLM "Software\Classes\${PROGID}"
   DeleteRegKey HKLM "Software\Classes\Drive\shell\WinArchiveFSPro.Eject"
   DeleteRegKey HKLM "Software\Classes\Drive\shellex\ContextMenuHandlers\WinArchiveFSPro.Eject"

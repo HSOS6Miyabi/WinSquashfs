@@ -20,6 +20,12 @@ A native Windows application for browsing, creating, extracting, verifying and m
 
 Regular files and directories are projected into Windows. Symbolic links and special files are displayed as metadata. Incompatible Windows names are encoded deterministically. Extreme compression uses format-specific high-ratio settings.
 
+### Additional archive formats
+
+ZIP (including ZIP64), 7z, RAR, TAR, CPIO, CAB, ISO9660, AR and LHA are available through the same read-only browser, CLI, drive mounts and UNC namespace. TAR supports gzip, bzip2, xz, Zstandard, LZ4, LZMA, lzip and Unix compress filters; standalone compressed streams appear as a single file. Ordinary TAR entries use indexed physical offsets, including sparse extent maps. Compressed TAR and solid archives require sequential decompression; decoder cursors and bounded decoded-page caches accelerate repeated reads. A backward cache miss can require replaying a stream. No extracted files or intermediate TAR files are written for reads.
+
+Archive creation remains available for SquashFS, DwarFS and EROFS. Encrypted archives requiring passwords, split/multi-volume archives and UDF-only discs are not supported. The installer offers archive-specific Explorer commands without changing existing default archive applications.
+
 ## Installation
 
 Windows 10 1809 or newer, with native x64, x86 and ARM64 packages. Choose the installer for the operating system's architecture. Mounting and UNC access require WinFsp 2.2.26323 or a compatible newer 2.x version. The installer installs or upgrades WinFsp; the portable distribution includes its MSI in prerequisites. No .NET runtime is required.
