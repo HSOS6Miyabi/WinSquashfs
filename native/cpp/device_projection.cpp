@@ -214,6 +214,12 @@ private:
     }
 };
 }
+std::vector<DeviceListing> list_connected_devices(const std::shared_ptr<DeviceProvider>& provider){
+    if(!provider)throw std::invalid_argument("missing device provider");
+    std::vector<DeviceListing> result;
+    for(auto& d:names(provider->devices()))result.push_back({std::move(d.name),std::move(d.value)});
+    return result;
+}
 std::shared_ptr<Projection> device_projection(std::shared_ptr<DeviceProvider> provider,std::shared_ptr<ImagePool> pool,
     std::u16string id,std::function<void(const DeviceFailure&)> unavailable){
     if(!provider||!pool)throw std::invalid_argument("missing device projection");

@@ -51,7 +51,8 @@ void cancelled(std::stop_token s){if(s.stop_requested())throw std::runtime_error
 void validate(const Settings& s){
     auto valid_alias=[](std::u16string_view alias){return !alias.empty()&&alias.size()<=64&&alias.find_first_of(u"\\/:*?\"<>| ")==std::u16string_view::npos&&alias!=u"."&&alias!=u".."&&alias.back()!=u'.'&&
         !std::any_of(alias.begin(),alias.end(),[](char16_t c){return c<32;});};
-    std::set<std::u16string,WindowsNameLess> aliases{u"UNC"};
+    std::set<std::u16string,WindowsNameLess> aliases{u"UNC",u"mtp",u"adb",u"adb.r"};
+    if(!s.adb_port||s.adb_port>65535)throw std::invalid_argument("invalid ADB Server port");
     if(s.root.empty()||!s.root.is_absolute()||!valid_alias(s.alias)||!aliases.insert(s.alias).second||
        s.idle_seconds>86400||s.max_idle_images>1024||s.cache_mib>4096||s.cache_mib>(std::numeric_limits<std::size_t>::max()>>20)||s.total_cache_mib>4096||s.total_cache_mib>(std::numeric_limits<std::size_t>::max()>>20)||s.extra_shares.size()>64)throw std::invalid_argument("invalid UNC settings");
     for(auto const& extra:s.extra_shares)
@@ -79,8 +80,8 @@ void save_recent(const std::vector<fs::path>& paths){
 std::vector<fs::path> recent_images(){try{auto path=settings_directory()/L"recent.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"recent.json";if(!fs::exists(path)||fs::file_size(path)>1u<<20)return {};std::ifstream input(path,std::ios::binary);auto json=nlohmann::json::parse(input);std::vector<fs::path> paths;for(auto& value:json){if(paths.size()==15)break;paths.emplace_back(to_utf16(value.get<std::string>()));}return paths;}catch(...){return {};}}
 void remember_image(const fs::path& path){try{auto paths=recent_images();auto full=fs::absolute(path).lexically_normal();auto name=full.u16string();std::erase_if(paths,[&](auto& p){auto other=p.u16string();WindowsNameLess less;return !less(name,other)&&!less(other,name);});paths.insert(paths.begin(),full);if(paths.size()>15)paths.resize(15);save_recent(paths);}catch(...){}}
 void clear_recent_images(){save_recent({});}
-Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){std::ifstream in(path,std::ios::binary);auto j=nlohmann::json::parse(in);s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.show_tray_icon=j.value("ShowTrayIcon",true);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.total_cache_mib=j.value("TotalCacheMiB",512u);s.language=j.value("Language",std::string("system"));s.theme=j.value("Theme",std::string("system"));for(auto const& item:j.value("ExtraShares",nlohmann::json::array()))s.extra_shares.push_back({to_utf16(item.at("Alias").get<std::string>()),fs::path(to_utf16(item.at("Root").get<std::string>()))});}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
-void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";auto temporary=path;temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";struct Cleanup{fs::path path;~Cleanup(){std::error_code ec;fs::remove(path,ec);}}cleanup{temporary};nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"ShowTrayIcon",show_tray_icon},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"TotalCacheMiB",total_cache_mib},{"Language",language},{"Theme",theme}};j["ExtraShares"]=nlohmann::json::array();for(auto const& extra:extra_shares)j["ExtraShares"].push_back({{"Alias",to_utf8(extra.name)},{"Root",to_utf8(extra.root.u16string())}});{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::badbit|std::ios::failbit);out<<j.dump(2)<<'\n';out.close();}if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save settings");autostart(start_at_login);}
+Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){std::ifstream in(path,std::ios::binary);auto j=nlohmann::json::parse(in);s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.show_tray_icon=j.value("ShowTrayIcon",true);s.enable_mtp=j.value("EnableMtp",true);s.enable_adb=j.value("EnableAdb",true);s.enable_adb_root=j.value("EnableAdbRoot",true);s.show_open_progress=j.value("ShowOpenProgress",true);s.adb_port=j.value("AdbPort",5037u);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.total_cache_mib=j.value("TotalCacheMiB",512u);s.language=j.value("Language",std::string("system"));s.theme=j.value("Theme",std::string("system"));for(auto const& item:j.value("ExtraShares",nlohmann::json::array()))s.extra_shares.push_back({to_utf16(item.at("Alias").get<std::string>()),fs::path(to_utf16(item.at("Root").get<std::string>()))});}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
+void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";auto temporary=path;temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";struct Cleanup{fs::path path;~Cleanup(){std::error_code ec;fs::remove(path,ec);}}cleanup{temporary};nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"ShowTrayIcon",show_tray_icon},{"EnableMtp",enable_mtp},{"EnableAdb",enable_adb},{"EnableAdbRoot",enable_adb_root},{"ShowOpenProgress",show_open_progress},{"AdbPort",adb_port},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"TotalCacheMiB",total_cache_mib},{"Language",language},{"Theme",theme}};j["ExtraShares"]=nlohmann::json::array();for(auto const& extra:extra_shares)j["ExtraShares"].push_back({{"Alias",to_utf8(extra.name)},{"Root",to_utf8(extra.root.u16string())}});{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::badbit|std::ios::failbit);out<<j.dump(2)<<'\n';out.close();}if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save settings");autostart(start_at_login);}
 void migrate_settings(){
     auto current=settings_directory();
     auto legacy=current.parent_path()/L"WinSquashfs";
@@ -89,7 +90,27 @@ void migrate_settings(){
     if(!fs::exists(current/L"recent.json")&&fs::exists(legacy/L"recent.json"))save_recent(recent_images());
 }
 std::vector<Share> Settings::shares()const{validate(*this);std::vector<Share> result;for(auto server:{u"sfs$",u"sfs.localhost"}){result.push_back({alias,root,false,server});for(auto const& extra:extra_shares)result.push_back({extra.name,extra.root,false,server});if(include_drives){auto mask=GetLogicalDrives();for(unsigned i=0;i<26;++i){if(!(mask&(1u<<i)))continue;std::u16string name(1,static_cast<char16_t>(u'A'+i));if(std::any_of(result.begin(),result.end(),[&](auto const& share){WindowsNameLess less;return share.server==server&&!less(share.name,name)&&!less(name,share.name);}))continue;auto drive=fs::path(name+u":\\");wchar_t format[64]{};if(GetVolumeInformationW(drive.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)&&(!_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS")))continue;result.push_back({name,drive,false,server});}}result.push_back({u"UNC",{},true,server});}return result;}
-std::u16string Settings::unc_path(const fs::path& source)const{auto p=fs::absolute(source).lexically_normal();if(p.u16string().starts_with(u"\\\\?\\UNC\\"))p=fs::path(u"\\\\"+p.u16string().substr(8));bool remote=p.u16string().starts_with(u"\\\\");for(auto& s:shares())if(s.server==u"sfs$"&&s.network==remote)if(auto path=image_unc_path(s,p))return *path;throw std::invalid_argument("image is outside the configured UNC shares");}
+std::u16string Settings::unc_path(const fs::path& source)const{auto p=fs::absolute(source).lexically_normal();if(p.u16string().starts_with(u"\\\\?\\UNC\\"))p=fs::path(u"\\\\"+p.u16string().substr(8));bool remote=p.u16string().starts_with(u"\\\\");
+    if(remote){
+        auto value=p.u16string();auto end=value.find(u'\\',2);
+        if(end!=value.npos){
+            auto host=std::u16string_view(value).substr(2,end-2);
+            WindowsNameLess less;auto equal=[&](std::u16string_view a,std::u16string_view b){return !less(a,b)&&!less(b,a);};
+            if(equal(host,u"sfs$")||equal(host,u"sfs.localhost")||(host.size()>14&&equal(host.substr(0,4),u"sfs.")&&equal(host.substr(host.size()-10),u".localhost")))return value;
+        }
+    }for(auto& s:shares())if(s.server==u"sfs$"&&s.network==remote)if(auto path=image_unc_path(s,p))return *path;throw std::invalid_argument("image is outside the configured UNC shares");}
+std::vector<std::u16string> enabled_device_shares(const Settings& settings){
+    std::vector<std::u16string> result;
+    if(settings.enable_mtp)result.push_back(u"mtp");
+    if(settings.enable_adb)result.push_back(u"adb");
+    if(settings.enable_adb_root)result.push_back(u"adb.r");
+    return result;
+}
+std::shared_ptr<DeviceProvider> make_device_provider(std::u16string_view kind,const Settings& settings){
+    if(kind==u"mtp")return make_mtp_provider();
+    if(kind==u"adb"||kind==u"adb.r"){AdbOptions options;options.root=kind==u"adb.r";options.port=static_cast<std::uint16_t>(settings.adb_port);return make_adb_provider(options);}
+    throw std::invalid_argument("unknown device namespace");
+}
 void open_in_explorer(std::u16string_view path){auto p=wide(path);auto result=ShellExecuteW(nullptr,L"open",p.c_str(),nullptr,nullptr,SW_SHOWNORMAL);if(reinterpret_cast<INT_PTR>(result)<=32)throw std::runtime_error("Explorer could not open the path");}
 bool agent_running(){Handle h(OpenEventW(SYNCHRONIZE,FALSE,agent_name(L"Ready").c_str()));return h&&WaitForSingleObject(h.value,0)==WAIT_OBJECT_0;}
 void start_agent(std::stop_token stop){cancelled(stop);if(agent_running())return;winfsp_runtime_info();auto executable=application_directory()/L"WinArchiveFSPro.Unc.exe";auto command=L"\""+executable.wstring()+L"\"";STARTUPINFOW si{};si.cb=sizeof(si);PROCESS_INFORMATION pi{};if(!CreateProcessW(executable.c_str(),command.data(),nullptr,nullptr,FALSE,DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP,nullptr,executable.parent_path().c_str(),&si,&pi))fail("start UNC agent");Handle proc(pi.hProcess),thread(pi.hThread);std::stop_callback cancel_start(stop,[&] noexcept {try{if(!agent_running())TerminateProcess(proc.value,1);}catch(...){TerminateProcess(proc.value,1);}});for(unsigned i=0;i<300;++i){if(agent_running())return;cancelled(stop);if(WaitForSingleObject(proc.value,50)==WAIT_OBJECT_0){if(instance_stopped())break;std::this_thread::sleep_for(50ms);}}if(!agent_running()&&WaitForSingleObject(proc.value,0)==WAIT_TIMEOUT)TerminateProcess(proc.value,1);throw std::runtime_error("UNC agent did not become ready; see unc.log in application settings");}
@@ -298,9 +319,9 @@ int run_agent(){
     if(!stop||!ready||!aliases)fail("CreateEventW");
     ResetEvent(ready.value);ResetEvent(stop.value);
     auto settings=Settings::load();
-    auto pool=std::make_shared<ImagePool>(make_archive_opener(application_directory(),
-        static_cast<std::size_t>(settings.cache_mib)<<20,static_cast<std::size_t>(settings.total_cache_mib)<<20),
-        ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images});
+    auto open_source=make_archive_source_opener(application_directory(),static_cast<std::size_t>(settings.cache_mib)<<20,static_cast<std::size_t>(settings.total_cache_mib)<<20);
+    auto pool=std::make_shared<ImagePool>([open_source](const fs::path& path,SourcePolicy policy){return open_source(open_file_source(path,policy));},
+        ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images},open_source);
     auto shares=settings.shares();
     std::map<std::u16string,std::unique_ptr<NativeMount>,WindowsNameLess> mounts;
     auto update_mounts=[&](const std::vector<Share>& current,bool initial){
@@ -318,7 +339,15 @@ int run_agent(){
     };
     update_mounts(shares,true);
     DWORD drive_mask=GetLogicalDrives();
-    RemoteAliasMounts remote(pool,shares,settings.include_drives);
+    std::vector<std::unique_ptr<NativeMount>> device_mounts;
+    auto reserved=shares;
+    for(auto server:{u"sfs$",u"sfs.localhost"})for(auto kind:{u"mtp",u"adb",u"adb.r"})reserved.push_back({kind,{},false,server});
+    for(auto const& kind:enabled_device_shares(settings)){
+        auto projection=device_projection(make_device_provider(kind,settings),pool,kind);
+        for(auto server:{u"sfs$",u"sfs.localhost"})
+            device_mounts.push_back(std::make_unique<NativeMount>(projection,u"",std::u16string(u"\\")+server+u"\\"+kind));
+    }
+    RemoteAliasMounts remote(pool,reserved,settings.include_drives);
     try{remote.refresh();}catch(const std::exception&){}
     AgentTray tray(stop.value,settings.show_tray_icon,settings.language=="zh-CN"||(settings.language=="system"&&PRIMARYLANGID(GetUserDefaultUILanguage())==LANG_CHINESE));
     if(!SetEvent(ready.value))fail("SetEvent");
@@ -341,6 +370,7 @@ int run_agent(){
 }
 std::u16string register_unc_alias(const fs::path& source,std::stop_token stop){
     auto fallback=Settings::load().unc_path(source);
+    if(fallback==source.u16string()&&(fallback.starts_with(u"\\\\sfs$\\")||fallback.starts_with(u"\\\\sfs.localhost\\")||fallback.starts_with(u"\\\\sfs.")))return fallback;
     auto alias=source_alias(source);
     if(!alias)return fallback;
     start_agent(stop);
@@ -379,5 +409,5 @@ bool MountedVolume::mounted()const noexcept{return WaitForSingleObject(impl_->do
 void MountedVolume::wait(std::stop_token token){std::stop_callback callback(token,[this]{SetEvent(impl_->stop.value);});if(WaitForSingleObject(impl_->done.value,INFINITE)!=WAIT_OBJECT_0)fail("wait for unmount");}
 void MountedVolume::unmount(){SetEvent(impl_->stop.value);wait();}
 void eject_volume(std::u16string_view drive){Handle done(OpenEventW(SYNCHRONIZE,FALSE,eject_name(drive,L"Done").c_str()));if(!done)fail("find mounted image");Handle stop(OpenEventW(EVENT_MODIFY_STATE,FALSE,eject_name(drive,L"Stop").c_str()));if(!stop)fail("find mounted image");if(!SetEvent(stop.value))fail("request eject");if(WaitForSingleObject(done.value,20000)!=WAIT_OBJECT_0)throw std::runtime_error("eject did not finish");}
-void serve_share(Share share,const fs::path& decoders,unsigned idle_seconds,std::stop_token stop){if(idle_seconds>86400)throw std::invalid_argument("invalid idle timeout");winfsp_runtime_info();auto pool=std::make_shared<ImagePool>(make_archive_opener(decoders),ImagePool::Settings{std::chrono::seconds(idle_seconds),8});NativeMount mount(unc_projection(share,pool),u"",u"\\"+share.server+u"\\"+share.name);std::mutex mutex;std::condition_variable_any cv;std::unique_lock lock(mutex);cv.wait(lock,stop,[]{return false;});}
+void serve_share(Share share,const fs::path& decoders,unsigned idle_seconds,std::stop_token stop){if(idle_seconds>86400)throw std::invalid_argument("invalid idle timeout");winfsp_runtime_info();auto open_source=make_archive_source_opener(decoders);auto pool=std::make_shared<ImagePool>([open_source](const fs::path& path,SourcePolicy policy){return open_source(open_file_source(path,policy));},ImagePool::Settings{std::chrono::seconds(idle_seconds),8},open_source);NativeMount mount(unc_projection(share,pool),u"",u"\\"+share.server+u"\\"+share.name);std::mutex mutex;std::condition_variable_any cv;std::unique_lock lock(mutex);cv.wait(lock,stop,[]{return false;});}
 }

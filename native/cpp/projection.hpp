@@ -74,6 +74,8 @@ std::shared_ptr<Projection> unc_projection(Share share,std::shared_ptr<ImagePool
 ProjectedNodePtr project_archive(const std::shared_ptr<ImagePool>& pool,std::shared_ptr<ImagePool::Lease> lease,
     std::filesystem::path physical,std::u16string_view prefix,std::u16string_view relative);
 std::vector<ProjectedNodePtr> list_projected_archive(const ProjectedNodePtr& directory);
+struct DeviceListing {std::u16string component;RemoteDevice device;};
+std::vector<DeviceListing> list_connected_devices(const std::shared_ptr<DeviceProvider>& provider);
 std::shared_ptr<Projection> device_projection(std::shared_ptr<DeviceProvider> provider,
     std::shared_ptr<ImagePool> pool,std::u16string namespace_id,
     std::function<void(const DeviceFailure&)> unavailable={});

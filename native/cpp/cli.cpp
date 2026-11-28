@@ -124,7 +124,12 @@ int cli(std::vector<std::u16string> args) {
     if(command==u"mtp-worker"&&args.size()==1)return run_mtp_worker();
     if(command==u"migrate-settings"&&args.size()==1){migrate_settings();return 0;}
     if(command==u"doctor"&&args.size()==1){std::cout<<winfsp_runtime_info()<<'\n';return 0;}
-    if(command==u"unc-start"&&args.size()==1){ConsoleCancellation c;start_agent(c.stop.get_token());for(auto& s:Settings::load().shares())std::cout<<to_utf8(u"\\\\"+s.server+u"\\"+s.name)<<'\n';return 0;}
+    if(command==u"unc-start"&&args.size()==1){ConsoleCancellation c;start_agent(c.stop.get_token());auto cfg=Settings::load();for(auto& s:cfg.shares())std::cout<<to_utf8(u"\\\\"+s.server+u"\\"+s.name)<<'\n';for(auto& kind:enabled_device_shares(cfg))std::cout<<to_utf8(u"\\\\sfs$\\"+kind)<<'\n';return 0;}
+    if(command==u"devices"&&args.size()==2){
+        for(auto& d:list_connected_devices(make_device_provider(args[1],Settings::load())))
+            std::cout<<d.device.state<<'\t'<<to_utf8(d.component)<<'\t'<<d.device.id<<'\n';
+        return 0;
+    }
     if(command==u"unc-stop"&&args.size()==1){stop_agent();return 0;}
     if(command==u"unc-status"&&args.size()==1){std::cout<<(agent_running()?language.tr("Running","运行中"):language.tr("Stopped","已停止"))<<'\n';return 0;}
     if(command==u"unc-path"&&args.size()==2){std::cout<<to_utf8(Settings::load().unc_path(args[1]))<<'\n';return 0;}

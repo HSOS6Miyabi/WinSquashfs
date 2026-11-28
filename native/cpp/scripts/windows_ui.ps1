@@ -133,10 +133,16 @@ try{
   Navigate $w 'NavUnc'
   $scroll=(Control $w 'PageScroll').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
   if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,100)}
-  $null=Wait-Until {!(Control $w 'ExtraShareName' $false).Current.IsOffscreen -and !(Control $w 'ExtraSharePath' $false).Current.IsOffscreen -and !(Control $w 'AddExtraShare' $false).Current.IsOffscreen} 'visible directory alias fields'
+  foreach($id in @('ExtraShareName','ExtraSharePath','AddExtraShare')){
+    $element=Control $w $id $false
+    $scrollItem=$null
+    if($element.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern,[ref]$scrollItem)){$scrollItem.ScrollIntoView()}
+  }
   Set-Value $w 'ExtraShareName' 'ui-extra'
   Set-Value $w 'ExtraSharePath' $root
   $null=Wait-Until {(Value $w 'ExtraShareName') -eq 'ui-extra' -and (Value $w 'ExtraSharePath') -eq $root} 'entered directory alias values'
+  $add=Control $w 'AddExtraShare'
+  $add.SetFocus()
   Invoke-Control $w 'AddExtraShare'
   try {
     $null=Wait-Until {(Value $w 'ExtraShareName') -eq '' -and (Value $w 'ExtraSharePath') -eq ''} 'directory alias added'

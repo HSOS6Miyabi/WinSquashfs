@@ -23,7 +23,7 @@ private:
     archivefs::Settings settings_;
     Microsoft::UI::Xaml::Controls::StackPanel body_{nullptr},page_actions_{nullptr};
     Microsoft::UI::Xaml::Controls::NavigationView nav_host_{nullptr};
-    std::array<Microsoft::UI::Xaml::Controls::NavigationViewItem,5> nav_items_{{nullptr,nullptr,nullptr,nullptr,nullptr}};
+    std::array<Microsoft::UI::Xaml::Controls::NavigationViewItem,6> nav_items_{{nullptr,nullptr,nullptr,nullptr,nullptr,nullptr}};
     Microsoft::UI::Xaml::Controls::ScrollViewer scroll_{nullptr};
     Microsoft::UI::Dispatching::DispatcherQueueTimer mount_timer_{nullptr};
     Microsoft::UI::Xaml::Controls::TextBlock status_{nullptr};
@@ -41,7 +41,7 @@ private:
     fire_and_forget run(Task task,hstring message);
     void report(std::exception_ptr error);
     void navigate(int page);
-    void browser();void creator();void mount_page();void unc_page();void about_page();
+    void browser();void creator();void mount_page();void unc_page();void about_page();void device_page();
     void open_image(std::filesystem::path path,int mode=0);
     void refresh_entries();
     void search_subtree();fire_and_forget preview_selected();void extract(bool all);void mount_image();

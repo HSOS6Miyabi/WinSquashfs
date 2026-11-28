@@ -48,10 +48,10 @@ MainWindow::MainWindow(){
     auto root=LayoutRoot();root.RequestedTheme(settings_.theme=="dark"?ElementTheme::Dark:settings_.theme=="light"?ElementTheme::Light:ElementTheme::Default);root.Padding(Thickness{16,16,16,16});for(int i=0;i<3;++i){RowDefinition row;row.Height(i==1?GridLength{1,GridUnitType::Star}:GridLength{1,GridUnitType::Auto});root.RowDefinitions().Append(row);}
     auto heading=label(L"WinArchiveFSPro",21);root.Children().Append(heading);
     nav_host_=NavigationView();nav_host_.PaneDisplayMode(NavigationViewPaneDisplayMode::Auto);nav_host_.IsBackButtonVisible(NavigationViewBackButtonVisible::Collapsed);nav_host_.IsSettingsVisible(false);nav_host_.OpenPaneLength(184);nav_host_.CompactModeThresholdWidth(620);nav_host_.ExpandedModeThresholdWidth(990);
-    const std::array<hstring,5> titles{tr(L"Browse",L"浏览"),tr(L"Create",L"创建"),tr(L"Mounted images",L"挂载管理"),tr(L"UNC access",L"UNC 访问"),tr(L"Tools and about",L"工具与关于")};
-    const std::array<hstring,5> ids{L"NavBrowse",L"NavPack",L"NavMount",L"NavUnc",L"NavTools"};
-    const std::array<Symbol,5> icons{Symbol::Folder,Symbol::Add,Symbol::Folder,Symbol::Link,Symbol::Setting};
-    for(int i=0;i<5;++i){NavigationViewItem item;item.Content(box_value(titles[i]));item.Icon(SymbolIcon(icons[i]));item.Tag(box_value(i));identify(item,ids[i]);nav_items_[i]=item;nav_host_.MenuItems().Append(item);}
+    const std::array<hstring,6> titles{tr(L"Browse",L"浏览"),tr(L"Create",L"创建"),tr(L"Mounted images",L"挂载管理"),tr(L"UNC access",L"UNC 访问"),tr(L"Tools and about",L"工具与关于"),tr(L"Devices",L"设备管理")};
+    const std::array<hstring,6> ids{L"NavBrowse",L"NavPack",L"NavMount",L"NavUnc",L"NavTools",L"NavDevices"};
+    const std::array<Symbol,6> icons{Symbol::Folder,Symbol::Add,Symbol::Folder,Symbol::Link,Symbol::Setting,Symbol::Phone};
+    for(int i=0;i<6;++i){NavigationViewItem item;item.Content(box_value(titles[i]));item.Icon(SymbolIcon(icons[i]));item.Tag(box_value(i));identify(item,ids[i]);nav_items_[i]=item;nav_host_.MenuItems().Append(item);}
     nav_host_.SelectionChanged([this](auto const&,NavigationViewSelectionChangedEventArgs const& args){if(auto item=args.SelectedItem().try_as<NavigationViewItem>()){auto page=unbox_value<int>(item.Tag());if(page!=page_)navigate(page);}});
     Grid content;RowDefinition area;area.Height(GridLength{1,GridUnitType::Star});content.RowDefinitions().Append(area);RowDefinition actions;actions.Height(GridLength{1,GridUnitType::Auto});content.RowDefinitions().Append(actions);
     scroll_=ScrollViewer();scroll_.VerticalScrollBarVisibility(ScrollBarVisibility::Auto);identify(scroll_,L"PageScroll");body_=panel();body_.DragOver([this](auto const&,DragEventArgs const& args){if(!busy_&&(page_==0||page_==1)&&args.DataView().Contains(Windows::ApplicationModel::DataTransfer::StandardDataFormats::StorageItems()))args.AcceptedOperation(Windows::ApplicationModel::DataTransfer::DataPackageOperation::Copy);});body_.Drop([this](auto const&,DragEventArgs const& args){if(page_==0||page_==1)accept_drop(args,page_==1);});body_.Margin(Thickness{12,12,12,12});scroll_.Content(body_);content.Children().Append(scroll_);
@@ -84,7 +84,7 @@ void MainWindow::report(std::exception_ptr error){try{if(error)std::rethrow_exce
 fire_and_forget MainWindow::run(Task task,hstring message){auto lifetime=get_strong();if(busy_||closing_)co_return;busy_=true;stop_=std::stop_source();auto token=stop_.get_token();nav_host_.IsEnabled(false);scroll_.IsEnabled(false);page_actions_.IsHitTestVisible(false);progress_.Visibility(Visibility::Visible);progress_.IsActive(true);cancel_.IsEnabled(true);status_.Text(message);apartment_context ui;std::exception_ptr error;std::function<void()> finish;
     co_await resume_background();try{finish=task(token);}catch(...){error=std::current_exception();}try{co_await ui;}catch(...){co_return;}if(closing_)co_return;busy_=false;nav_host_.IsEnabled(true);scroll_.IsEnabled(true);page_actions_.IsHitTestVisible(true);progress_.IsActive(false);progress_.Visibility(Visibility::Collapsed);cancel_.IsEnabled(false);if(error){report(error);co_return;}status_.Text(tr(L"Completed",L"已完成"));try{if(finish)finish();}catch(...){report(std::current_exception());}}
 std::vector<fs::path> MainWindow::pick(bool folder,bool multi,bool save){com_ptr<IFileDialog> dialog;if(save){auto value=create_instance<IFileSaveDialog>(CLSID_FileSaveDialog);dialog=value.as<IFileDialog>();}else dialog=create_instance<IFileOpenDialog>(CLSID_FileOpenDialog).as<IFileDialog>();DWORD flags=0;check_hresult(dialog->GetOptions(&flags));check_hresult(dialog->SetOptions(flags|FOS_FORCEFILESYSTEM|FOS_NOCHANGEDIR|(folder?FOS_PICKFOLDERS:0)|(multi?FOS_ALLOWMULTISELECT:0)));auto hr=dialog->Show(hwnd());if(hr==HRESULT_FROM_WIN32(ERROR_CANCELLED))return {};check_hresult(hr);std::vector<fs::path> result;auto append=[&](IShellItem* item){PWSTR p=nullptr;check_hresult(item->GetDisplayName(SIGDN_FILESYSPATH,&p));result.emplace_back(p);CoTaskMemFree(p);};if(multi){auto open=dialog.as<IFileOpenDialog>();com_ptr<IShellItemArray> items;check_hresult(open->GetResults(items.put()));DWORD n=0;check_hresult(items->GetCount(&n));for(DWORD i=0;i<n;++i){com_ptr<IShellItem> item;check_hresult(items->GetItemAt(i,item.put()));append(item.get());}}else{com_ptr<IShellItem> item;check_hresult(dialog->GetResult(item.put()));append(item.get());}return result;}
-void MainWindow::navigate(int page){if(busy_||page<0||page>4)return;page_=page;++preview_revision_;preview_stop_.request_stop();if(nav_host_.SelectedItem()!=nav_items_[page])nav_host_.SelectedItem(nav_items_[page]);body_.Children().Clear();page_actions_.Children().Clear();body_.AllowDrop(false);scroll_.ChangeView(nullptr,0.0,nullptr,true);try{switch(page){case 0:browser();break;case 1:creator();break;case 2:mount_page();break;case 3:unc_page();break;default:about_page();}}catch(...){report(std::current_exception());}}
+void MainWindow::navigate(int page){if(busy_||page<0||page>5)return;page_=page;++preview_revision_;preview_stop_.request_stop();if(nav_host_.SelectedItem()!=nav_items_[page])nav_host_.SelectedItem(nav_items_[page]);body_.Children().Clear();page_actions_.Children().Clear();body_.AllowDrop(false);scroll_.ChangeView(nullptr,0.0,nullptr,true);try{switch(page){case 0:browser();break;case 1:creator();break;case 2:mount_page();break;case 3:unc_page();break;case 4:about_page();break;default:device_page();}}catch(...){report(std::current_exception());}}
 void MainWindow::browser(){
     auto children=body_.Children();children.Append(label(tr(L"Archive browser",L"存档浏览器"),24));
     image_summary_=identify(label(L""),L"ImageSummary");children.Append(image_summary_);
@@ -222,11 +222,68 @@ void MainWindow::unc_page(){auto children=body_.Children();children.Append(label
     extra_actions.Children().Append(button(tr(L"Browse",L"浏览"),[this,path]{try{auto p=pick(true);if(!p.empty())path.Text(text(p.front().u16string()));}catch(...){report(std::current_exception());}}));
     extra_actions.Children().Append(button(tr(L"Add alias",L"添加别名"),[this,extra,name,path,refresh,alias,root]{try{
         auto n=u16(name.Text());auto p=fs::path(u16(path.Text()));auto duplicate=[&](std::u16string_view other){WindowsNameLess less;return !less(other,n)&&!less(n,other);};
-        if(n.empty()||n.size()>64||n.find_first_of(u"\\/:*\"?<>| ")!=std::u16string::npos||n==u"."||n==u".."||n.back()==u'.'||duplicate(u"UNC")||duplicate(u16(alias.Text()))||p.empty()||!p.is_absolute()||extra->size()>=64||std::any_of(extra->begin(),extra->end(),[&](auto const& item){return duplicate(item.name);}))throw std::invalid_argument("invalid or duplicate directory alias");
+        if(n.empty()||n.size()>64||n.find_first_of(u"\\/:*\"?<>| ")!=std::u16string::npos||n==u"."||n==u".."||n.back()==u'.'||duplicate(u"UNC")||duplicate(u"mtp")||duplicate(u"adb")||duplicate(u"adb.r")||duplicate(u16(alias.Text()))||p.empty()||!p.is_absolute()||extra->size()>=64||std::any_of(extra->begin(),extra->end(),[&](auto const& item){return duplicate(item.name);}))throw std::invalid_argument("invalid or duplicate directory alias");
         extra->push_back({std::move(n),std::move(p)});name.Text(L"");path.Text(L"");refresh();status_.Text(tr(L"Directory alias added. Save and apply to activate it.",L"已添加目录别名，请保存并应用。"));
     }catch(...){report(std::current_exception());}},L"AddExtraShare"));
     extra_actions.Children().Append(button(tr(L"Remove alias",L"删除别名"),[extra,list,refresh]{auto i=list.SelectedIndex();if(i>=0&&static_cast<std::size_t>(i)<extra->size()){extra->erase(extra->begin()+i);refresh();}},L"RemoveExtraShare"));children.Append(extra_actions);
     identify(root,L"UncRoot");identify(alias,L"UncAlias");identify(drives,L"UncDrives");identify(login,L"UncLogin");identify(language,L"LanguageChoice");auto row=panel(true);row.Children().Append(button(tr(L"Save and apply",L"保存并应用"),[=,this]{try{auto s=settings_;s.root=fs::path(u16(root.Text()));s.alias=u16(alias.Text());s.idle_seconds=number(idle,86400);s.max_idle_images=number(max,1024);s.cache_mib=number(memory,4096);s.total_cache_mib=number(total_memory,4096);s.include_drives=checked(drives);s.start_at_login=checked(login);s.show_tray_icon=checked(tray);s.language=selected_text(language);s.extra_shares=*extra;run([this,s,state](std::stop_token t){bool running=agent_running();s.save();if(running){stop_agent(t);start_agent(t);}return [this,s,state]{settings_=s;state.Text(agent_running()?tr(L"Running",L"运行中"):tr(L"Stopped",L"已停止"));};},tr(L"Applying settings",L"正在应用设置"));}catch(...){report(std::current_exception());}},L"ApplyUnc"));row.Children().Append(button(tr(L"Start",L"启动"),[this,state]{run([this,state](std::stop_token t){start_agent(t);return [this,state]{state.Text(tr(L"Running",L"运行中"));};},tr(L"Starting UNC agent",L"正在启动后台进程"));},L"StartUnc"));row.Children().Append(button(tr(L"Stop",L"停止"),[this,state]{run([this,state](std::stop_token t){stop_agent(t);return [this,state]{state.Text(tr(L"Stopped",L"已停止"));};},tr(L"Stopping UNC agent",L"正在停止后台进程"));},L"StopUnc"));page_actions_.Children().Append(row);children.Append(label(L"\\\\sfs$\\path\\image.squashfs\n\\\\sfs$\\UNC\\server\\share\\image.dwarfs\n\\\\sfs.localhost\\C\\image.erofs"));}
+void MainWindow::device_page(){
+    auto children=body_.Children();children.Append(label(tr(L"Connected devices",L"设备管理"),24));
+    try{settings_=Settings::load();}catch(...){report(std::current_exception());}
+    children.Append(label(tr(L"Browse portable devices and Android files through UNC paths. ADB uses the existing server; Root access requires authorization on the device.",L"通过 UNC 路径浏览便携设备及 Android 文件。ADB 连接已有服务，Root 访问需要在设备上授权。")));
+    auto mtp=identify(check(tr(L"Enable MTP / PTP",L"启用 MTP / PTP"),settings_.enable_mtp),L"DeviceMtp");
+    auto adb=identify(check(tr(L"Enable ADB",L"启用 ADB"),settings_.enable_adb),L"DeviceAdb");
+    auto root=identify(check(tr(L"Enable ADB Root (su)",L"启用 ADB Root（su）"),settings_.enable_adb_root),L"DeviceAdbRoot");
+    children.Append(mtp);children.Append(adb);children.Append(root);
+    auto port=identify(numeric(tr(L"Local ADB Server port",L"本地 ADB Server 端口"),1,65535,settings_.adb_port),L"AdbPort");children.Append(port);
+    auto notification=identify(check(tr(L"Show progress notifications for slow archive opens",L"镜像打开耗时较长时显示进度通知"),settings_.show_open_progress),L"OpenProgress");children.Append(notification);
+    auto list=identify(ListView(),L"DeviceList");list.Height(180);children.Append(list);
+    auto paths=std::make_shared<std::vector<std::u16string>>();
+    auto refresh=[this,list,paths,port,mtp,adb,root]{
+        try{
+            auto settings=settings_;settings.adb_port=number(port,65535);
+            settings.enable_mtp=checked(mtp);settings.enable_adb=checked(adb);settings.enable_adb_root=checked(root);
+            run([this,list,paths,settings](std::stop_token token){
+                std::vector<std::pair<std::u16string,std::u16string>> rows;
+                for(auto const& kind:enabled_device_shares(settings)){
+                    if(token.stop_requested())break;
+                    try{
+                        auto devices=list_connected_devices(make_device_provider(kind,settings));
+                        if(devices.empty())rows.emplace_back(kind+u": "+(chinese_?u"没有连接的设备":u"No connected devices"),u"");
+                        for(auto& d:devices){
+                            auto path=u"\\\\sfs$\\"+kind+u"\\"+d.component;
+                            rows.emplace_back(path+u"  ·  "+to_utf16(d.device.state),path);
+                        }
+                    }catch(std::exception const& e){rows.emplace_back(kind+u": "+to_utf16(e.what()),u"");}
+                }
+                return [this,list,paths,rows=std::move(rows)]{
+                    list.Items().Clear();paths->clear();
+                    for(auto const& row:rows){list.Items().Append(box_value(text(row.first)));paths->push_back(row.second);}
+                    status_.Text(tr(L"Device list updated",L"设备列表已更新"));
+                };
+            },tr(L"Enumerating devices",L"正在枚举设备"));
+        }catch(...){report(std::current_exception());}
+    };
+    auto root_buttons=panel(true);
+    for(auto const& kind:{std::u16string(u"mtp"),std::u16string(u"adb"),std::u16string(u"adb.r")}){
+        auto path=u"\\\\sfs$\\"+kind;
+        root_buttons.Children().Append(button(text(kind),[this,path]{
+            run([path](std::stop_token token){start_agent(token);open_in_explorer(path);return std::function<void()>{};},tr(L"Opening device namespace",L"正在打开设备目录"));
+        },kind==u"mtp"?L"OpenMtp":kind==u"adb"?L"OpenAdb":L"OpenAdbRoot"));
+    }
+    children.Append(root_buttons);
+    page_actions_.Children().Append(button(tr(L"Refresh",L"刷新"),refresh,L"RefreshDevices"));
+    page_actions_.Children().Append(button(tr(L"Open selected",L"打开选中设备"),[this,list,paths]{
+        auto i=list.SelectedIndex();if(i<0||static_cast<std::size_t>(i)>=paths->size()||(*paths)[i].empty())return;auto path=(*paths)[i];
+        run([path](std::stop_token token){start_agent(token);open_in_explorer(path);return std::function<void()>{};},tr(L"Opening device",L"正在打开设备"));
+    },L"OpenDevice"));
+    auto save=button(tr(L"Save and apply",L"保存并应用"),[this,mtp,adb,root,port,notification]{
+        try{auto settings=Settings::load();settings.enable_mtp=checked(mtp);settings.enable_adb=checked(adb);settings.enable_adb_root=checked(root);settings.adb_port=number(port,65535);settings.show_open_progress=checked(notification);
+            run([this,settings](std::stop_token token){auto running=agent_running();settings.save();if(running){stop_agent(token);start_agent(token);}return [this,settings]{settings_=settings;};},tr(L"Applying device settings",L"正在应用设备设置"));
+        }catch(...){report(std::current_exception());}
+    },L"ApplyDevices");accent(save);page_actions_.Children().Append(save);
+    refresh();
+}
 void MainWindow::about_page(){body_.Children().Append(label(L"WinArchiveFSPro",28));body_.Children().Append(label(tr(L"Appearance",L"外观"),18));auto current_theme=identify(label(L""),L"CurrentTheme");auto theme_label=[this,current_theme](std::string_view value){current_theme.Text(value=="dark"?tr(L"Current appearance: Dark",L"当前外观：深色"):value=="light"?tr(L"Current appearance: Light",L"当前外观：浅色"):tr(L"Current appearance: System",L"当前外观：跟随系统"));};theme_label(settings_.theme);body_.Children().Append(current_theme);auto themes=panel(true);auto set_theme=[this,theme_label](std::string value){try{auto s=Settings::load();s.theme=std::move(value);s.save();settings_=s;LayoutRoot().RequestedTheme(s.theme=="dark"?ElementTheme::Dark:s.theme=="light"?ElementTheme::Light:ElementTheme::Default);theme_label(s.theme);}catch(...){report(std::current_exception());}};themes.Children().Append(button(tr(L"System",L"跟随系统"),[set_theme]{set_theme("system");},L"ThemeSystem"));themes.Children().Append(button(tr(L"Light",L"浅色"),[set_theme]{set_theme("light");},L"ThemeLight"));themes.Children().Append(button(tr(L"Dark",L"深色"),[set_theme]{set_theme("dark");},L"ThemeDark"));body_.Children().Append(themes);body_.Children().Append(label(tr(L"Read-only archive filesystem manager\nSquashFS · DwarFS · EROFS\nC++23 · WinUI 3 · WinFsp",L"只读存档文件系统管理器\nSquashFS · DwarFS · EROFS\nC++23 · WinUI 3 · WinFsp")));body_.Children().Append(button(tr(L"Check WinFsp runtime",L"检查 WinFsp 运行时"),[this]{try{status_.Text(text(winfsp_runtime_info()));}catch(...){report(std::current_exception());}}));body_.Children().Append(button(tr(L"Open tools folder",L"打开工具目录"),[this]{try{open_in_explorer((application_directory()/L"tools").u16string());}catch(...){report(std::current_exception());}}));}
 void MainWindow::apply_command_line(){try{int count=0;auto raw=CommandLineToArgvW(GetCommandLineW(),&count);if(!raw)return;struct Guard{LPWSTR* p;~Guard(){LocalFree(p);}}guard{raw};std::vector<fs::path> args;for(int i=1;i<count;++i)args.emplace_back(raw[i]);if(args.empty())return;if(args[0]==L"--pack-list"&&args.size()==2){auto list=fs::absolute(args[1]);if(fs::file_size(list)>16u<<20)throw std::runtime_error("selection list too large");std::ifstream in(list,std::ios::binary);if(!in)throw std::runtime_error("cannot read selection list");std::vector<char> bytes((std::istreambuf_iterator<char>(in)),{});if(bytes.size()%2||bytes.size()>16u<<20)throw std::runtime_error("invalid selection list");std::u16string name;for(size_t i=0;i<bytes.size();i+=2){auto ch=static_cast<char16_t>(static_cast<unsigned char>(bytes[i])|(static_cast<unsigned>(static_cast<unsigned char>(bytes[i+1]))<<8));if(ch)name+=ch;else if(!name.empty()){sources_.emplace_back(name);name.clear();}}if(!name.empty())throw std::runtime_error("invalid selection list");in.close();if(fs::equivalent(list.parent_path(),fs::temp_directory_path())&&list.filename().wstring().starts_with(L"wsq")){std::error_code ec;fs::remove(list,ec);}navigate(1);}else if(args[0]==L"--pack"&&args.size()>1){sources_.assign(args.begin()+1,args.end());navigate(1);}else if(args[0]==L"--unc"&&args.size()==2){auto p=args[1];run([this,p](std::stop_token s){open_unc(p,s);return [this]{Close();};},tr(L"Opening UNC path",L"正在打开 UNC 路径"));}else if(args[0]==L"--eject"&&args.size()==2){auto d=args[1].u16string();run([this,d](std::stop_token){eject_volume(d);return [this]{Close();};},tr(L"Ejecting",L"正在弹出"));}else if(args.size()==1)open_image(args[0]);else if(args.size()==2&&(args[0]==L"--open"||args[0]==L"--mount"||args[0]==L"--extract"))open_image(args[1],args[0]==L"--mount"?1:args[0]==L"--extract"?2:0);else throw std::invalid_argument("invalid command line");}catch(...){report(std::current_exception());}}
 }
