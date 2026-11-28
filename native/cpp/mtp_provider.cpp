@@ -186,17 +186,22 @@ public:
         }
         return result;
     }
-    std::vector<std::byte> read(std::string const& object,std::uint64_t offset,std::size_t size){
+    std::vector<std::byte> read(std::string const& object,std::uint64_t offset,std::size_t size,const SeekProgress& progress){
         if(size>max_read||offset>INT64_MAX||size>static_cast<std::uint64_t>(INT64_MAX)-offset)failure(DeviceError::protocol,"Portable device read range is invalid");
         if(streams_.size()>=4&&!streams_.contains(object))streams_.erase(streams_.begin());
         auto& state=streams_[object];
         auto reopen=[&]{state.stream.Reset();state.position=0;state.buffer=0;check(resources_->GetStream(wide(object).c_str(),WPD_RESOURCE_DEFAULT,STGM_READ,&state.buffer,state.stream.GetAddressOf()),"Open portable device stream");};
         if(!state.stream)reopen();
         try{
+            auto reported=Clock::time_point::min();
+            auto report=[&](bool force=false){
+                auto now=Clock::now();
+                if(progress&&(force||reported==Clock::time_point::min()||now-reported>=250ms)){progress(state.position);reported=now;}
+            };
             if(state.position!=offset){
                 LARGE_INTEGER move{};move.QuadPart=static_cast<LONGLONG>(offset);
                 ULARGE_INTEGER actual{};
-                if(SUCCEEDED(state.stream->Seek(move,STREAM_SEEK_SET,&actual))&&actual.QuadPart==offset)state.position=offset;
+                if(SUCCEEDED(state.stream->Seek(move,STREAM_SEEK_SET,&actual))&&actual.QuadPart==offset){state.position=offset;report(true);}
                 else{
                     // Some PTP/MTP devices implement only sequential resources.
                     // Reuse the current stream when possible; never materialize a file.
@@ -206,13 +211,14 @@ public:
                         if(FAILED(state.stream->Seek(zero,STREAM_SEEK_CUR,&current))||current.QuadPart!=state.position)reopen();
                     }
                     std::vector<std::byte> scratch(std::clamp<std::size_t>(state.buffer,64u<<10,4u<<20));
-                    while(state.position<offset){auto amount=static_cast<ULONG>(std::min<std::uint64_t>(scratch.size(),offset-state.position));ULONG got=0;check(state.stream->Read(scratch.data(),amount,&got),"Seek portable device stream");if(!got||got>amount)failure(DeviceError::offline,"Portable device stream ended while seeking");state.position+=got;}
+                    while(state.position<offset){auto amount=static_cast<ULONG>(std::min<std::uint64_t>(scratch.size(),offset-state.position));ULONG got=0;check(state.stream->Read(scratch.data(),amount,&got),"Seek portable device stream");if(!got||got>amount)failure(DeviceError::offline,"Portable device stream ended while seeking");state.position+=got;report();}
                 }
             }
             std::vector<std::byte> result(size);std::size_t done=0;
             while(done<size){auto amount=static_cast<ULONG>(std::min<std::size_t>(size-done,std::clamp<std::size_t>(state.buffer,64u<<10,4u<<20)));ULONG got=0;
                 check(state.stream->Read(result.data()+done,amount,&got),"Read portable device stream");
-                if(!got||got>amount)failure(DeviceError::offline,"Portable device stream ended unexpectedly");state.position+=got;done+=got;}
+                if(!got||got>amount)failure(DeviceError::offline,"Portable device stream ended unexpectedly");state.position+=got;done+=got;report();}
+            report(true);
             return result;
         }catch(...){streams_.erase(object);throw;}
     }
@@ -243,7 +249,7 @@ void timed_read(HANDLE pipe,HANDLE process,void* raw,std::size_t size,Clock::tim
 class Worker {
 public:
     ~Worker(){reset();}
-    Response request(Json const& request){
+    Response request(Json const& request,const SeekProgress& progress={}){
         std::unique_lock lock(mutex_,std::defer_lock);
         if(!lock.try_lock_for(20s))failure(DeviceError::timeout,"Portable device is busy");
         try{
@@ -253,11 +259,19 @@ public:
             auto size=static_cast<std::uint32_t>(data.size());
             // One small request is written only after the previous reply was consumed.
             write_all(input_.h,&size,sizeof(size));write_all(input_.h,data.data(),data.size());
+            auto absolute=Clock::now()+10min;
             auto deadline=Clock::now()+30s;
-            std::uint32_t length=0;timed_read(output_.h,process_.h,&length,sizeof(length),deadline);
-            if(length>max_message)failure(DeviceError::protocol,"Portable device response is too large");
-            std::string metadata(length,'\0');timed_read(output_.h,process_.h,metadata.data(),metadata.size(),deadline);
-            auto meta=Json::parse(metadata);
+            Json meta;
+            for(;;){
+                std::uint32_t length=0;timed_read(output_.h,process_.h,&length,sizeof(length),deadline);
+                if(length>max_message)failure(DeviceError::protocol,"Portable device response is too large");
+                std::string metadata(length,'\0');timed_read(output_.h,process_.h,metadata.data(),metadata.size(),deadline);
+                meta=Json::parse(metadata);
+                if(!meta.contains("seek"))break;
+                if(progress)progress(meta.at("seek").get<std::uint64_t>());
+                // Keep a bounded idle deadline while a sequential device is making progress.
+                deadline=std::min(absolute,Clock::now()+30s);
+            }
             if(!meta.at("ok").get<bool>()){
                 auto code=meta.at("code").get<unsigned>();
                 if(code>static_cast<unsigned>(DeviceError::unsupported))code=static_cast<unsigned>(DeviceError::protocol);
@@ -331,10 +345,13 @@ public:
         return object_from(worker(device)->request(Json{{"op","stat"},{"device",device},{"object",object}}).meta.at("result"));
     }
     void read_exact(std::string_view device,std::string_view object,std::uint64_t offset,std::span<std::byte> output)override{
+        read_exact_progress(device,object,offset,output,{});
+    }
+    void read_exact_progress(std::string_view device,std::string_view object,std::uint64_t offset,std::span<std::byte> output,const SeekProgress& progress)override{
         auto session=worker(device);
         while(!output.empty()){
             auto count=std::min(output.size(),max_read);
-            auto result=session->request(Json{{"op","read"},{"device",device},{"object",object},{"offset",offset},{"length",count}});
+            auto result=session->request(Json{{"op","read"},{"device",device},{"object",object},{"offset",offset},{"length",count}},progress);
             if(result.bytes.size()!=count)failure(DeviceError::protocol,"Incorrect portable device read size");
             std::copy(result.bytes.begin(),result.bytes.end(),output.begin());output=output.subspan(count);offset+=count;
         }
@@ -377,7 +394,17 @@ int run_mtp_worker(){
                     session.connect(request.at("device").get<std::string>());auto object=request.at("object").get<std::string>();
                     if(op=="list"){auto values=Json::array();for(auto& item:session.list(object))values.push_back(to_json(item));result["result"]=std::move(values);}
                     else if(op=="stat")result["result"]=to_json(session.stat(object));
-                    else if(op=="read"){bytes=session.read(object,request.at("offset").get<std::uint64_t>(),request.at("length").get<std::size_t>());result["bytes"]=bytes.size();}
+                    else if(op=="read"){
+                        auto seek=[](std::uint64_t position){
+                            auto text=Json{{"seek",position}}.dump();
+                            auto size=static_cast<std::uint32_t>(text.size());
+                            std::cout.write(reinterpret_cast<const char*>(&size),sizeof(size));
+                            std::cout.write(text.data(),static_cast<std::streamsize>(text.size()));
+                            std::cout.flush();
+                            if(!std::cout)failure(DeviceError::offline,"Portable device progress pipe closed");
+                        };
+                        bytes=session.read(object,request.at("offset").get<std::uint64_t>(),request.at("length").get<std::size_t>(),seek);result["bytes"]=bytes.size();
+                    }
                     else failure(DeviceError::protocol,"Unknown portable device operation");
                 }
             }catch(DeviceFailure const& e){result={{"ok",false},{"code",static_cast<unsigned>(e.code())},{"error",e.what()}};bytes.clear();}

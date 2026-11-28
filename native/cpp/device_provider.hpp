@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #pragma once
+#include "random_access_source.hpp"
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -36,6 +37,10 @@ public:
     virtual std::vector<RemoteObject> children(std::string_view device,std::string_view parent)=0;
     virtual RemoteObject stat(std::string_view device,std::string_view object)=0;
     virtual void read_exact(std::string_view device,std::string_view object,std::uint64_t offset,std::span<std::byte> output)=0;
+    virtual void read_exact_progress(std::string_view device,std::string_view object,std::uint64_t offset,std::span<std::byte> output,const SeekProgress& progress){
+        read_exact(device,object,offset,output);
+        if(progress)progress(offset+output.size());
+    }
 };
 struct AdbOptions {
     bool root=false;

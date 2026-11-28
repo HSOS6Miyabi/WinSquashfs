@@ -3,15 +3,22 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <span>
 
 namespace archivefs {
 
+using SeekProgress=std::function<void(std::uint64_t)>;
+
 class ReadSession {
 public:
     virtual ~ReadSession() = default;
     virtual void read_exact(std::uint64_t offset, std::span<std::byte> buffer) const = 0;
+    virtual void read_exact_progress(std::uint64_t offset,std::span<std::byte> buffer,const SeekProgress& progress)const {
+        read_exact(offset,buffer);
+        if(progress)progress(offset+buffer.size());
+    }
     virtual void finish() = 0;
 };
 

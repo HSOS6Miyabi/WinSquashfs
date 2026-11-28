@@ -27,9 +27,9 @@ class ProgressSource final:public RandomAccessSource {
         Session(std::unique_ptr<ReadSession> inner,std::weak_ptr<OpenProgress> progress)
             :inner_(std::move(inner)),progress_(std::move(progress)){}
         void read_exact(std::uint64_t offset,std::span<std::byte> data)const override{
-            inner_->read_exact(offset,data);
-            if(auto p=progress_.lock();p&&!p->done.load(std::memory_order_relaxed))
-                p->advance(offset+data.size());
+            if(auto p=progress_.lock();p&&!p->done.load(std::memory_order_relaxed)){
+                inner_->read_exact_progress(offset,data,[p](std::uint64_t end){p->advance(end);});
+            }else inner_->read_exact(offset,data);
         }
         void finish()override{inner_->finish();}
     private:

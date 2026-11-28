@@ -80,7 +80,8 @@ class RemoteSource final:public RandomAccessSource,public std::enable_shared_fro
     class Session final:public ReadSession {
     public:
         explicit Session(std::shared_ptr<const RemoteSource> owner):owner_(std::move(owner)){owner_->validate();}
-        void read_exact(std::uint64_t offset,std::span<std::byte> data)const override{owner_->read(offset,data);}
+        void read_exact(std::uint64_t offset,std::span<std::byte> data)const override{owner_->read(offset,data,{});}
+        void read_exact_progress(std::uint64_t offset,std::span<std::byte> data,const SeekProgress& progress)const override{owner_->read(offset,data,progress);}
         void finish()override{owner_->validate();}
     private:std::shared_ptr<const RemoteSource> owner_;
     };
@@ -114,12 +115,12 @@ private:
     mutable std::mutex mutex_;
     mutable std::atomic<bool> invalid_{false};
     mutable std::atomic<Clock::duration::rep> next_check_{0};
-    void read(std::uint64_t offset,std::span<std::byte> output)const{
+    void read(std::uint64_t offset,std::span<std::byte> output,const SeekProgress& progress)const{
         if(offset>size()||output.size()>size()-offset)throw std::out_of_range("device read outside file");
         validate();
         constexpr std::uint64_t page_size=512u<<10;
         // Large requests bypass the page cache. Random reads coalesce.
-        if(output.size()>=page_size){provider_->read_exact(device_,object_.id,offset,output);return;}
+        if(output.size()>=page_size){provider_->read_exact_progress(device_,object_.id,offset,output,progress);return;}
         while(!output.empty()){
             auto page=offset/page_size;
             auto start=page*page_size;
@@ -127,9 +128,10 @@ private:
             auto length=static_cast<std::size_t>(std::min(page_size,size()-start));
             auto count=std::min(output.size(),length-inside);
             auto data=cache_->get(key_+":"+std::to_string(page),[&]{
-                DataCache::Buffer bytes(length);provider_->read_exact(device_,object_.id,start,bytes);return bytes;
+                DataCache::Buffer bytes(length);provider_->read_exact_progress(device_,object_.id,start,bytes,progress);return bytes;
             });
             std::copy_n(data->data()+inside,count,output.data());offset+=count;output=output.subspan(count);
+            if(progress)progress(offset);
         }
         validate();
     }
