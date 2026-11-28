@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 import bz2
+import binascii
 import gzip
 import io
 import lzma
@@ -32,6 +33,14 @@ def cpio_entry(name, data, inode, links=1, mode=0o100644):
     values = (inode, mode, 0, 0, links, 0, len(data), 0, 0, 0, 0, len(name), 0)
     header = b'070701' + b''.join(f'{n:08x}'.encode() for n in values) + name
     return header + b'\0' * (-len(header) % 4) + data + b'\0' * (-len(data) % 4)
+
+def fixture(root, name):
+    source = pathlib.Path(__file__).with_name('fixtures') / (name + '.uu')
+    lines = source.read_bytes().splitlines()
+    assert lines[0].startswith(b'begin ') and lines[-1] == b'end'
+    image = root / name
+    image.write_bytes(b''.join(binascii.a2b_uu(line) for line in lines[1:-1] if line))
+    return image
 
 with tempfile.TemporaryDirectory(prefix='archivefs-common-') as tmp:
     root = pathlib.Path(tmp)
@@ -89,6 +98,24 @@ with tempfile.TemporaryDirectory(prefix='archivefs-common-') as tmp:
     run('info',bad,ok=False)
     bad=root/'unknown.bin';bad.write_bytes(b'not an archive')
     run('info',bad,ok=False)
+    image=fixture(root,'test_read_format_rar.rar')
+    assert run('info',image).startswith('RAR ')
+    read(image,'test.txt',0,64,b'test text document\r\n')
+    image=fixture(root,'test_read_format_rar5_multiple_files_solid.rar')
+    assert run('info',image).startswith('RAR ')
+    for magic in (4,1,3,2):
+        data5=b''.join(struct.pack('<I',max(0,k*k-3*k+1+magic)) for k in range(1,1025))
+        for offset,count in ((0,37),(1000,113),(4092,12)):
+            read(image,f'test{magic}.bin',offset,count,data5[offset:offset+count])
+    image=fixture(root,'test_read_format_rar5_stored.rar')
+    assert run('info',image).startswith('RAR ')
+    run('verify',image)
+    image=fixture(root,'test_read_format_cab_3.cab')
+    assert run('info',image).startswith('CAB ')
+    run('verify',image)
+    image=fixture(root,'test_read_format_lha_header2.lzh')
+    assert run('info',image).startswith('LHA ')
+    run('verify',image)
     # A packed sparse TAR header with two extents and a 64-bit logical EOF.
     logical=2**32+8192
     sparse=root/'sparse.tar'
