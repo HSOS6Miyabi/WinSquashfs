@@ -1,0 +1,109 @@
+name: Native Windows production decoders
+on:
+  push:
+    branches: ['refactor/native-cpp-validation', 'refactor/native-cpp']
+    paths:
+      - 'scripts/build-alternate-readers.sh'
+      - 'native/cpp/scripts/build.ps1'
+      - 'native/cpp/scripts/native_readers_test.py'
+      - '.github/workflows/windows-native-decoders.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-readers:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            arch: x86
+            msystem: MINGW32
+            compiler: gcc
+          - runner: windows-11-arm
+            arch: arm64
+            msystem: CLANGARM64
+            compiler: clang
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - run: git config --global core.autocrlf input
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          suppress-deprecation-warnings: msystem-mingw32
+          install: git autoconf automake libtool make pkgconf python
+          pacboy: >-
+            ${{ matrix.compiler }}:p
+            binutils:p
+            pkgconf:p
+            zlib:p
+            xz:p
+            lzo2:p
+            lz4:p
+            zstd:p
+            libdeflate:p
+            tre:p
+            gettext:p
+            libiconv:p
+            libwinpthread:p
+      - name: Build native SquashFS and EROFS libraries
+        shell: msys2 {0}
+        run: bash scripts/build-alternate-readers.sh ${{ matrix.arch }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install WinFsp
+        shell: pwsh
+        run: ./scripts/install-winfsp.ps1 -Architecture ${{ matrix.arch }}
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .deps/${{ matrix.arch }}/dwarfs-install
+            .deps/${{ matrix.arch }}/vcpkg-installed
+          key: archivefs-native-dwarfs-v0.15.10-${{ matrix.arch }}-v1
+      - name: Build official DwarFS library and tools
+        shell: pwsh
+        run: ./native/cpp/scripts/build.ps1 -Stage Dependencies -Architecture ${{ matrix.arch }}
+      - name: Build production core with official DwarFS
+        shell: pwsh
+        run: |
+          $arch='${{ matrix.arch }}'
+          $deps=Join-Path $PWD ".deps/$arch"
+          $ports=Join-Path $deps 'vcpkg-installed'
+          $prefix=Join-Path $deps 'dwarfs-install'
+          $out=Join-Path $PWD "artifacts/readers-$arch"
+          $vcpkg=$env:VCPKG_INSTALLATION_ROOT
+          if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
+          $triplet="$arch-windows-static-md"
+          $env:PKG_CONFIG_PATH="$ports/$triplet/lib/pkgconfig"
+          $env:PATH="$ports/$triplet/tools/pkgconf;$env:PATH"
+          cmake -S native/cpp -B build/production -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$triplet" "-DVCPKG_INSTALLED_DIR=$ports" "-DCMAKE_PREFIX_PATH=$prefix" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DARCHIVEFS_WITH_DWARFS=ON -DBUILD_TESTING=OFF -DVCPKG_MANIFEST_MODE=OFF
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          cmake --build build/production --parallel 2
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          Copy-Item build/production/archivefs-read.exe "$out/archivefs.exe"
+          Copy-Item build/production/archivefs_core.dll,build/production/WinArchiveFSPro.Unc.exe $out
+          Copy-Item "$prefix/bin/mkdwarfs.exe","$prefix/bin/dwarfsck.exe" "$out/tools"
+          Copy-Item "$prefix/licenses/dwarfs.txt" "$out/licenses"
+          $crt=Get-ChildItem (Join-Path $env:VCToolsRedistDir $arch) -Directory | Where-Object Name -Match '^Microsoft\.VC[0-9]+\.CRT$' | Select-Object -First 1
+          if(!$crt){throw "Missing runtime for $arch"}
+          Copy-Item "$($crt.FullName)/*.dll" $out
+          Copy-Item "$($crt.FullName)/*.dll" "$out/tools"
+          New-Item -ItemType Directory -Force "$out/licenses/vcpkg" | Out-Null
+          Get-ChildItem "$ports/$triplet/share" -Directory | ForEach-Object {
+            $license=Join-Path $_.FullName 'copyright'
+            if(Test-Path $license){Copy-Item $license "$out/licenses/vcpkg/$($_.Name).txt"}
+          }
+      - name: Test actual decoders and architecture
+        run: python native/cpp/scripts/native_readers_test.py artifacts/readers-${{ matrix.arch }} ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinArchiveFSPro-native-readers-${{ matrix.arch }}
+          path: artifacts/readers-${{ matrix.arch }}
+          if-no-files-found: error

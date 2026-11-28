@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-only
-param([ValidateSet('All','ConfigureDependencies','Dependencies','Application','CoreDistribution','Gui','Tests')][string]$Stage='All')
+param([ValidateSet('All','ConfigureDependencies','Dependencies','Application','CoreDistribution','Gui','Tests')][string]$Stage='All', [ValidateSet('x86','x64','arm64')][string]$Architecture='x64')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/../../..").Path
 Set-Location $root
@@ -8,21 +8,24 @@ $vcpkg = $env:VCPKG_INSTALLATION_ROOT
 if (!$vcpkg) { $vcpkg = $env:VCPKG_ROOT }
 if (!$vcpkg) { throw 'VCPKG_INSTALLATION_ROOT or VCPKG_ROOT is required' }
 $toolchain = Join-Path $vcpkg 'scripts/buildsystems/vcpkg.cmake'
-$deps = Join-Path $root '.deps'
+$triplet = "$Architecture-windows-static-md"
+$platform = @{x86='Win32';x64='x64';arm64='ARM64'}[$Architecture]
+$deps = if ($Architecture -eq 'x64') { Join-Path $root '.deps' } else { Join-Path $root ".deps/$Architecture" }
 $dwarfs = Join-Path $deps 'dwarfs'
 $prefix = Join-Path $deps 'dwarfs-install'
 $ports = Join-Path $deps 'vcpkg-installed'
 $build = Join-Path $deps 'archivefs-build'
 $test = Join-Path $deps 'archivefs-test'
-$dist = Join-Path $root 'artifacts/dist'
+$dist = if ($Architecture -eq 'x64') { Join-Path $root 'artifacts/dist' } else { Join-Path $root "artifacts/dist-$Architecture" }
+if ($Architecture -ne 'x64' -and $Stage -in @('All','CoreDistribution','Application')) { throw 'The complete distribution requires architecture-specific creation tools; use the native-readers workflow.' }
 New-Item -ItemType Directory -Force $deps,$dist | Out-Null
-$flags = @('-G','Ninja','-DCMAKE_BUILD_TYPE=Release',"-DCMAKE_TOOLCHAIN_FILE=$toolchain",'-DVCPKG_TARGET_TRIPLET=x64-windows-static-md',"-DVCPKG_INSTALLED_DIR=$ports",'-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL')
+$flags = @('-G','Ninja','-DCMAKE_BUILD_TYPE=Release',"-DCMAKE_TOOLCHAIN_FILE=$toolchain","-DVCPKG_TARGET_TRIPLET=$triplet","-DVCPKG_INSTALLED_DIR=$ports",'-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL')
 if ($Stage -in @('All','ConfigureDependencies','Dependencies')) {
     if (!(Test-Path "$prefix/bin/mkdwarfs.exe") -or !(Test-Path "$prefix/lib/cmake/dwarfs/dwarfs-config.cmake")) {
         if (!(Test-Path "$dwarfs/CMakeLists.txt")) { Invoke-Checked git @('clone','--branch','v0.15.10','--depth','1','--recursive','https://github.com/mhx/dwarfs.git',$dwarfs) }
         # The C++ reader shares the application's CRT and allocator. Upstream's
         # Windows defaults use the static CRT; set the two explicit overrides
-        # to match the x64-windows-static-md dependency triplet.
+        # to match the selected dynamic-CRT dependency triplet.
         foreach ($relative in @('cmake/compile.cmake','ricepp/CMakeLists.txt')) {
             $file=Join-Path $dwarfs $relative
             $source=[IO.File]::ReadAllText($file)
@@ -42,12 +45,12 @@ if ($Stage -in @('All','ConfigureDependencies','Dependencies')) {
     if ($Stage -in @('ConfigureDependencies','Dependencies')) { return }
 }
 if ($Stage -eq 'Gui') {
-    Invoke-Checked msbuild @('native/cpp/gui/WinArchiveFSPro.vcxproj','/restore','/m','/p:Configuration=Release','/p:Platform=x64',"/p:ArchiveFSCoreLib=$build/archivefs_core.lib","/p:OutDir=$dist/",'/p:WindowsAppSDKSelfContained=true')
+    Invoke-Checked msbuild @('native/cpp/gui/WinArchiveFSPro.vcxproj','/restore','/m','/p:Configuration=Release',"/p:Platform=$platform","/p:ArchiveFSCoreLib=$build/archivefs_core.lib","/p:OutDir=$dist/",'/p:WindowsAppSDKSelfContained=true')
     if (!(Test-Path "$dist/WinArchiveFSPro.exe")) { throw 'Missing WinUI application' }
     return
 }
-$env:PKG_CONFIG_PATH = "$ports/x64-windows-static-md/lib/pkgconfig"
-$env:PATH = "$ports/x64-windows-static-md/tools/pkgconf;$env:PATH"
+$env:PKG_CONFIG_PATH = "$ports/$triplet/lib/pkgconfig"
+$env:PATH = "$ports/$triplet/tools/pkgconf;$env:PATH"
 # The test build uses deterministic mock decoder libraries. The application
 # build links the official DwarFS reader and is exercised by real images.
 Invoke-Checked cmake (@('-S','native/cpp','-B',$test,'-DARCHIVEFS_WITH_DWARFS=OFF','-DBUILD_TESTING=ON','-DVCPKG_MANIFEST_MODE=OFF')+$flags)
@@ -67,12 +70,12 @@ Copy-Item 'src/App/Assets/app-icon.ico','src/App/Assets/file-icon.ico' "$dist/As
 Copy-Item LICENSE,README.md,README.zh-CN.md,THIRD-PARTY.md $dist -Force
 $redist=$env:VCToolsRedistDir
 if (!$redist) { throw 'VCToolsRedistDir is required for a portable Windows build' }
-$crt=Get-ChildItem (Join-Path $redist 'x64') -Directory | Where-Object Name -Match '^Microsoft\.VC[0-9]+\.CRT$' | Select-Object -First 1
+$crt=Get-ChildItem (Join-Path $redist $Architecture) -Directory | Where-Object Name -Match '^Microsoft\.VC[0-9]+\.CRT$' | Select-Object -First 1
 if (!$crt) { throw 'Visual C++ redistributable directory is missing' }
 Copy-Item (Join-Path $crt.FullName '*.dll') $dist -Force
 $licenseRoot=Join-Path $dist 'licenses/vcpkg'
 New-Item -ItemType Directory -Force $licenseRoot | Out-Null
-Get-ChildItem "$ports/x64-windows-static-md/share" -Directory | ForEach-Object {
+Get-ChildItem "$ports/$triplet/share" -Directory | ForEach-Object {
     $copyright=Join-Path $_.FullName 'copyright'
     if(Test-Path $copyright){Copy-Item $copyright (Join-Path $licenseRoot ($_.Name+'.txt')) -Force}
 }
@@ -81,5 +84,5 @@ Copy-Item artifacts/winfsp.msi "$dist/prerequisites/WinFsp.msi" -Force
 $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
 Move-Item "$dist/winsqfs-shell.dll" "$dist/winsqfs-shell-$version.dll" -Force
 if ($Stage -eq 'CoreDistribution') { return }
-Invoke-Checked msbuild @('native/cpp/gui/WinArchiveFSPro.vcxproj','/restore','/m','/p:Configuration=Release','/p:Platform=x64',"/p:ArchiveFSCoreLib=$build/archivefs_core.lib","/p:OutDir=$dist/",'/p:WindowsAppSDKSelfContained=true')
+Invoke-Checked msbuild @('native/cpp/gui/WinArchiveFSPro.vcxproj','/restore','/m','/p:Configuration=Release',"/p:Platform=$platform","/p:ArchiveFSCoreLib=$build/archivefs_core.lib","/p:OutDir=$dist/",'/p:WindowsAppSDKSelfContained=true')
 if (!(Test-Path "$dist/WinArchiveFSPro.exe")) { throw 'Missing WinUI application' }
