@@ -176,9 +176,23 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             settings_path.write_bytes(old_settings)
         else:
             settings_path.unlink(missing_ok=True)
+    # Recursive archive projection never opens the agent's own UNC filesystem
+    # as a decoder source; the inner images are read through their outer reader.
+    nested_source = root / 'nested-source'
+    nested_source.mkdir()
+    for image in images:
+        shutil.copyfile(image,nested_source / image.name)
+    outer = root / 'nested.squashfs'
+    invoke('create','SquashFS',4,outer,*list(nested_source.iterdir()))
     # Explicit temporary share exercises both first access and source deletion.
     process = subprocess.Popen([str(cli),'serve','test-native',str(root),'1'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
     try:
+        for image in images:
+            nested_path=Path(r'\\sfs$\test-native')/outer.name/image.name/'文件.bin'
+            wait_until(nested_path.is_file)
+            assert nested_path.read_bytes()==data, nested_path
+        outer.unlink()
+        wait_until(lambda:not nested_path.exists())
         for image in images:
             path=Path(r'\\sfs$\test-native')/image.name/'文件.bin'
             wait_until(path.is_file)

@@ -42,3 +42,16 @@
 执行 archivefs --help 查看命令，使用 --lang zh-CN 输出简体中文。构建及测试方法见[原生核心文档](native/cpp/README.md)。
 
 本项目采用 GPL-3.0-only 许可证，依赖组件许可证见 [THIRD-PARTY.md](THIRD-PARTY.md)。
+
+
+### 便携设备与 Android 文件访问
+
+启动 UNC 后台程序后，可直接使用以下目录：
+
+- `\\sfs$\mtp`：枚举 Windows Portable Devices（MTP/PTP）设备。
+- `\\sfs$\adb`：枚举已连接至本地 ADB Server 的 Android 设备。
+- `\\sfs$\adb.r`：使用设备已授权的 su 权限访问 Android 文件。
+
+在设备管理页面可启用或关闭各目录、指定 ADB 端口、刷新设备列表并打开资源管理器。ADB 客户端直接连接现有服务（默认 127.0.0.1:5037），不会启动或重启服务。支持 UTF-8 文件名、64 位文件大小和偏移量。Root 模式需要设备已有可用的 su，并完成设备上的授权。设备目录为只读。
+
+慢速镜像打开时，后台程序显示 Windows 进度通知；百分比表示成功读取的最远文件偏移量相对于镜像大小的比例。支持通过外层镜像直接打开内层 SquashFS、DwarFS、EROFS 镜像，无需解压到本地临时文件。

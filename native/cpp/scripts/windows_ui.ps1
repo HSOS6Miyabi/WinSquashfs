@@ -178,6 +178,12 @@ try{
   $null=Wait-Until {!([IO.Directory]::Exists($unc))} 'UNC stop'
   Invoke-Control $w 'StartUnc'
   $null=Wait-Until {[IO.File]::Exists($unc+'\extra.txt')} 'UNC restart'
+  Navigate $w 'NavDevices'
+  $null=Control $w 'RefreshDevices'
+  foreach($id in @('DeviceMtp','DeviceAdb','DeviceAdbRoot','AdbPort','OpenProgress','DeviceList','OpenMtp','OpenAdb','OpenAdbRoot','ApplyDevices')){
+    $null=Control $w $id $false
+  }
+  Save-WindowScreenshot $p 'devices'
   Navigate $w 'NavBrowse'
   Invoke-Control $w 'CloseImage'
   foreach($id in @('MountImage','CloseImage','VerifyImage','ExtractSelected','ExtractAll','OpenUnc','CopyUnc','UpDirectory')) {

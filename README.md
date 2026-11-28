@@ -42,3 +42,10 @@ Both server names expose enabled drive mappings, the configured directory aliase
 Run archivefs --help for commands. Use --lang zh-CN for Chinese output. See [native build instructions](native/cpp/README.md) for CMake, MSVC, vcpkg and Windows integration tests.
 
 GPL-3.0-only. See [THIRD-PARTY.md](THIRD-PARTY.md).
+
+
+### Portable devices and Android files
+
+Start the UNC agent to browse `\\sfs$\mtp` (MTP/PTP), `\\sfs$\adb` (existing ADB connections), and `\\sfs$\adb.r` (Android files with authorized su access). Manage these read-only namespaces and the local ADB port in the Devices page. The agent never starts or restarts an ADB server. ADB uses UTF-8 filenames and 64-bit sizes and offsets; Root access requires authorization on the Android device.
+
+Slow archive opens display a native Windows progress notification based on the furthest successfully read offset relative to the image size. Nested SquashFS, DwarFS and EROFS images are opened directly from their parent archive readers without extracting them to disk.
