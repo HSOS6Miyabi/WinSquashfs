@@ -4,8 +4,10 @@
 #include <filesystem>
 #include <stop_token>
 namespace archivefs {
+struct LocalAlias {std::u16string name;std::filesystem::path root;};
 struct Settings {
     std::filesystem::path root;
+    std::vector<LocalAlias> extra_shares;
     std::u16string alias=u"path";
     bool include_drives=true,start_at_login=false;
     unsigned idle_seconds=60,max_idle_images=8,cache_mib=64;

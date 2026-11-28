@@ -47,7 +47,18 @@ std::wstring eject_name(std::u16string_view drive,std::wstring_view suffix){
 }
 fs::path known_folder(REFKNOWNFOLDERID folder){PWSTR p=nullptr;if(FAILED(SHGetKnownFolderPath(folder,0,nullptr,&p)))throw std::runtime_error("cannot resolve user folder");fs::path result(p);CoTaskMemFree(p);return result;}
 void cancelled(std::stop_token s){if(s.stop_requested())throw std::runtime_error("operation cancelled");}
-void validate(const Settings& s){if(s.root.empty()||!s.root.is_absolute()||s.alias.empty()||s.alias.size()>64||s.alias.find_first_of(u"\\/:*?\"<>| ")!=std::u16string::npos||s.alias==u"."||s.alias==u".."||(!WindowsNameLess{}(s.alias,u"UNC")&&!WindowsNameLess{}(u"UNC",s.alias))||s.idle_seconds>86400||s.max_idle_images>1024||s.cache_mib>4096)throw std::invalid_argument("invalid UNC settings");if(s.language!="system"&&s.language!="en-US"&&s.language!="zh-CN")throw std::invalid_argument("invalid language");if(s.theme!="system"&&s.theme!="light"&&s.theme!="dark")throw std::invalid_argument("invalid theme");}
+void validate(const Settings& s){
+    auto valid_alias=[](std::u16string_view alias){return !alias.empty()&&alias.size()<=64&&alias.find_first_of(u"\\/:*?\"<>| ")==std::u16string_view::npos&&alias!=u"."&&alias!=u".."&&alias.back()!=u'.'&&
+        !std::any_of(alias.begin(),alias.end(),[](char16_t c){return c<32;});};
+    std::set<std::u16string,WindowsNameLess> aliases{u"UNC"};
+    if(s.root.empty()||!s.root.is_absolute()||!valid_alias(s.alias)||!aliases.insert(s.alias).second||
+       s.idle_seconds>86400||s.max_idle_images>1024||s.cache_mib>4096||s.extra_shares.size()>64)throw std::invalid_argument("invalid UNC settings");
+    for(auto const& extra:s.extra_shares)
+        if(extra.root.empty()||!extra.root.is_absolute()||!valid_alias(extra.name)||!aliases.insert(extra.name).second)
+            throw std::invalid_argument("invalid or duplicate directory alias");
+    if(s.language!="system"&&s.language!="en-US"&&s.language!="zh-CN")throw std::invalid_argument("invalid language");
+    if(s.theme!="system"&&s.theme!="light"&&s.theme!="dark")throw std::invalid_argument("invalid theme");
+}
 void autostart(bool enable){HKEY key=nullptr;auto rc=RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr);if(rc!=ERROR_SUCCESS)throw std::system_error(static_cast<int>(rc),std::system_category(),"login startup registry");struct Key{HKEY h;~Key(){RegCloseKey(h);}}guard{key};if(enable){auto value=L"\""+(application_directory()/L"WinArchiveFSPro.Unc.exe").wstring()+L"\"";rc=RegSetValueExW(key,L"WinArchiveFSProUNC",0,REG_SZ,reinterpret_cast<const BYTE*>(value.c_str()),static_cast<DWORD>((value.size()+1)*sizeof(wchar_t)));}else{rc=RegDeleteValueW(key,L"WinArchiveFSProUNC");if(rc==ERROR_FILE_NOT_FOUND)rc=ERROR_SUCCESS;}if(rc!=ERROR_SUCCESS)throw std::system_error(static_cast<int>(rc),std::system_category(),"login startup registry");}
 bool instance_stopped(){auto name=agent_name(L"Instance");Handle h(OpenMutexW(SYNCHRONIZE|MUTEX_MODIFY_STATE,FALSE,name.c_str()));if(!h){if(GetLastError()==ERROR_FILE_NOT_FOUND)return true;fail("OpenMutexW");}auto wait=WaitForSingleObject(h.value,0);if(wait==WAIT_OBJECT_0||wait==WAIT_ABANDONED){ReleaseMutex(h.value);return true;}if(wait==WAIT_TIMEOUT)return false;fail("WaitForSingleObject");}
 }
@@ -67,8 +78,8 @@ void save_recent(const std::vector<fs::path>& paths){
 std::vector<fs::path> recent_images(){try{auto path=settings_directory()/L"recent.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"recent.json";if(!fs::exists(path)||fs::file_size(path)>1u<<20)return {};std::ifstream input(path,std::ios::binary);auto json=nlohmann::json::parse(input);std::vector<fs::path> paths;for(auto& value:json){if(paths.size()==15)break;paths.emplace_back(to_utf16(value.get<std::string>()));}return paths;}catch(...){return {};}}
 void remember_image(const fs::path& path){try{auto paths=recent_images();auto full=fs::absolute(path).lexically_normal();auto name=full.u16string();std::erase_if(paths,[&](auto& p){auto other=p.u16string();WindowsNameLess less;return !less(name,other)&&!less(other,name);});paths.insert(paths.begin(),full);if(paths.size()>15)paths.resize(15);save_recent(paths);}catch(...){}}
 void clear_recent_images(){save_recent({});}
-Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){std::ifstream in(path,std::ios::binary);auto j=nlohmann::json::parse(in);s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.language=j.value("Language",std::string("system"));s.theme=j.value("Theme",std::string("system"));}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
-void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";auto temporary=path;temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";struct Cleanup{fs::path path;~Cleanup(){std::error_code ec;fs::remove(path,ec);}}cleanup{temporary};nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"Language",language},{"Theme",theme}};{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::badbit|std::ios::failbit);out<<j.dump(2)<<'\n';out.close();}if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save settings");autostart(start_at_login);}
+Settings Settings::load(){Settings s;s.root=known_folder(FOLDERID_Profile);auto path=settings_directory()/L"unc.json";if(!fs::exists(path))path=settings_directory().parent_path()/L"WinSquashfs"/L"unc.json";if(fs::exists(path)){std::ifstream in(path,std::ios::binary);auto j=nlohmann::json::parse(in);s.root=fs::u8path(j.value("Root",to_utf8(s.root.u16string())));s.alias=to_utf16(j.value("Alias",std::string("path")));s.include_drives=j.value("IncludeDrives",true);s.start_at_login=j.value("StartAtLogin",false);s.idle_seconds=j.value("IdleSeconds",60u);s.max_idle_images=j.value("MaxIdleImages",8u);s.cache_mib=j.value("CacheMiB",64u);s.language=j.value("Language",std::string("system"));s.theme=j.value("Theme",std::string("system"));for(auto const& item:j.value("ExtraShares",nlohmann::json::array()))s.extra_shares.push_back({to_utf16(item.at("Alias").get<std::string>()),fs::path(to_utf16(item.at("Root").get<std::string>()))});}if(!fs::exists(settings_directory()/L"unc.json")){auto language=settings_directory().parent_path()/L"WinSquashfs"/L"language.txt";if(fs::exists(language)){std::ifstream file(language);std::string value;file>>value;if(value=="en-US"||value=="zh-CN"||value=="system")s.language=value;}}validate(s);return s;}
+void Settings::save()const{validate(*this);shares();fs::create_directories(settings_directory());auto path=settings_directory()/L"unc.json";auto temporary=path;temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";struct Cleanup{fs::path path;~Cleanup(){std::error_code ec;fs::remove(path,ec);}}cleanup{temporary};nlohmann::json j={{"Root",to_utf8(root.u16string())},{"Alias",to_utf8(alias)},{"IncludeDrives",include_drives},{"StartAtLogin",start_at_login},{"IdleSeconds",idle_seconds},{"MaxIdleImages",max_idle_images},{"CacheMiB",cache_mib},{"Language",language},{"Theme",theme}};j["ExtraShares"]=nlohmann::json::array();for(auto const& extra:extra_shares)j["ExtraShares"].push_back({{"Alias",to_utf8(extra.name)},{"Root",to_utf8(extra.root.u16string())}});{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out.exceptions(std::ios::badbit|std::ios::failbit);out<<j.dump(2)<<'\n';out.close();}if(!MoveFileExW(temporary.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))fail("save settings");autostart(start_at_login);}
 void migrate_settings(){
     auto current=settings_directory();
     auto legacy=current.parent_path()/L"WinSquashfs";
@@ -76,7 +87,7 @@ void migrate_settings(){
        (fs::exists(legacy/L"unc.json")||fs::exists(legacy/L"language.txt")))Settings::load().save();
     if(!fs::exists(current/L"recent.json")&&fs::exists(legacy/L"recent.json"))save_recent(recent_images());
 }
-std::vector<Share> Settings::shares()const{validate(*this);std::vector<Share> result;for(auto server:{u"sfs$",u"sfs.localhost"}){result.push_back({alias,root,false,server});if(include_drives){auto mask=GetLogicalDrives();for(unsigned i=0;i<26;++i){if(!(mask&(1u<<i)))continue;std::u16string name(1,static_cast<char16_t>(u'A'+i));if(!WindowsNameLess{}(name,alias)&&!WindowsNameLess{}(alias,name))continue;auto drive=fs::path(name+u":\\");wchar_t format[64]{};if(GetVolumeInformationW(drive.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)&&(!_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS")))continue;result.push_back({name,drive,false,server});}}result.push_back({u"UNC",{},true,server});}return result;}
+std::vector<Share> Settings::shares()const{validate(*this);std::vector<Share> result;for(auto server:{u"sfs$",u"sfs.localhost"}){result.push_back({alias,root,false,server});for(auto const& extra:extra_shares)result.push_back({extra.name,extra.root,false,server});if(include_drives){auto mask=GetLogicalDrives();for(unsigned i=0;i<26;++i){if(!(mask&(1u<<i)))continue;std::u16string name(1,static_cast<char16_t>(u'A'+i));if(std::any_of(result.begin(),result.end(),[&](auto const& share){WindowsNameLess less;return share.server==server&&!less(share.name,name)&&!less(name,share.name);}))continue;auto drive=fs::path(name+u":\\");wchar_t format[64]{};if(GetVolumeInformationW(drive.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)&&(!_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS")))continue;result.push_back({name,drive,false,server});}}result.push_back({u"UNC",{},true,server});}return result;}
 std::u16string Settings::unc_path(const fs::path& source)const{auto p=fs::absolute(source).lexically_normal();if(p.u16string().starts_with(u"\\\\?\\UNC\\"))p=fs::path(u"\\\\"+p.u16string().substr(8));bool remote=p.u16string().starts_with(u"\\\\");for(auto& s:shares())if(s.server==u"sfs$"&&s.network==remote)if(auto path=image_unc_path(s,p))return *path;throw std::invalid_argument("image is outside the configured UNC shares");}
 void open_in_explorer(std::u16string_view path){auto p=wide(path);auto result=ShellExecuteW(nullptr,L"open",p.c_str(),nullptr,nullptr,SW_SHOWNORMAL);if(reinterpret_cast<INT_PTR>(result)<=32)throw std::runtime_error("Explorer could not open the path");}
 bool agent_running(){Handle h(OpenEventW(SYNCHRONIZE,FALSE,agent_name(L"Ready").c_str()));return h&&WaitForSingleObject(h.value,0)==WAIT_OBJECT_0;}
@@ -235,14 +246,16 @@ int run_agent(){
     std::map<std::u16string,std::unique_ptr<NativeMount>,WindowsNameLess> mounts;
     auto update_mounts=[&](const std::vector<Share>& current,bool initial){
         std::set<std::u16string,WindowsNameLess> wanted;
+        bool complete=true;
         for(auto& share:current){
             auto prefix=u"\\"+share.server+u"\\"+share.name;
             wanted.insert(prefix);
             if(mounts.contains(prefix))continue;
             try{mounts.emplace(prefix,std::make_unique<NativeMount>(unc_projection(share,pool),u"",prefix));}
-            catch(...){if(initial)throw;}
+            catch(...){if(initial)throw;complete=false;}
         }
         std::erase_if(mounts,[&](const auto& entry){return !wanted.contains(entry.first);});
+        return complete;
     };
     update_mounts(shares,true);
     DWORD drive_mask=GetLogicalDrives();
@@ -259,7 +272,7 @@ int run_agent(){
         if(settings.include_drives){
             auto mask=GetLogicalDrives();
             if(mask&&mask!=drive_mask){
-                try{update_mounts(settings.shares(),false);drive_mask=mask;}catch(const std::exception&){}
+                try{if(update_mounts(settings.shares(),false))drive_mask=mask;}catch(const std::exception&){}
             }
         }
     }

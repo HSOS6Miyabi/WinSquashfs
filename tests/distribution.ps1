@@ -157,7 +157,47 @@ try {
         $agentStarted=$false
         if((Invoke-Cli --lang en-US unc-status) -ne 'Stopped' -or [IO.File]::Exists($unc)){throw 'Agent did not stop after language change'}
     }
-    Write-Host "PASS packaged applications $Version, Unicode paths, CLI validation and cross-language UNC lifecycle"
+    # A second directory alias and a drive created after the agent starts must
+    # be accessible without restarting or replacing existing shares.
+    $settings.IncludeDrives=$true
+    $settings.ExtraShares=@(@{Alias='extra-dist';Root=$root})
+    [IO.File]::WriteAllText($settingsFile,($settings|ConvertTo-Json -Depth 4 -Compress))
+    $agentStarted=$true
+    Invoke-Cli unc-start|Out-Null
+    if([Convert]::ToHexString([IO.File]::ReadAllBytes('\\sfs$\extra-dist\测试镜像.squashfs\测试.txt')) -ne '0001027FFF'){throw 'Additional directory alias read mismatch'}
+    $letter=$null
+    foreach($c in [char[]]'ZYXWVUTSRQPONMLKJIHGFED'){if(![IO.Directory]::Exists(([string]$c+':\'))){$letter=[string]$c;break}}
+    if(!$letter){throw 'No free letter for drive mapping test'}
+    $mapping=$letter+':'
+    try{
+        & subst.exe $mapping $root
+        if($LASTEXITCODE){throw 'Cannot create drive mapping'}
+        foreach($server in @('sfs
+}
+finally {
+    if($agentStarted){try {Invoke-Cli --lang en-US unc-stop|Out-Null}catch{Write-Warning $_.Exception.Message}}
+    foreach($file in @($settingsFile,$languageFile)){
+        if($backup.ContainsKey($file)){[IO.File]::WriteAllBytes($file,$backup[$file])}
+        elseif(Test-Path $file){Remove-Item -LiteralPath $file -Force}
+    }
+    if(Test-Path $root){Remove-Item -LiteralPath $root -Recurse -Force}
+}
+,'sfs.localhost')){
+            $mapped='\\'+$server+'\'+$letter+'\测试镜像.squashfs\测试.txt'
+            $deadline=[DateTime]::UtcNow.AddSeconds(25)
+            while(![IO.File]::Exists($mapped) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 300}
+            if([Convert]::ToHexString([IO.File]::ReadAllBytes($mapped)) -ne '0001027FFF'){throw 'Dynamically registered drive read mismatch'}
+        }
+    }finally{
+        & subst.exe $mapping /D
+    }
+    $deadline=[DateTime]::UtcNow.AddSeconds(25)
+    while([IO.File]::Exists($mapped) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 300}
+    if([IO.File]::Exists($mapped)){throw 'Removed drive remains accessible'}
+    if([Convert]::ToHexString([IO.File]::ReadAllBytes($unc)) -ne '0001027FFF'){throw 'Existing alias stopped after drive removal'}
+    Invoke-Cli unc-stop|Out-Null
+    $agentStarted=$false
+    Write-Host "PASS packaged applications $Version, Unicode paths, CLI validation, multiple aliases, dynamic drive mapping and cross-language UNC lifecycle"
 }
 finally {
     if($agentStarted){try {Invoke-Cli --lang en-US unc-stop|Out-Null}catch{Write-Warning $_.Exception.Message}}

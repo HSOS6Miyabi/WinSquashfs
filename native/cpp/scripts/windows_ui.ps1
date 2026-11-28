@@ -107,10 +107,17 @@ try{
   Navigate $w 'NavBrowse'
   Save-WindowScreenshot $p 'browser-dark'
   Navigate $w 'NavUnc'
+  Set-Value $w 'ExtraShareName' 'ui-extra'
+  Set-Value $w 'ExtraSharePath' $root
+  Invoke-Control $w 'AddExtraShare'
+  Invoke-Control $w 'ApplyUnc'
+  $null=Wait-Until {((Get-Content $settings -Raw|ConvertFrom-Json).ExtraShares|Where-Object {$_.Alias -eq 'ui-extra'}).Count -eq 1} 'saved additional share'
   Invoke-Control $w 'StartUnc'
   $unc='\\sfs$\'+$alias+'\'+[IO.Path]::GetFileName($image)
   $null=Wait-Until {[IO.File]::Exists($unc+'\extra.txt')} 'UNC start'
   if([IO.File]::ReadAllText($unc+'\extra.txt') -ne 'second selected file'){throw 'Wrong UNC file data'}
+  $extraUnc='\\sfs$\ui-extra\'+[IO.Path]::GetFileName($image)+'\extra.txt'
+  if([IO.File]::ReadAllText($extraUnc) -ne 'second selected file'){throw 'Wrong additional alias data'}
   Save-WindowScreenshot $p 'unc-dark'
   foreach($id in @('UncImagePath','OpenUnc','CopyUnc','ApplyUnc','StartUnc','StopUnc')){
     if((Control $w $id $false).Current.IsOffscreen){throw "UNC action is offscreen: $id"}
