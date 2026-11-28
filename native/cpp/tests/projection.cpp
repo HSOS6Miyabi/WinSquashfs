@@ -4,6 +4,7 @@
 #include <atomic>
 #include <barrier>
 #include <fstream>
+#include <future>
 #include <iostream>
 #include <random>
 #include <thread>
@@ -40,6 +41,44 @@ int main(int argc,char** argv){try{check(argc==2,"module dir");Temp temp;auto ro
         auto data_node=reopened->tree()->find(u"data.bin");
         std::array<std::byte,1> data{};
         check(reopened->tree()->read(data_node,0,data)==1&&data[0]==std::byte{80},"new generation after idle deletion");
+    }
+    // Evicting a decoder that is still shutting down must not prevent
+    // concurrent access to a different archive in the same pool.
+    {
+        struct SlowClose {
+            std::shared_ptr<ArchiveTree> tree;
+            std::promise<void>* entered;
+            std::shared_future<void> resume;
+            ~SlowClose(){entered->set_value();resume.wait();}
+        };
+        std::promise<void> entered,resume;
+        auto started=entered.get_future();
+        auto done=resume.get_future().share();
+        auto slow_pool=std::make_shared<ImagePool>(
+            [&](const fs::path& path,SourcePolicy policy){
+                auto tree=opener(path,policy);
+                if(path==first){
+                    auto owner=std::shared_ptr<SlowClose>(new SlowClose{std::move(tree),&entered,done});
+                    return std::shared_ptr<ArchiveTree>(owner,owner->tree.get());
+                }
+                return tree;
+            },ImagePool::Settings{std::chrono::milliseconds(0),8});
+        auto slow=slow_pool->acquire(first);
+        auto unrelated=slow_pool->acquire(second);
+        slow.reset();
+        if(started.wait_for(std::chrono::seconds(5))!=std::future_status::ready){
+            resume.set_value();
+            throw std::runtime_error("idle decoder was not retired");
+        }
+        auto read=std::async(std::launch::async,[&]{
+            auto lease=slow_pool->acquire(second);
+            auto node=lease->tree()->find(u"data.bin");
+            std::array<std::byte,1> byte{};
+            return lease->tree()->read(node,0,byte)==1&&byte[0]==std::byte{20};
+        });
+        const auto ready=read.wait_for(std::chrono::seconds(2))==std::future_status::ready;
+        resume.set_value();
+        check(ready&&read.get(),"decoder destruction must not block another archive");
     }
     auto disk=mount_projection(opener(first,SourcePolicy::protected_handle));auto r=disk->open(u"\\");check(r&&r->info.directory,"disk root");check(disk->list(r).size()==2,"disk listing");check(!disk->open(u"missing"),"missing file");bool traversal=false;try{disk->open(u"folder/../data.bin");}catch(...){traversal=true;}check(traversal,"traversal rejected");std::cout<<"PASS projected paths, concurrent open, leases, idle eviction and source invalidation\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

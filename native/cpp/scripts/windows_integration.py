@@ -293,11 +293,37 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
         if old_settings is not None:settings_path.write_bytes(old_settings)
         elif settings_path.exists():settings_path.unlink()
     # Explicit temporary share exercises both first access and source deletion.
-    process = subprocess.Popen([str(cli),'serve','test-native',str(root),'1'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+    serve_log = root / 'serve.log'
+    with serve_log.open('wb') as log:
+        process = subprocess.Popen([str(cli),'serve','test-native',str(root),'1'],
+            stdout=log,stderr=subprocess.STDOUT,env={**os.environ,'ARCHIVEFS_TRACE':'1'})
+    def check_serve():
+        if process.poll() is not None:
+            raise RuntimeError(f'UNC server exited: {process.returncode:#x}\n{serve_log.read_text(encoding="utf-8",errors="replace")}')
+    def share_file(path, present=True, timeout=30):
+        # A synchronous Windows UNC lookup can exceed the polling deadline.
+        # Run it in a separate process so the deadline can be enforced.
+        deadline=time.monotonic()+timeout
+        while time.monotonic()<deadline:
+            check_serve()
+            try:
+                result=subprocess.run([sys.executable,'-c',
+                    'import pathlib,sys; sys.exit(0 if pathlib.Path(sys.argv[1]).is_file() else 1)',
+                    str(path)],capture_output=True,timeout=max(0.1,min(10,deadline-time.monotonic())))
+            except subprocess.TimeoutExpired as error:
+                check_serve()
+                raise TimeoutError(f'UNC query blocked: {path}') from error
+            if result.returncode not in (0,1):
+                raise RuntimeError((str(path),result.returncode,result.stderr))
+            if (result.returncode==0)==present:
+                check_serve()
+                return
+            time.sleep(.1)
+        raise TimeoutError(f'UNC file did not become {"available" if present else "unavailable"}: {path}')
     try:
         for fixture in fixtures:
             alias=Path(r'\\sfs$\test-native')/fixture.name
-            wait_until(lambda:(alias/'relative').is_file())
+            share_file(alias/'relative')
             assert (alias/'relative').read_bytes()==link_data
             assert (alias/'dir-link'/'target.txt').read_bytes()==link_data
             if fixture.suffix!=".dwarfs":
@@ -310,17 +336,25 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
                     else:raise AssertionError(f"Unsafe link or special object readable: {name}")
         for image in images:
             nested_path=Path(r'\\sfs$\test-native')/outer.name/image.name/'文件.bin'
-            wait_until(nested_path.is_file)
+            share_file(nested_path)
             assert nested_path.read_bytes()==data, nested_path
         outer.unlink()
-        wait_until(lambda:not nested_path.exists())
-        for image in images:
+        share_file(nested_path,False)
+        print('PASS outer image removal',flush=True)
+        for index,image in enumerate(images):
             path=Path(r'\\sfs$\test-native')/image.name/'文件.bin'
-            wait_until(path.is_file)
+            share_file(path)
             assert path.read_bytes()==data
             image.unlink()
-            wait_until(lambda:not path.exists())
+            share_file(path,False)
+            for remaining in images[index+1:]:
+                unaffected=Path(r'\\sfs$\test-native')/remaining.name/'文件.bin'
+                share_file(unaffected)
+                assert unaffected.read_bytes()==data
+            print(f'PASS removal of {image.name} and remaining shares',flush=True)
     finally:
-        process.terminate();process.communicate(timeout=30)
+        if process.poll() is None:process.terminate()
+        process.wait(timeout=30)
+        print(serve_log.read_text(encoding='utf-8',errors='replace')[-12000:],flush=True)
 faulthandler.cancel_dump_traceback_later()
 print('PASS real codec creation, Unicode extraction, malformed images, random access, WinFsp mounting, eject and UNC source removal', flush=True)

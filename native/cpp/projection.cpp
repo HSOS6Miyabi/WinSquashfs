@@ -64,15 +64,25 @@ struct ImagePool::State {
         return next;
     }
     void erase_if_current(const std::shared_ptr<Entry>& entry){auto it=images.find(entry->key);if(it!=images.end()&&it->second==entry)images.erase(it);}
-    void trim(){
+    void trim(std::vector<std::shared_ptr<Entry>>& retired){
         auto now=Clock::now();std::vector<std::shared_ptr<Entry>> idle;
-        for(auto it=images.begin();it!=images.end();){auto entry=it->second;if(!entry->active&&entry->idle+settings.idle_time<=now)it=images.erase(it);else{if(!entry->active)idle.push_back(entry);++it;}}
-        if(idle.size()>settings.idle_images){std::sort(idle.begin(),idle.end(),[](auto& a,auto& b){return a->idle<b->idle;});for(std::size_t i=0;i<idle.size()-settings.idle_images;++i)erase_if_current(idle[i]);}
+        for(auto it=images.begin();it!=images.end();){
+            auto entry=it->second;
+            if(!entry->active&&entry->idle+settings.idle_time<=now){retired.push_back(entry);it=images.erase(it);}
+            else{if(!entry->active)idle.push_back(entry);++it;}
+        }
+        if(idle.size()>settings.idle_images){
+            std::sort(idle.begin(),idle.end(),[](auto& a,auto& b){return a->idle<b->idle;});
+            for(std::size_t i=0;i<idle.size()-settings.idle_images;++i){retired.push_back(idle[i]);erase_if_current(idle[i]);}
+        }
     }
-    void release(const std::shared_ptr<Entry>& entry)noexcept{try{std::lock_guard lock(mutex);if(entry->active&&!--entry->active){entry->idle=Clock::now();trim();}changed();}catch(...){}}
+    void release(const std::shared_ptr<Entry>& entry)noexcept{
+        try{std::lock_guard lock(mutex);if(entry->active&&!--entry->active)entry->idle=Clock::now();changed();}catch(...){}
+    }
     void sweep(bool changed_only=false){
-        std::vector<std::shared_ptr<Entry>> check;
-        {std::lock_guard lock(mutex);trim();for(auto& [key,entry]:images)if(entry->future.wait_for(std::chrono::seconds(0))==std::future_status::ready)check.push_back(entry);}
+        std::vector<std::shared_ptr<Entry>> check,retired;
+        {std::lock_guard lock(mutex);trim(retired);for(auto& [key,entry]:images)if(entry->future.wait_for(std::chrono::seconds(0))==std::future_status::ready)check.push_back(entry);}
+        retired.clear();
         // Active readers may retain their own generation. Drop the cache
         // entry if the named source has disappeared or been replaced.
         for(auto& entry:check){
@@ -94,7 +104,14 @@ ImagePool::ImagePool(ArchiveOpener opener,Settings settings,ArchiveSourceOpener 
         constexpr auto check_interval=std::chrono::milliseconds(500);
         auto next_check=Clock::now()+check_interval;
         while(!stop.stop_requested()){
-            state->trim();
+            std::vector<std::shared_ptr<Entry>> retired;
+            state->trim(retired);
+            if(!retired.empty()){
+                // Decoder shutdown may join workers or cancel pending I/O.
+                // Release the retired entries outside the cache mutex.
+                lock.unlock();retired.clear();lock.lock();
+                continue;
+            }
             if(Clock::now()>=next_check){
                 // A slow or remote filesystem must not hold the pool mutex.
                 lock.unlock();
