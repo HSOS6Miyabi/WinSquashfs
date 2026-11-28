@@ -76,7 +76,7 @@ void migrate_settings(){
        (fs::exists(legacy/L"unc.json")||fs::exists(legacy/L"language.txt")))Settings::load().save();
     if(!fs::exists(current/L"recent.json")&&fs::exists(legacy/L"recent.json"))save_recent(recent_images());
 }
-std::vector<Share> Settings::shares()const{validate(*this);std::vector<Share> result;for(auto server:{u"sfs$",u"sfs.localhost"}){result.push_back({alias,root,false,server});if(include_drives){auto mask=GetLogicalDrives();for(unsigned i=0;i<26;++i){if(!(mask&(1u<<i)))continue;std::u16string name(1,static_cast<char16_t>(u'A'+i));if(!WindowsNameLess{}(name,alias)&&!WindowsNameLess{}(alias,name))throw std::invalid_argument("UNC alias conflicts with drive letter");auto drive=fs::path(name+u":\\");wchar_t format[64]{};if(GetVolumeInformationW(drive.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)&&(!_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS")))continue;result.push_back({name,drive,false,server});}}result.push_back({u"UNC",{},true,server});}return result;}
+std::vector<Share> Settings::shares()const{validate(*this);std::vector<Share> result;for(auto server:{u"sfs$",u"sfs.localhost"}){result.push_back({alias,root,false,server});if(include_drives){auto mask=GetLogicalDrives();for(unsigned i=0;i<26;++i){if(!(mask&(1u<<i)))continue;std::u16string name(1,static_cast<char16_t>(u'A'+i));if(!WindowsNameLess{}(name,alias)&&!WindowsNameLess{}(alias,name))continue;auto drive=fs::path(name+u":\\");wchar_t format[64]{};if(GetVolumeInformationW(drive.c_str(),nullptr,0,nullptr,nullptr,nullptr,format,64)&&(!_wcsicmp(format,L"ArchiveFS")||!_wcsicmp(format,L"SquashFS")))continue;result.push_back({name,drive,false,server});}}result.push_back({u"UNC",{},true,server});}return result;}
 std::u16string Settings::unc_path(const fs::path& source)const{auto p=fs::absolute(source).lexically_normal();if(p.u16string().starts_with(u"\\\\?\\UNC\\"))p=fs::path(u"\\\\"+p.u16string().substr(8));bool remote=p.u16string().starts_with(u"\\\\");for(auto& s:shares())if(s.server==u"sfs$"&&s.network==remote)if(auto path=image_unc_path(s,p))return *path;throw std::invalid_argument("image is outside the configured UNC shares");}
 void open_in_explorer(std::u16string_view path){auto p=wide(path);auto result=ShellExecuteW(nullptr,L"open",p.c_str(),nullptr,nullptr,SW_SHOWNORMAL);if(reinterpret_cast<INT_PTR>(result)<=32)throw std::runtime_error("Explorer could not open the path");}
 bool agent_running(){Handle h(OpenEventW(SYNCHRONIZE,FALSE,agent_name(L"Ready").c_str()));return h&&WaitForSingleObject(h.value,0)==WAIT_OBJECT_0;}
@@ -178,8 +178,11 @@ bool alias_active(std::u16string_view prefix){
 }
 class RemoteAliasMounts {
 public:
-    explicit RemoteAliasMounts(std::shared_ptr<ImagePool> pool,const std::vector<Share>& builtin):pool_(std::move(pool)){
+    explicit RemoteAliasMounts(std::shared_ptr<ImagePool> pool,const std::vector<Share>& builtin,bool reserve_drives):pool_(std::move(pool)){
         for(auto& share:builtin)reserved_.insert(u"\\"+share.server+u"\\"+share.name);
+        if(reserve_drives)for(auto server:{u"sfs$",u"sfs.localhost"})
+            for(char16_t letter=u'A';letter<=u'Z';++letter)
+                reserved_.insert(std::u16string(u"\\")+server+u"\\"+letter);
     }
     void refresh(){
         AliasLock lock;
@@ -229,19 +232,36 @@ int run_agent(){
         static_cast<std::size_t>(settings.cache_mib)<<20),
         ImagePool::Settings{std::chrono::seconds(settings.idle_seconds),settings.max_idle_images});
     auto shares=settings.shares();
-    std::vector<std::unique_ptr<NativeMount>> mounts;
-    for(auto& share:shares)mounts.push_back(std::make_unique<NativeMount>(
-        unc_projection(share,pool),u"",u"\\"+share.server+u"\\"+share.name));
-    RemoteAliasMounts remote(pool,shares);
+    std::map<std::u16string,std::unique_ptr<NativeMount>,WindowsNameLess> mounts;
+    auto update_mounts=[&](const std::vector<Share>& current,bool initial){
+        std::set<std::u16string,WindowsNameLess> wanted;
+        for(auto& share:current){
+            auto prefix=u"\\"+share.server+u"\\"+share.name;
+            wanted.insert(prefix);
+            if(mounts.contains(prefix))continue;
+            try{mounts.emplace(prefix,std::make_unique<NativeMount>(unc_projection(share,pool),u"",prefix));}
+            catch(...){if(initial)throw;}
+        }
+        std::erase_if(mounts,[&](const auto& entry){return !wanted.contains(entry.first);});
+    };
+    update_mounts(shares,true);
+    DWORD drive_mask=GetLogicalDrives();
+    RemoteAliasMounts remote(pool,shares,settings.include_drives);
     try{remote.refresh();}catch(const std::exception&){}
     if(!SetEvent(ready.value))fail("SetEvent");
     struct ResetReady{HANDLE event;~ResetReady(){ResetEvent(event);}}reset_ready{ready.value};
     HANDLE events[]{stop.value,aliases.value};
     for(;;){
-        auto result=WaitForMultipleObjects(2,events,FALSE,INFINITE);
+        auto result=WaitForMultipleObjects(2,events,FALSE,settings.include_drives?1000:INFINITE);
         if(result==WAIT_OBJECT_0)break;
-        if(result!=WAIT_OBJECT_0+1)fail("wait for UNC agent");
-        try{remote.refresh();}catch(const std::exception&){}
+        if(result==WAIT_OBJECT_0+1){try{remote.refresh();}catch(const std::exception&){}}
+        else if(result!=WAIT_TIMEOUT)fail("wait for UNC agent");
+        if(settings.include_drives){
+            auto mask=GetLogicalDrives();
+            if(mask&&mask!=drive_mask){
+                try{update_mounts(settings.shares(),false);drive_mask=mask;}catch(const std::exception&){}
+            }
+        }
     }
     return 0;
 }

@@ -139,7 +139,8 @@ void MainWindow::search_subtree(){
             for(auto& node:result.nodes){visible_.push_back(node);auto name=text(tree->path_of(node));auto suffix=node->info.kind==FileKind::directory?tr(L"  [Folder]",L"  [文件夹]"):text("  "+std::to_string(node->info.size)+" B");entries_.Items().Append(box_value(hstring(std::wstring(name)+std::wstring(suffix))));}
             update_browser_buttons();
             auto count=text(std::to_string(result.nodes.size()));
-            status_.Text(hstring(std::wstring(count)+std::wstring(result.truncated?tr(L"+ results; refine the search",L" 个以上结果，请缩小搜索范围"):tr(L" results",L" 个搜索结果")))));
+            auto message=result.truncated?tr(L"+ results; refine the search",L" 个以上结果，请缩小搜索范围"):tr(L" results",L" 个搜索结果");
+            status_.Text(hstring(std::wstring(count)+std::wstring(message)));
         };
     },tr(L"Searching subfolders",L"正在搜索子目录"));
 }
