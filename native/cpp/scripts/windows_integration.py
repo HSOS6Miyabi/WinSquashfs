@@ -123,6 +123,13 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             alias_file = Path(short_path) / '文件.bin'
             wait_until(alias_file.is_file)
             assert alias_file.read_bytes()==data
+            bare_file = Path(r'\\sfs.localhost') / share_name / copy.name / '文件.bin'
+            wait_until(bare_file.is_file)
+            assert bare_file.read_bytes()==data
+            invoke('unc-stop')
+            invoke('unc-start')
+            wait_until(alias_file.is_file)
+            assert alias_file.read_bytes()==data
             copy.unlink()
             wait_until(lambda: not projected.exists())
             wait_until(lambda: not alias_file.exists())
