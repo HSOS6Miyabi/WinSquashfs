@@ -3,6 +3,7 @@
 #include "decoder_backend.hpp"
 #include "gzip_index.hpp"
 #include "xz_index.hpp"
+#include "zstd_index.hpp"
 #include <archive.h>
 #include <archive_entry.h>
 #include <array>
@@ -512,6 +513,9 @@ std::shared_ptr<const ArchiveBackend> open_stream_archive_backend(
         auto xz=index_xz_tar(source,cache_bytes/2);
         if(xz.source)return std::make_shared<StreamBackend>(std::move(xz.source),
             ArchiveFormat::tar,source->size(),ARCHIVE_FILTER_XZ,xz.reserved);
+        auto zstd=index_zstd_tar(source,cache_bytes/2);
+        if(zstd.source)return std::make_shared<StreamBackend>(std::move(zstd.source),
+            ArchiveFormat::tar,source->size(),ARCHIVE_FILTER_ZSTD,zstd.reserved);
     }
     return std::make_shared<StreamBackend>(std::move(source),hint);
 }

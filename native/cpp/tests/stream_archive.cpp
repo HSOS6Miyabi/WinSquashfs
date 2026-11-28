@@ -5,6 +5,8 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <lzma.h>
+#include <zstd.h>
+#include <xxhash.h>
 #include <array>
 #include <atomic>
 #include <future>
@@ -181,6 +183,71 @@ void xz_blocks(){
     require(rejected,"corrupt XZ index or footer rejected");
     std::cout<<"PASS XZ block index, cross-block reads, bounded cache and streaming large blocks\n";
 }
+void append32(std::vector<std::byte>& data,std::uint32_t v){
+    for(unsigned i=0;i<4;++i)data.push_back(static_cast<std::byte>((v>>(i*8))&255));
+}
+std::vector<std::byte> seekable_zstd(std::span<const std::byte> raw,bool checksums){
+    std::vector<std::byte> result,index;
+    std::uint32_t count=0;
+    while(!raw.empty()){
+        auto piece=raw.first(std::min<std::size_t>(raw.size(),1u<<20));raw=raw.subspan(piece.size());
+        auto at=result.size();result.resize(at+ZSTD_compressBound(piece.size()));
+        auto length=ZSTD_compress(result.data()+at,result.size()-at,piece.data(),piece.size(),1);
+        require(!ZSTD_isError(length),"write Zstandard frame");
+        result.resize(at+length);
+        append32(index,static_cast<std::uint32_t>(length));
+        append32(index,static_cast<std::uint32_t>(piece.size()));
+        if(checksums)append32(index,static_cast<std::uint32_t>(XXH64(piece.data(),piece.size(),0)));
+        ++count;
+    }
+    append32(result,0x184d2a5e);append32(result,static_cast<std::uint32_t>(index.size()+9));
+    result.insert(result.end(),index.begin(),index.end());
+    append32(result,count);result.push_back(checksums?std::byte{0x80}:std::byte{});
+    append32(result,0x8f92eab1);return result;
+}
+void zstd_frames(){
+    std::vector<std::byte> payload((10u<<20)+333);
+    std::mt19937 rng(40832);
+    for(auto& b:payload)b=static_cast<std::byte>(rng()&255);
+    auto raw=make_archive(archive_write_set_format_pax_restricted,archive_write_add_filter_none,payload);
+    for(bool checksums:{false,true}){
+        auto compressed=seekable_zstd(raw,checksums);
+        auto source=std::make_shared<MemorySource>(compressed);
+        auto backend=open_decoder_backend(source,{},8u<<20);
+        require(backend->info().format==ArchiveFormat::tar&&backend->info().compression==ARCHIVE_FILTER_ZSTD,"seekable Zstandard TAR");
+        require(backend->info().image_size==compressed.size(),"Zstandard compressed size");
+        require(backend->cache_reservation_bytes()>0&&backend->cache_reservation_bytes()<=4u<<20,"bounded Zstandard frame cache");
+        require(source->bytes_read<payload.size()/2,"seekable Zstandard skips earlier frames");
+        auto entry=backend->list(backend->info().root).at(0);
+        auto before=source->bytes_read.load();
+        std::array<std::byte,1024> bytes{};
+        for(auto offset:{(9u<<20)+17,(4u<<20)+93,(9u<<20)+123,(1u<<20)-1000}){
+            backend->read_exact(entry.info.inode,offset,bytes);
+            require(std::equal(bytes.begin(),bytes.end(),payload.begin()+offset),"Zstandard frame random read");
+        }
+        require(source->bytes_read-before<6u<<20,"Zstandard reads only selected frames");
+        auto small=open_decoder_backend(source,{},256u<<10);
+        small->read_exact(entry.info.inode,(9u<<20)+17,bytes);
+        require(std::equal(bytes.begin(),bytes.end(),payload.begin()+(9u<<20)+17),"large Zstandard frame streaming");
+        require(source->active==0,"Zstandard source handles released");
+        if(checksums){
+            auto damaged=compressed;
+            auto count=(raw.size()+(1u<<20)-1)/(1u<<20);
+            auto first_checksum=damaged.size()-9-count*12+8;
+            damaged[first_checksum]^=std::byte{1};
+            bool rejected=false;
+            try{(void)open_decoder_backend(std::make_shared<MemorySource>(std::move(damaged)),{},8u<<20);}
+            catch(const std::runtime_error&){rejected=true;}
+            require(rejected,"Zstandard seek table checksum rejected");
+        }
+        compressed[compressed.size()-5]|=std::byte{4};
+        bool rejected=false;
+        try{(void)open_decoder_backend(std::make_shared<MemorySource>(std::move(compressed)),{},8u<<20);}
+        catch(const std::runtime_error&){rejected=true;}
+        require(rejected,"invalid Zstandard seek descriptor rejected");
+    }
+    std::cout<<"PASS seekable Zstandard frames, checksums, cross-frame reads and bounded cache\n";
+}
 }
 int main(){
     try{
@@ -194,6 +261,7 @@ int main(){
             exercise(archive_write_set_format_pax_restricted,filter,ArchiveFormat::tar,payload);
         gzip_checkpoints();
         xz_blocks();
+        zstd_frames();
         exercise(archive_write_set_format_zip,archive_write_add_filter_none,ArchiveFormat::zip,payload);
         exercise(archive_write_set_format_7zip,archive_write_add_filter_none,ArchiveFormat::seven_zip,payload);
         exercise(archive_write_set_format_ar_bsd,archive_write_add_filter_none,ArchiveFormat::ar,payload);

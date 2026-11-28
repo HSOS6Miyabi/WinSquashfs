@@ -71,7 +71,7 @@ jobs:
           if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
           if(!$vcpkg){throw 'Install vcpkg and the Windows SDK on the physical runner'}
           $ports=Join-Path $PWD '.deps/hardware-ports'
-          & "$vcpkg/vcpkg.exe" install 'libarchive[core,bzip2,lz4,lzma,zstd]' nlohmann-json --classic --recurse --triplet=x64-windows-static-md "--x-install-root=$ports"
+          & "$vcpkg/vcpkg.exe" install 'libarchive[core,bzip2,lz4,lzma,zstd]' nlohmann-json xxhash --classic --recurse --triplet=x64-windows-static-md "--x-install-root=$ports"
           if($LASTEXITCODE){exit $LASTEXITCODE}
           cmake -S native/cpp -B build/hardware -G Ninja -DCMAKE_BUILD_TYPE=Release -DARCHIVEFS_WITH_DWARFS=OFF "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md "-DVCPKG_INSTALLED_DIR=$ports" -DVCPKG_MANIFEST_MODE=OFF
           if($LASTEXITCODE){exit $LASTEXITCODE}
