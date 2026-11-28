@@ -60,10 +60,10 @@ private:
 };
 class Backend final:public ArchiveBackend {
 public:
-    explicit Backend(std::shared_ptr<const RandomAccessSource> source):source_(std::move(source)),filesystem_(logger_,os_,dwarfs::file_view(std::make_shared<View>(source_)),options()){
+    explicit Backend(std::shared_ptr<const RandomAccessSource> source,std::size_t cache_bytes):source_(std::move(source)),filesystem_(logger_,os_,dwarfs::file_view(std::make_shared<View>(source_)),options(cache_bytes)){
         auto root=filesystem_.root().inode();root_=root.inode_num();if(!root.is_directory())throw std::runtime_error("DwarFS root is not a directory");source_->validate();
     }
-    ArchiveInfo info()const override{return {ArchiveFormat::dwarfs,root_,source_->size(),0,0};}
+    ArchiveInfo info()const override{return {ArchiveFormat::dwarfs,root_,source_->size(),static_cast<std::uint32_t>(std::min<std::size_t>(filesystem_.block_size(),UINT32_MAX)),0};}
     FileInfo stat(InodeId id)const override{return metadata(inode(id));}
     std::vector<DirectoryEntry> list(InodeId id)const override{
         auto dir=filesystem_.opendir(inode(id));if(!dir)throw std::invalid_argument("not a DwarFS directory");std::vector<DirectoryEntry> result;result.reserve(dir->entry_count());
@@ -76,12 +76,13 @@ public:
     void validate_source()const override{source_->validate();}
     void validate_path()const override{source_->validate_path();}
     bool source_changed()const noexcept override{return source_->source_changed();}
+    bool uses_native_cache()const noexcept override{return true;}
 private:
-    static dwarfs::reader::filesystem_options options(){dwarfs::reader::filesystem_options o;o.block_cache.max_bytes=128u<<20;o.block_cache.num_workers=std::clamp(std::thread::hardware_concurrency(),2u,8u);o.metadata.readonly=true;o.metadata.check_consistency=true;o.inode_reader.readahead=1u<<20;return o;}
+    static dwarfs::reader::filesystem_options options(std::size_t cache_bytes){dwarfs::reader::filesystem_options o;o.block_cache.max_bytes=cache_bytes;o.block_cache.num_workers=std::clamp(std::thread::hardware_concurrency(),2u,8u);o.metadata.readonly=true;o.metadata.check_consistency=true;o.inode_reader.readahead=std::min<std::size_t>(cache_bytes,1u<<20);return o;}
     dwarfs::reader::inode_view inode(InodeId id)const{if(id>static_cast<std::uint64_t>(INT_MAX))throw std::out_of_range("DwarFS inode");auto result=filesystem_.find(static_cast<int>(id));if(!result)throw std::out_of_range("DwarFS inode not found");return *result;}
     FileInfo metadata(dwarfs::reader::inode_view file)const{auto st=filesystem_.getattr(file);auto kind=st.is_regular_file()?FileKind::regular:st.is_directory()?FileKind::directory:st.is_symlink()?FileKind::symlink:FileKind::special;auto size=st.size();if(size<0)throw std::runtime_error("invalid DwarFS file size");return {file.inode_num(),kind,kind==FileKind::regular?static_cast<std::uint64_t>(size):0,std::clamp<std::int64_t>(st.mtime(),-11644473600LL,253402300799LL)};}
     std::shared_ptr<const RandomAccessSource> source_;dwarfs::null_logger logger_;dwarfs::os_access_generic os_;dwarfs::reader::filesystem_v2_lite filesystem_;InodeId root_=0;
 };
 }
-std::shared_ptr<const ArchiveBackend> open_dwarfs_backend(std::shared_ptr<const RandomAccessSource> source){return std::make_shared<Backend>(std::move(source));}
+std::shared_ptr<const ArchiveBackend> open_dwarfs_backend(std::shared_ptr<const RandomAccessSource> source,std::size_t cache_bytes){return std::make_shared<Backend>(std::move(source),cache_bytes);}
 }

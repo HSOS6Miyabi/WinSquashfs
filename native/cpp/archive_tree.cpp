@@ -119,25 +119,78 @@ public:
 } // namespace
 
 std::u16string to_utf16(std::string_view utf8) {
-    std::u8string value;
-    value.resize(utf8.size());
-    std::transform(utf8.begin(),utf8.end(),value.begin(),[](char c){return static_cast<char8_t>(c);});
-    return std::filesystem::path(value).u16string();
+    std::u16string result;
+    result.reserve(utf8.size());
+    for(std::size_t i=0;i<utf8.size();) {
+        const auto first=static_cast<unsigned char>(utf8[i++]);
+        std::uint32_t cp=first;
+        unsigned tail=0;
+        std::uint32_t minimum=0;
+        if(first<0x80) {}
+        else if(first>=0xc2&&first<=0xdf){cp=first&0x1f;tail=1;minimum=0x80;}
+        else if(first>=0xe0&&first<=0xef){cp=first&0xf;tail=2;minimum=0x800;}
+        else if(first>=0xf0&&first<=0xf4){cp=first&7;tail=3;minimum=0x10000;}
+        else throw std::invalid_argument("invalid UTF-8");
+        if(tail>utf8.size()-i)throw std::invalid_argument("truncated UTF-8");
+        for(unsigned j=0;j<tail;++j){
+            const auto next=static_cast<unsigned char>(utf8[i++]);
+            if((next&0xc0)!=0x80)throw std::invalid_argument("invalid UTF-8 continuation");
+            cp=(cp<<6)|(next&0x3f);
+        }
+        if(cp<minimum||cp>0x10ffff||(cp>=0xd800&&cp<=0xdfff))
+            throw std::invalid_argument("invalid Unicode scalar");
+        if(cp<0x10000)result.push_back(static_cast<char16_t>(cp));
+        else{
+            cp-=0x10000;
+            result.push_back(static_cast<char16_t>(0xd800+(cp>>10)));
+            result.push_back(static_cast<char16_t>(0xdc00+(cp&0x3ff)));
+        }
+    }
+    return result;
 }
 std::string to_utf8(std::u16string_view utf16) {
-    auto u8=std::filesystem::path(std::u16string(utf16)).u8string();
-    return {reinterpret_cast<const char*>(u8.data()),u8.size()};
+    std::string result;
+    result.reserve(utf16.size());
+    for(std::size_t i=0;i<utf16.size();) {
+        std::uint32_t cp=utf16[i++];
+        if(cp>=0xd800&&cp<=0xdbff){
+            if(i>=utf16.size()||utf16[i]<0xdc00||utf16[i]>0xdfff)
+                throw std::invalid_argument("invalid UTF-16 surrogate pair");
+            cp=0x10000+((cp-0xd800)<<10)+(utf16[i++]-0xdc00);
+        }else if(cp>=0xdc00&&cp<=0xdfff)throw std::invalid_argument("invalid UTF-16 surrogate");
+        if(cp<0x80)result.push_back(static_cast<char>(cp));
+        else if(cp<0x800){
+            result.push_back(static_cast<char>(0xc0|(cp>>6)));
+            result.push_back(static_cast<char>(0x80|(cp&63)));
+        }else if(cp<0x10000){
+            result.push_back(static_cast<char>(0xe0|(cp>>12)));
+            result.push_back(static_cast<char>(0x80|((cp>>6)&63)));
+            result.push_back(static_cast<char>(0x80|(cp&63)));
+        }else{
+            result.push_back(static_cast<char>(0xf0|(cp>>18)));
+            result.push_back(static_cast<char>(0x80|((cp>>12)&63)));
+            result.push_back(static_cast<char>(0x80|((cp>>6)&63)));
+            result.push_back(static_cast<char>(0x80|(cp&63)));
+        }
+    }
+    return result;
 }
 std::u16string encode_windows_name(std::string_view input) {
     if(input.empty()) return u"%0000";
-    auto name=to_utf16(input);
+    std::u16string name;
+    bool raw=false;
+    try{name=to_utf16(input);}
+    catch(const std::invalid_argument&){
+        raw=true;
+        for(unsigned char byte:input)name.push_back(static_cast<char16_t>(byte));
+    }
     auto device=reserved_name(name);
     auto trailing=name.find_last_not_of(u" .");
     auto trailing_start=trailing==std::u16string::npos?0:trailing+1;
     std::u16string result;
     for(std::size_t i=0;i<name.size();++i) {
         const auto ch=name[i];
-        if(ch<32||std::u16string_view(u"<>:\"/\\|?*%").find(ch)!=std::u16string_view::npos||
+        if(raw||ch<32||std::u16string_view(u"<>:\"/\\|?*%").find(ch)!=std::u16string_view::npos||
            (i==0&&device)||(i>=trailing_start&&(ch==u'.'||ch==u' '))) append_hex(result,ch);
         else result.push_back(ch);
     }
@@ -176,23 +229,37 @@ void ArchiveTree::validate_node(const NodePtr& node) const {
 std::shared_ptr<const ArchiveTree::Directory> ArchiveTree::load(const NodePtr& directory) const {
     validate_node(directory);
     if(directory->info.kind!=FileKind::directory) throw std::invalid_argument("not a directory");
+    std::shared_ptr<std::promise<std::shared_ptr<const Directory>>> producer;
+    std::shared_future<std::shared_ptr<const Directory>> future;
     {
         std::lock_guard lock(directories_mutex_);
         auto it=directories_.find(directory.get());
-        if(it!=directories_.end()) return it->second;
-    }
-    auto result=std::make_shared<Directory>();
-    for(const auto& entry:reader_->list(directory->info.inode)) {
-        auto base=encode_windows_name(entry.name), name=base;
-        for(std::uint64_t n=2;result->names.contains(name);++n) {
-            name=base+u"~"+to_utf16(std::to_string(n));
+        if(it!=directories_.end())future=it->second;
+        else {
+            producer=std::make_shared<std::promise<std::shared_ptr<const Directory>>>();
+            future=producer->get_future().share();
+            directories_.emplace(directory.get(),future);
         }
-        auto node=std::make_shared<Node>(Node{entry.name,std::move(name),entry.info,directory,owner_});
-        result->names.emplace(node->windows_name,node);
     }
-    for(const auto& [name,node]:result->names) { (void)name;result->nodes.push_back(node); }
-    std::lock_guard lock(directories_mutex_);
-    return directories_.try_emplace(directory.get(),result).first->second;
+    if(!producer)return future.get();
+    try {
+        auto result=std::make_shared<Directory>();
+        for(const auto& entry:reader_->list(directory->info.inode)) {
+            auto base=encode_windows_name(entry.name), name=base;
+            for(std::uint64_t n=2;result->names.contains(name);++n)
+                name=base+u"~"+to_utf16(std::to_string(n));
+            auto node=std::make_shared<Node>(Node{entry.name,std::move(name),entry.info,directory,owner_});
+            result->names.emplace(node->windows_name,node);
+        }
+        for(const auto& [name,node]:result->names) { (void)name;result->nodes.push_back(node); }
+        producer->set_value(result);
+        return result;
+    }catch(...){
+        auto error=std::current_exception();
+        {std::lock_guard lock(directories_mutex_);directories_.erase(directory.get());}
+        producer->set_exception(error);
+        std::rethrow_exception(error);
+    }
 }
 std::vector<ArchiveTree::NodePtr> ArchiveTree::children(const NodePtr& directory) const {
     // Reject stale source generations even when the directory is already cached.

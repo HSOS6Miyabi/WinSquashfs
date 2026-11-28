@@ -37,6 +37,7 @@ public:
     virtual void validate_source() const = 0;
     virtual void validate_path() const { validate_source(); }
     virtual bool source_changed() const noexcept { return false; }
+    virtual bool uses_native_cache() const noexcept { return false; }
 };
 
 ArchiveFormat detect_format(const RandomAccessSource& source);
@@ -59,7 +60,7 @@ public:
     using Cache = ConcurrentCache<PageKey, std::byte, PageHash>;
     explicit ArchiveReader(std::shared_ptr<const ArchiveBackend> backend,
                            std::size_t budget = 64u << 20, std::size_t page_size = 256u << 10)
-        : backend_(std::move(backend)), cache_(budget), page_size_(page_size), caching_(budget != 0) {
+        : backend_(std::move(backend)), cache_(backend_&&backend_->uses_native_cache()?0:budget), page_size_(page_size), caching_(budget != 0&&backend_&&!backend_->uses_native_cache()) {
         if (!backend_ || page_size_ == 0) throw std::invalid_argument("invalid archive reader configuration");
     }
     ArchiveInfo info() const { backend_->validate_source(); return backend_->info(); }

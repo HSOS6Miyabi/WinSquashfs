@@ -20,6 +20,19 @@ static std::byte sample(std::size_t n, unsigned seed) {
     return std::byte(static_cast<unsigned char>((n * 17 + seed) % 251));
 }
 int main(int argc,char** argv) {
+    // Archive names can contain arbitrary Unix byte strings.
+    for(std::uint32_t cp=0;cp<=0x10ffff;cp+=97){
+        if(cp>=0xd800&&cp<=0xdfff)continue;
+        std::u16string u;
+        if(cp<=0xffff)u.push_back(static_cast<char16_t>(cp));
+        else{auto v=cp-0x10000;u.push_back(static_cast<char16_t>(0xd800+(v>>10)));u.push_back(static_cast<char16_t>(0xdc00+(v&0x3ff)));}
+        if(to_utf16(to_utf8(u))!=u)throw std::runtime_error("Unicode round trip");
+    }
+    for(auto bytes:{std::string("\x80"),std::string("\xc0\xaf"),std::string("\xed\xa0\x80"),std::string("\xf4\x90\x80\x80"),std::string("\xe2\x82")}){
+        bool rejected=false;try{(void)to_utf16(bytes);}catch(const std::invalid_argument&){rejected=true;}
+        if(!rejected||encode_windows_name(bytes).empty())throw std::runtime_error("invalid UTF-8 filename handling");
+    }
+
     require(argc==2);
     require(encode_windows_name("AUX.txt")==u"%0041UX.txt");
     require(encode_windows_name("a%. ")==u"a%0025%002E%0020");

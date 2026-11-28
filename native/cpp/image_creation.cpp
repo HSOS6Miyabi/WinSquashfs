@@ -84,7 +84,7 @@ fs::path executable(const fs::path& tools,std::string_view name){
     return tools/name;
 #endif
 }
-std::uint64_t validate_image(const fs::path& image,const fs::path& decoders,ArchiveFormat format){auto source=open_file_source(image);auto backend=open_decoder_backend(source,decoders);if(backend->info().format!=format)throw std::runtime_error("unexpected output archive format");return backend->info().image_size;}
+std::uint64_t validate_image(const fs::path& image,const fs::path& decoders,ArchiveFormat format){auto source=open_file_source(image);auto backend=open_decoder_backend(source,decoders,0);if(backend->info().format!=format)throw std::runtime_error("unexpected output archive format");return backend->info().image_size;}
 struct TarWriter {
     struct archive* value=archive_write_new();
     std::exception_ptr error;

@@ -2,6 +2,7 @@
 #pragma once
 #include "archive_reader.hpp"
 #include <filesystem>
+#include <future>
 #include <map>
 #include <mutex>
 #include <string_view>
@@ -51,7 +52,7 @@ private:
     std::shared_ptr<ArchiveReader> reader_;
     NodePtr root_;
     mutable std::mutex directories_mutex_;
-    mutable std::map<const Node*, std::shared_ptr<const Directory>> directories_;
+    mutable std::map<const Node*, std::shared_future<std::shared_ptr<const Directory>>> directories_;
 };
 
 } // namespace archivefs

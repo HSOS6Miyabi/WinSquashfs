@@ -2,5 +2,5 @@
 #pragma once
 #include "archive_reader.hpp"
 namespace archivefs {
-std::shared_ptr<const ArchiveBackend> open_dwarfs_backend(std::shared_ptr<const RandomAccessSource> source);
+std::shared_ptr<const ArchiveBackend> open_dwarfs_backend(std::shared_ptr<const RandomAccessSource> source,std::size_t cache_bytes);
 }

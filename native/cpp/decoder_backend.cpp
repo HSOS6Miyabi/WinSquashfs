@@ -374,12 +374,14 @@ private:
 } // namespace
 
 std::shared_ptr<const ArchiveBackend> open_decoder_backend(
-    std::shared_ptr<const RandomAccessSource> source, const std::filesystem::path& module_directory) {
+    std::shared_ptr<const RandomAccessSource> source, const std::filesystem::path& module_directory, std::size_t cache_bytes) {
     if (!source) throw std::invalid_argument("missing archive source");
     auto format = detect_format(*source);
     if (format == ArchiveFormat::unknown) throw std::runtime_error("unsupported archive format");
 #ifdef ARCHIVEFS_WITH_DWARFS
-    if(format==ArchiveFormat::dwarfs) return open_dwarfs_backend(std::move(source));
+    if(format==ArchiveFormat::dwarfs) return open_dwarfs_backend(std::move(source),cache_bytes);
+#else
+    (void)cache_bytes;
 #endif
     return std::make_shared<Backend>(std::move(source), format, module_directory);
 }
