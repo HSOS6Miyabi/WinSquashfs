@@ -254,9 +254,20 @@ jobs:
         with:
           name: WinArchiveFSPro-windows-x64
           path: output
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test benchmark implementation
+        run: python native/cpp/scripts/windows_mount_benchmark.py self-test
       - name: Upgrade previous released product
         shell: pwsh
         run: ./tests/product-upgrade.ps1 -Setup output/WinArchiveFSPro-Setup-x64.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WinArchiveFSPro-mount-comparison
+          path: artifacts/mount-comparison
+          if-no-files-found: warn
   release:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     needs: [windows, windows-core, installer-runtime, product-upgrade, linux-sanitizers]

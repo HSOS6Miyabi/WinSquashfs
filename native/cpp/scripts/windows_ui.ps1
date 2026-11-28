@@ -92,12 +92,21 @@ try{
   Save-WindowScreenshot $p 'mounted'
   Invoke-Control $w 'UnmountImage'
   $null=Wait-Until {!([IO.Directory]::Exists($drive))} 'eject drive'
+  $null=Wait-Until {!(Control $w 'UnmountImage' $false).Current.IsEnabled} 'eject disabled after unmount'
+  if((Control $w 'OpenMountedImage' $false).Current.IsEnabled){throw 'Open mount enabled without selection'}
+  Save-WindowScreenshot $p 'mount-empty'
+  Navigate $w 'NavTools'
+  $darkName=if($Language -eq 'zh-CN'){'深色'}else{'Dark'}
+  Choose $w 'ThemeChoice' $darkName
+  $null=Wait-Until {(Get-Content $settings -Raw|ConvertFrom-Json).Theme -eq 'dark'} 'dark theme preference'
+  Navigate $w 'NavBrowse'
+  Save-WindowScreenshot $p 'browser-dark'
   Navigate $w 'NavUnc'
   Invoke-Control $w 'StartUnc'
   $unc='\\sfs$\'+$alias+'\'+[IO.Path]::GetFileName($image)
   $null=Wait-Until {[IO.File]::Exists($unc+'\extra.txt')} 'UNC start'
   if([IO.File]::ReadAllText($unc+'\extra.txt') -ne 'second selected file'){throw 'Wrong UNC file data'}
-  Save-WindowScreenshot $p 'unc'
+  Save-WindowScreenshot $p 'unc-dark'
   foreach($id in @('UncImagePath','OpenUnc','CopyUnc','ApplyUnc','StartUnc','StopUnc')){
     if((Control $w $id $false).Current.IsOffscreen){throw "UNC action is offscreen: $id"}
   }

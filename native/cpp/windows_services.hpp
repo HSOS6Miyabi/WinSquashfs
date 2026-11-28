@@ -9,7 +9,7 @@ struct Settings {
     std::u16string alias=u"path";
     bool include_drives=true,start_at_login=false;
     unsigned idle_seconds=60,max_idle_images=8,cache_mib=64;
-    std::string language="system";
+    std::string language="system",theme="system";
     static Settings load();
     void save() const;
     std::vector<Share> shares()const;

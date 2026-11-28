@@ -31,9 +31,9 @@ private:
     Microsoft::UI::Xaml::Controls::Button cancel_{nullptr},mount_button_{nullptr},
         close_button_{nullptr},up_button_{nullptr},verify_button_{nullptr},
         extract_selected_button_{nullptr},extract_all_button_{nullptr},
-        open_unc_button_{nullptr},copy_unc_button_{nullptr};
+        open_unc_button_{nullptr},copy_unc_button_{nullptr},mount_open_button_{nullptr},mount_eject_button_{nullptr};
     Microsoft::UI::Xaml::Controls::ComboBox drive_choice_{nullptr};
-    Microsoft::UI::Xaml::Controls::TextBlock image_summary_{nullptr};
+    Microsoft::UI::Xaml::Controls::TextBlock image_summary_{nullptr},mount_empty_{nullptr};
     Microsoft::UI::Xaml::Controls::ListView entries_{nullptr},source_list_{nullptr},mount_list_{nullptr};
     Microsoft::UI::Xaml::Controls::TextBox address_{nullptr},filter_{nullptr},preview_{nullptr};
     hstring tr(std::wstring_view en,std::wstring_view zh)const{return hstring(chinese_?zh:en);}
