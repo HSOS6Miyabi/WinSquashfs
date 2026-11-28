@@ -394,12 +394,20 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID)
     }
     return TRUE;
 }
-extern "C" __declspec(dllexport) HRESULT WINAPI DllCanUnloadNow()
+#ifdef _MSC_VER
+#define ARCHIVEFS_COM_EXPORT
+#define DllCanUnloadNow ArchiveFsDllCanUnloadNow
+#define DllGetClassObject ArchiveFsDllGetClassObject
+#else
+#define ARCHIVEFS_COM_EXPORT __declspec(dllexport)
+#endif
+
+extern "C" ARCHIVEFS_COM_EXPORT HRESULT WINAPI DllCanUnloadNow()
 {
     return InterlockedCompareExchange(&objects, 0, 0) == 0 &&
         InterlockedCompareExchange(&locks, 0, 0) == 0 ? S_OK : S_FALSE;
 }
-extern "C" __declspec(dllexport) HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
+extern "C" ARCHIVEFS_COM_EXPORT HRESULT WINAPI DllGetClassObject(REFCLSID clsid, REFIID iid, void **out)
 {
     if (!out) return E_POINTER;
     *out = nullptr;
