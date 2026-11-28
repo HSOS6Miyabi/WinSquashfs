@@ -10,18 +10,32 @@ public static class WindowCapture {
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int height, uint flags);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern IntPtr GetWindowDpiAwarenessContext(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool AreDpiAwarenessContextsEqual(IntPtr first, IntPtr second);
+    [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr h);
 }
 '@
 [WindowCapture]::SetProcessDPIAware() | Out-Null
 $script:ScreenshotDir=Join-Path (Split-Path -Parent $PSScriptRoot) 'artifacts\screenshots'
 New-Item -ItemType Directory -Force $script:ScreenshotDir | Out-Null
 
-function Save-WindowScreenshot($process,[string]$name,[int]$width=1200,[int]$height=780) {
+function Assert-WindowDpiAwareness($process) {
+    $process.Refresh()
+    $handle=$process.MainWindowHandle
+    if($handle -eq [IntPtr]::Zero){throw 'Window handle is missing for DPI validation'}
+    $context=[WindowCapture]::GetWindowDpiAwarenessContext($handle)
+    if(![WindowCapture]::AreDpiAwarenessContextsEqual($context,[IntPtr](-4))){throw 'Window does not use PerMonitorV2 DPI awareness'}
+    $dpi=[WindowCapture]::GetDpiForWindow($handle)
+    if(!$dpi){throw 'Cannot read the window DPI'}
+    Write-Host "PASS PerMonitorV2 window DPI=$dpi; displays=$([System.Windows.Forms.Screen]::AllScreens.Count)"
+}
+
+function Save-WindowScreenshot($process,[string]$name,[int]$width=1200,[int]$height=780,$screen=[System.Windows.Forms.Screen]::PrimaryScreen) {
     if($script:ScreenshotPrefix){$name=$script:ScreenshotPrefix+$name}
     $process.Refresh()
     $h=$process.MainWindowHandle
     if($h -eq [IntPtr]::Zero){throw "Window handle is missing: $name"}
-    $area=[System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $area=$screen.WorkingArea
     $width=[Math]::Min($width,$area.Width)
     $height=[Math]::Min($height,$area.Height)
     [WindowCapture]::SetWindowPos($h,[IntPtr](-1),$area.Left,$area.Top,$width,$height,0x0040) | Out-Null

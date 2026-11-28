@@ -61,6 +61,27 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             assert (output/'目录'/'empty.txt').stat().st_size == 0
             if preset == 4:
                 images.append(image)
+    # Mutate real decoder inputs, rather than testing signatures alone.
+    # Corruption may still describe a valid image; the CLI must either verify
+    # it or reject it through a normal error path without crashing or hanging.
+    malformed = root / 'malformed.img'
+    mutations = 0
+    for image in images:
+        original = image.read_bytes()
+        candidates = [original[:n] for n in (0, 3, 6, 96, 1028, len(original)//2)]
+        for _ in range(16):
+            changed = bytearray(original)
+            for _ in range(1 + rng.randrange(4)):
+                at = rng.randrange(len(changed))
+                changed[at] ^= 1 << rng.randrange(8)
+            candidates.append(changed)
+        for candidate in candidates:
+            malformed.write_bytes(candidate)
+            result = subprocess.run([str(cli), 'verify', str(malformed)], capture_output=True, timeout=20)
+            assert result.returncode in (0, 1, 2), (image.name, mutations, result.returncode, result.stderr[-2000:])
+            mutations += 1
+    malformed.unlink()
+    print(f'PASS {mutations} truncated or mutated real archives')
     for image in images:
         process = subprocess.Popen([str(cli),'mount',str(image)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8')
         try:
@@ -166,4 +187,4 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             wait_until(lambda:not path.exists())
     finally:
         process.terminate();process.communicate(timeout=30)
-print('PASS real codec creation, Unicode extraction, random access, WinFsp mounting, eject and UNC source removal')
+print('PASS real codec creation, Unicode extraction, malformed images, random access, WinFsp mounting, eject and UNC source removal')

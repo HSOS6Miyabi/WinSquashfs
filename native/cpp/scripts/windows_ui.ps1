@@ -76,6 +76,7 @@ try{
   $image=$images[0]
   $p=Start-Process $gui -ArgumentList @('--open',('"'+$image+'"')) -PassThru
   $w=Window $p 'FileList'
+  Assert-WindowDpiAwareness $p
   $null=Control $w 'MountImage'
   Set-Value $w 'FileFilter' 'hello.txt'
   Invoke-Control $w 'SearchSubtree'
@@ -99,6 +100,18 @@ try{
     if((Control $w $id).Current.IsOffscreen){throw "Compact window action is offscreen: $id"}
   }
   Save-WindowScreenshot $p 'browser-restored'
+  $screenIndex=0
+  foreach($screen in [System.Windows.Forms.Screen]::AllScreens){
+    if(!$screen.Primary){
+      Save-WindowScreenshot $p "browser-display-$screenIndex" 1200 780 $screen
+      Assert-WindowDpiAwareness $p
+      foreach($id in @('MountImage','ExtractSelected','ExtractAll')){
+        if((Control $w $id).Current.IsOffscreen){throw "Monitor transition hid $id"}
+      }
+    }
+    $screenIndex++
+  }
+  Save-WindowScreenshot $p 'browser-primary'
   $before=@([IO.DriveInfo]::GetDrives().Name)
   Invoke-Control $w 'MountImage'
   $drive=Wait-Until {foreach($d in [IO.DriveInfo]::GetDrives()){if($d.Name -notin $before -and [IO.File]::Exists($d.Name+'extra.txt')){return $d.Name}}} 'mounted drive'
