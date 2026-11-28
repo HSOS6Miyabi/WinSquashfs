@@ -94,6 +94,40 @@ void exercise(Configure format,Configure filter,ArchiveFormat expected,const std
     require(std::equal(sample.begin(),sample.end(),payload.begin()+65531),"mounted data");
     require(source->active==0,"no session retained by mounted reader");
 }
+void gzip_checkpoints(){
+    std::vector<std::byte> payload((13u<<20)+211);
+    std::mt19937 rng(39021);
+    for(auto& b:payload)b=static_cast<std::byte>(rng()&255);
+    auto raw=make_archive(archive_write_set_format_pax_restricted,archive_write_add_filter_none,payload);
+    auto cut=(7u<<20)+123;
+    auto gzip=make_archive(archive_write_set_format_raw,archive_write_add_filter_gzip,std::span(raw).first(cut));
+    auto second=make_archive(archive_write_set_format_raw,archive_write_add_filter_gzip,std::span(raw).subspan(cut));
+    gzip.insert(gzip.end(),second.begin(),second.end());
+    auto source=std::make_shared<MemorySource>(gzip);
+    auto backend=open_decoder_backend(source,{},4u<<20);
+    require(backend->info().format==ArchiveFormat::tar&&backend->info().compression==ARCHIVE_FILTER_GZIP,"indexed GZIP TAR");
+    require(backend->info().image_size==gzip.size(),"compressed size");
+    require(backend->cache_reservation_bytes()>0&&backend->cache_reservation_bytes()<=2u<<20,"bounded GZIP checkpoint cache");
+    auto entry=backend->list(backend->info().root).at(0);
+    std::array<std::byte,513> sample{};
+    auto before=source->bytes_read.load();
+    for(auto offset:{(12u<<20)+17,(4u<<20)+93,(8u<<20)+333,(7u<<20)+13}){
+        backend->read_exact(entry.info.inode,offset,sample);
+        require(std::equal(sample.begin(),sample.end(),payload.begin()+offset),"GZIP checkpoint read");
+    }
+    require(source->bytes_read-before<5u<<20,"GZIP backward reads avoid prefix replay");
+    require(source->active==0,"GZIP source handles released");
+    auto small=open_decoder_backend(source,{},256u<<10);
+    require(small->cache_reservation_bytes()<=128u<<10,"GZIP checkpoint coarsening");
+    small->read_exact(entry.info.inode,(12u<<20)+17,sample);
+    require(std::equal(sample.begin(),sample.end(),payload.begin()+(12u<<20)+17),"coarsened GZIP checkpoint read");
+    gzip.resize(gzip.size()-5);
+    bool rejected=false;
+    try{(void)open_decoder_backend(std::make_shared<MemorySource>(std::move(gzip)),{},4u<<20);}
+    catch(const std::runtime_error&){rejected=true;}
+    require(rejected,"truncated GZIP member rejected");
+    std::cout<<"PASS bounded GZIP checkpoints, concatenated members, backwards reads and truncated members\n";
+}
 }
 int main(){
     try{
@@ -105,6 +139,7 @@ int main(){
                         archive_write_add_filter_zstd,archive_write_add_filter_lz4,archive_write_add_filter_lzma,
                         archive_write_add_filter_lzip,archive_write_add_filter_compress})
             exercise(archive_write_set_format_pax_restricted,filter,ArchiveFormat::tar,payload);
+        gzip_checkpoints();
         exercise(archive_write_set_format_zip,archive_write_add_filter_none,ArchiveFormat::zip,payload);
         exercise(archive_write_set_format_7zip,archive_write_add_filter_none,ArchiveFormat::seven_zip,payload);
         exercise(archive_write_set_format_ar_bsd,archive_write_add_filter_none,ArchiveFormat::ar,payload);

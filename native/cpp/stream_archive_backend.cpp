@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "stream_archive_backend.hpp"
 #include "decoder_backend.hpp"
+#include "gzip_index.hpp"
 #include <archive.h>
 #include <archive_entry.h>
 #include <array>
@@ -252,7 +253,9 @@ struct Node {
 };
 class StreamBackend final:public ArchiveBackend {
 public:
-    StreamBackend(std::shared_ptr<const RandomAccessSource> source,ArchiveFormat hint):source_(std::move(source)),hint_(hint){
+    StreamBackend(std::shared_ptr<const RandomAccessSource> source,ArchiveFormat hint,
+                  std::optional<std::uint64_t> gzip_size={},std::size_t reserved=0)
+        :source_(std::move(source)),hint_(hint),reserved_(reserved){
         nodes_.emplace_back();nodes_.back().info={1,FileKind::directory,0,0};
         Cursor cursor(source_,hint_);
         cursor.begin();
@@ -353,9 +356,11 @@ public:
             if(!target){node.info.kind=FileKind::special;node.info.size=0;continue;}
             copy_payload(node,at(*target));
         }
+        if(gzip_size){info_.image_size=*gzip_size;info_.compression=ARCHIVE_FILTER_GZIP;}
         source_->validate();
     }
     ArchiveInfo info()const override{return info_;}
+    std::size_t cache_reservation_bytes()const noexcept override{return reserved_;}
     FileInfo stat(InodeId id)const override{return at(id).info;}
     std::vector<DirectoryEntry> list(InodeId id)const override{
         const auto& node=at(id);
@@ -491,13 +496,19 @@ private:
     ArchiveInfo info_{ArchiveFormat::unknown,1,0,0};
     std::vector<Node> nodes_;
     std::size_t name_bytes_=0,extent_count_=0;
+    const std::size_t reserved_;
     mutable std::mutex mutex_;
     mutable std::condition_variable ready_;
     mutable std::array<Slot,2> slots_;
 };
 }
 std::shared_ptr<const ArchiveBackend> open_stream_archive_backend(
-    std::shared_ptr<const RandomAccessSource> source,ArchiveFormat hint){
+    std::shared_ptr<const RandomAccessSource> source,ArchiveFormat hint,std::size_t cache_bytes){
+    if(hint==ArchiveFormat::unknown){
+        auto indexed=index_gzip_tar(source,cache_bytes/2);
+        if(indexed.source)return std::make_shared<StreamBackend>(std::move(indexed.source),
+            ArchiveFormat::tar,source->size(),indexed.reserved);
+    }
     return std::make_shared<StreamBackend>(std::move(source),hint);
 }
 }

@@ -67,6 +67,7 @@ public:
     virtual void validate_path() const { validate_source(); }
     virtual bool source_changed() const noexcept { return false; }
     virtual bool uses_native_cache() const noexcept { return false; }
+    virtual std::size_t cache_reservation_bytes() const noexcept { return 0; }
 };
 
 ArchiveFormat detect_format(const RandomAccessSource& source);
@@ -93,7 +94,7 @@ public:
     using Cache = ConcurrentCache<PageKey, std::byte, PageHash>;
     explicit ArchiveReader(std::shared_ptr<const ArchiveBackend> backend,
                            std::size_t budget = 64u << 20, std::size_t page_size = 256u << 10)
-        : backend_(std::move(backend)), cache_(backend_&&backend_->uses_native_cache()?0:budget), page_size_(page_size), caching_(budget != 0&&backend_&&!backend_->uses_native_cache()) {
+        : backend_(std::move(backend)), cache_(page_budget(backend_,budget)), page_size_(page_size), caching_(page_budget(backend_,budget)!=0) {
         if (!backend_ || page_size_ == 0) throw std::invalid_argument("invalid archive reader configuration");
     }
     ArchiveInfo info() const { backend_->validate_source(); return backend_->info(); }
@@ -158,6 +159,10 @@ public:
     }
     Cache::Statistics cache_statistics() const { return cache_.statistics(); }
 private:
+    static std::size_t page_budget(const std::shared_ptr<const ArchiveBackend>& backend,std::size_t budget)noexcept{
+        if(!backend||backend->uses_native_cache())return 0;
+        return budget-std::min(budget,backend->cache_reservation_bytes());
+    }
     static void cancelled(std::stop_token token) {
         if (token.stop_requested()) throw std::runtime_error("read cancelled");
     }
