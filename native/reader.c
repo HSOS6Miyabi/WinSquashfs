@@ -292,6 +292,10 @@ API uint64_t ws_size(const sqfs_tree_node_t *n) {
     sqfs_u64 size = 0;
     if (n->inode->base.type == SQFS_INODE_FILE || n->inode->base.type == SQFS_INODE_EXT_FILE)
         sqfs_inode_get_file_size(n->inode, &size);
+    else if (n->inode->base.type == SQFS_INODE_SLINK)
+        size = n->inode->data.slink.target_size;
+    else if (n->inode->base.type == SQFS_INODE_EXT_SLINK)
+        size = n->inode->data.slink_ext.target_size;
     return size;
 }
 API uint64_t ws_image_size(image_t *im) { return im->super.bytes_used; }
@@ -369,9 +373,17 @@ static int index_file(image_t *im, const sqfs_inode_generic_t *inode, sqfs_u64 f
 API int ws_read(image_t *im, const sqfs_tree_node_t *n, uint64_t offset,
                 void *buffer, uint32_t size) {
     const sqfs_inode_generic_t *inode = n->inode;
+    if (size > INT32_MAX) return SQFS_ERROR_ARG_INVALID;
+    if (inode->base.type == SQFS_INODE_SLINK || inode->base.type == SQFS_INODE_EXT_SLINK) {
+        uint64_t length = ws_size(n);
+        if (length > inode->payload_bytes_used) return SQFS_ERROR_CORRUPTED;
+        if (offset >= length || !size) return 0;
+        if (length - offset < size) size = (uint32_t)(length - offset);
+        memcpy(buffer, (const unsigned char *)inode->extra + (size_t)offset, size);
+        return (int)size;
+    }
     if (inode->base.type != SQFS_INODE_FILE && inode->base.type != SQFS_INODE_EXT_FILE)
         return SQFS_ERROR_ARG_INVALID;
-    if (size > INT32_MAX) return SQFS_ERROR_ARG_INVALID;
     sqfs_u64 file_size;
     sqfs_u32 frag_idx, frag_off;
     int rc = sqfs_inode_get_file_size(inode, &file_size);

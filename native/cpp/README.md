@@ -61,3 +61,7 @@ Use `--lang en-US`, `--lang zh-CN` or `--lang system` to select the command-line
 - `Settings`, `MountedVolume` and the UNC agent: per-user settings, background access, notification area controls, mount management and Explorer integration.
 
 The UNC agent exposes exact registered prefixes such as `\\sfs$\C`, `\\sfs$\UNC`, `\\sfs.localhost\C` and the configured alias. Network images can be opened through `\\sfs$\UNC\SERVER\SHARE\IMAGE`. Both host aliases use the same image pool. No extracted file tree is stored on disk to serve filesystem reads.
+
+### Symbolic links and special objects
+
+`archivefs readlink IMAGE ENTRY` prints the stored link target. Mounted and UNC archives resolve relative and absolute POSIX symbolic links inside their own image, using exact original filename bytes. Dangling links, cycles, paths escaping the image, and non-file special objects remain visible but cannot be opened for data access. They are not exposed as host devices or Windows reparse points. Extraction copies regular files and directories.

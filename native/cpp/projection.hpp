@@ -46,7 +46,7 @@ private:
     std::shared_ptr<State> state_;
     std::jthread worker_;
 };
-struct ProjectionInfo {bool directory;std::uint64_t size;std::int64_t modified;std::uint64_t index;};
+struct ProjectionInfo {bool directory;std::uint64_t size;std::int64_t modified;std::uint64_t index;bool unavailable=false;};
 struct ProjectedNode {
     std::u16string name,path;
     std::filesystem::path physical;

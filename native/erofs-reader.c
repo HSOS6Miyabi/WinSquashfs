@@ -86,7 +86,7 @@ API int wa_read(image_t *im, uint64_t id, uint64_t offset, void *buffer, uint32_
     struct erofs_inode inode = { .sbi = &im->sbi, .nid = id };
     int rc = erofs_read_inode_from_disk(&inode);
     if (rc) return rc;
-    if (!S_ISREG(inode.i_mode)) return -EINVAL;
+    if (!S_ISREG(inode.i_mode) && !S_ISLNK(inode.i_mode)) return -EINVAL;
     if (offset >= inode.i_size) return 0;
     if (length > inode.i_size - offset) length = (uint32_t)(inode.i_size - offset);
     struct erofs_vfile vf = {0};

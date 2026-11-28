@@ -301,7 +301,7 @@ public:
     void read_exact(InodeId id, std::uint64_t offset, std::span<std::byte> output) const override {
         std::shared_lock lock(mutex_);
         auto file = known(id);
-        if (file.kind != FileKind::regular || offset > file.size || output.size() > file.size - offset)
+        if ((file.kind != FileKind::regular && file.kind != FileKind::symlink) || offset > file.size || output.size() > file.size - offset)
             throw std::out_of_range("invalid archive file read");
         auto node=squash_?nodes_.at(id):nullptr;
         lock.unlock();

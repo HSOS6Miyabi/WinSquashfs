@@ -73,6 +73,11 @@ public:
         auto file=inode(id);auto info=metadata(file);if(info.kind!=FileKind::regular||offset>info.size||data.size()>info.size-offset)throw std::out_of_range("invalid DwarFS read");if(data.empty())return;
         std::error_code ec;auto n=filesystem_.read(file.inode_num(),reinterpret_cast<char*>(data.data()),data.size(),static_cast<dwarfs::file_off_t>(offset),ec);if(ec)throw std::system_error(ec);if(n!=data.size())throw std::runtime_error("short DwarFS read");
     }
+    std::string read_link(InodeId id)const override{
+        auto file=inode(id);
+        if(!file.is_symlink())throw std::invalid_argument("not a DwarFS symbolic link");
+        return filesystem_.readlink(file,dwarfs::reader::readlink_mode::posix);
+    }
     void validate_source()const override{source_->validate();}
     void validate_path()const override{source_->validate_path();}
     bool source_changed()const noexcept override{return source_->source_changed();}
@@ -80,7 +85,7 @@ public:
 private:
     static dwarfs::reader::filesystem_options options(std::size_t cache_bytes){dwarfs::reader::filesystem_options o;o.block_cache.max_bytes=cache_bytes;o.block_cache.num_workers=std::clamp(std::thread::hardware_concurrency(),2u,8u);o.metadata.readonly=true;o.metadata.check_consistency=true;o.inode_reader.readahead=std::min<std::size_t>(cache_bytes,1u<<20);return o;}
     dwarfs::reader::inode_view inode(InodeId id)const{if(id>static_cast<std::uint64_t>(INT_MAX))throw std::out_of_range("DwarFS inode");auto result=filesystem_.find(static_cast<int>(id));if(!result)throw std::out_of_range("DwarFS inode not found");return *result;}
-    FileInfo metadata(dwarfs::reader::inode_view file)const{auto st=filesystem_.getattr(file);auto kind=st.is_regular_file()?FileKind::regular:st.is_directory()?FileKind::directory:st.is_symlink()?FileKind::symlink:FileKind::special;auto size=st.size();if(size<0)throw std::runtime_error("invalid DwarFS file size");return {file.inode_num(),kind,kind==FileKind::regular?static_cast<std::uint64_t>(size):0,std::clamp<std::int64_t>(st.mtime(),-11644473600LL,253402300799LL)};}
+    FileInfo metadata(dwarfs::reader::inode_view file)const{auto st=filesystem_.getattr(file);auto kind=st.is_regular_file()?FileKind::regular:st.is_directory()?FileKind::directory:st.is_symlink()?FileKind::symlink:FileKind::special;auto size=st.size();if(size<0)throw std::runtime_error("invalid DwarFS file size");return {file.inode_num(),kind,(kind==FileKind::regular||kind==FileKind::symlink)?static_cast<std::uint64_t>(size):0,std::clamp<std::int64_t>(st.mtime(),-11644473600LL,253402300799LL)};}
     std::shared_ptr<const RandomAccessSource> source_;dwarfs::null_logger logger_;dwarfs::os_access_generic os_;dwarfs::reader::filesystem_v2_lite filesystem_;InodeId root_=0;
 };
 }

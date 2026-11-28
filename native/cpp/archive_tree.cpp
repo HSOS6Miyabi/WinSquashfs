@@ -3,6 +3,7 @@
 #include <array>
 #include <bit>
 #include <chrono>
+#include <deque>
 #include <fstream>
 #include <limits>
 #include <random>
@@ -250,6 +251,7 @@ std::shared_ptr<const ArchiveTree::Directory> ArchiveTree::load(const NodePtr& d
                 name=base+u"~"+to_utf16(std::to_string(n));
             auto node=std::make_shared<Node>(Node{entry.name,std::move(name),entry.info,directory,owner_});
             result->names.emplace(node->windows_name,node);
+            result->original_names.emplace(node->name,node);
         }
         for(const auto& [name,node]:result->names) { (void)name;result->nodes.push_back(node); }
         producer->set_value(result);
@@ -275,6 +277,7 @@ ArchiveTree::NodePtr ArchiveTree::find(std::u16string_view path) const {
         path.remove_prefix(n);
         n=path.find_first_of(u"\\/");
         auto component=path.substr(0,n);
+        if(current->info.kind==FileKind::symlink){current=resolve_link(current);if(!current)return {};}
         if(component==u"."||component==u".."||current->info.kind!=FileKind::directory) return {};
         auto directory=load(current);
         auto found=directory->names.find(std::u16string(component));
@@ -285,6 +288,48 @@ ArchiveTree::NodePtr ArchiveTree::find(std::u16string_view path) const {
     }
     reader_->stat(current->info.inode);
     return current;
+}
+std::string ArchiveTree::read_link(const NodePtr& node) const {
+    validate_node(node);
+    return reader_->read_link(node->info.inode);
+}
+ArchiveTree::NodePtr ArchiveTree::resolve_link(const NodePtr& node) const {
+    validate_node(node);
+    auto current=node;
+    std::deque<std::string> pending;
+    unsigned links=0;
+    // Targets are POSIX paths with case-sensitive original names. Absolute
+    // targets are rooted at the archive, never the host or a Windows share.
+    for(;;){
+        if(current->info.kind==FileKind::symlink){
+            if(++links>40)return {};
+            auto target=read_link(current);
+            current=target.front()=='/'?root_:current->parent.lock();
+            if(!current)return {};
+            std::vector<std::string> components;
+            std::string_view rest=target;
+            while(!rest.empty()){
+                auto end=rest.find('/');
+                auto part=rest.substr(0,end);
+                if(!part.empty())components.emplace_back(part);
+                if(end==rest.npos)break;
+                rest.remove_prefix(end+1);
+            }
+            if(target.back()=='/')components.emplace_back(".");
+            if(components.size()+pending.size()>4096)return {};
+            for(auto i=components.rbegin();i!=components.rend();++i)pending.push_front(std::move(*i));
+            continue;
+        }
+        if(pending.empty()){reader_->stat(current->info.inode);return current;}
+        if(current->info.kind!=FileKind::directory)return {};
+        auto part=std::move(pending.front());pending.pop_front();
+        if(part==".")continue;
+        if(part==".."){current=current->parent.lock();if(!current)return {};continue;}
+        auto directory=load(current);
+        auto found=directory->original_names.find(part);
+        if(found==directory->original_names.end())return {};
+        current=found->second;
+    }
 }
 std::u16string ArchiveTree::path_of(const NodePtr& node) const {
     validate_node(node);
@@ -332,7 +377,9 @@ ArchiveTree::SearchReport ArchiveTree::search(const NodePtr& directory,std::u16s
 }
 std::size_t ArchiveTree::read(const NodePtr& node,std::uint64_t offset,std::span<std::byte> output,std::stop_token token) const {
     validate_node(node);
-    return reader_->read_at(node->info.inode,offset,output,token);
+    auto target=resolve_link(node);
+    if(!target||target->info.kind!=FileKind::regular)throw std::invalid_argument("entry has no readable regular file target");
+    return reader_->read_at(target->info.inode,offset,output,token);
 }
 ArchiveTree::VerifyReport ArchiveTree::verify(std::stop_token token) const {
     VerifyReport report;
@@ -345,6 +392,8 @@ ArchiveTree::VerifyReport ArchiveTree::verify(std::stop_token token) const {
         if(node->info.kind==FileKind::directory) {
             if(!visited_dirs.insert(node->info.inode).second)throw std::runtime_error("archive directory cycle");
             for(auto& child:children(node)) pending.push_back(std::move(child));
+        } else if(node->info.kind==FileKind::symlink) {
+            (void)read_link(node);
         } else if(node->info.kind==FileKind::regular&&seen.insert(node->info.inode).second) {
             for(std::uint64_t offset=0;offset<node->info.size;) {
                 auto count=read(node,offset,buffer,token);

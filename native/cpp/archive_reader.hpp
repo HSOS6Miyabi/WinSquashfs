@@ -34,6 +34,13 @@ public:
     virtual FileInfo stat(InodeId inode) const = 0;
     virtual std::vector<DirectoryEntry> list(InodeId directory) const = 0;
     virtual void read_exact(InodeId inode, std::uint64_t offset, std::span<std::byte> output) const = 0;
+    virtual std::string read_link(InodeId inode) const {
+        auto file=stat(inode);
+        if(file.kind!=FileKind::symlink||!file.size||file.size>65536)throw std::invalid_argument("invalid symbolic link");
+        std::string target(static_cast<std::size_t>(file.size),'\0');
+        read_exact(inode,0,std::as_writable_bytes(std::span(target)));
+        return target;
+    }
     virtual void validate_source() const = 0;
     virtual void validate_path() const { validate_source(); }
     virtual bool source_changed() const noexcept { return false; }
@@ -71,6 +78,15 @@ public:
     void validate_path() const { backend_->validate_path(); }
     bool source_changed() const noexcept { return backend_->source_changed(); }
     FileInfo stat(InodeId id) const { backend_->validate_source(); return backend_->stat(id); }
+    std::string read_link(InodeId id) const {
+        backend_->validate_source();
+        if(backend_->stat(id).kind!=FileKind::symlink)throw std::invalid_argument("not a symbolic link");
+        auto target=backend_->read_link(id);
+        backend_->validate_source();
+        if(target.empty()||target.size()>65536||target.find('\0')!=std::string::npos)
+            throw std::runtime_error("invalid symbolic link target");
+        return target;
+    }
     std::vector<DirectoryEntry> list(InodeId id) const {
         backend_->validate_source();
         if (backend_->stat(id).kind != FileKind::directory) throw std::invalid_argument("not a directory");

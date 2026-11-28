@@ -36,6 +36,8 @@ public:
     bool source_changed() const noexcept { return reader_->source_changed(); }
     std::vector<NodePtr> children(const NodePtr& directory) const;
     NodePtr find(std::u16string_view path) const;
+    NodePtr resolve_link(const NodePtr& node) const;
+    std::string read_link(const NodePtr& node) const;
     std::u16string path_of(const NodePtr& node) const;
     SearchReport search(const NodePtr& directory,std::u16string_view query,
                         std::size_t limit=10000,std::stop_token token={}) const;
@@ -48,6 +50,7 @@ private:
     struct Directory {
         std::vector<NodePtr> nodes;
         std::map<std::u16string, NodePtr, WindowsNameLess> names;
+        std::map<std::string,NodePtr,std::less<>> original_names;
     };
     std::shared_ptr<const Directory> load(const NodePtr& directory) const;
     void validate_node(const NodePtr& node) const;

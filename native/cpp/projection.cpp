@@ -156,11 +156,13 @@ std::uint64_t index_for(std::u16string_view text,std::uint64_t inode){std::uint6
 std::int64_t modified(const fs::path& path){std::error_code ec;auto t=fs::last_write_time(path,ec);if(ec)return 0;return std::chrono::duration_cast<std::chrono::seconds>(file_time_to_system(t).time_since_epoch()).count();}
 bool supported(const ArchiveTree::NodePtr& n){return n&& (n->info.kind==FileKind::directory||n->info.kind==FileKind::regular);}
 ProjectedNodePtr archive_node(std::shared_ptr<ArchiveTree> archive,ArchiveTree::NodePtr entry,const fs::path& physical,std::u16string path,std::u16string name,std::shared_ptr<ImagePool::Lease> lease={}){
-    if(!supported(entry))return {};
-    auto node=std::make_shared<ProjectedNode>();node->archive=std::move(archive);node->entry=std::move(entry);node->physical=physical;node->path=std::move(path);node->name=std::move(name);node->lease=std::move(lease);const auto& info=node->entry->info;node->info={info.kind==FileKind::directory,info.kind==FileKind::regular?info.size:0,info.modified,index_for(physical.u16string(),info.inode)};return node;
+    if(!entry)return {};
+    auto target=archive->resolve_link(entry);
+    const bool available=supported(target);
+    auto node=std::make_shared<ProjectedNode>();node->archive=std::move(archive);node->entry=available?std::move(target):std::move(entry);node->physical=physical;node->path=std::move(path);node->name=std::move(name);node->lease=std::move(lease);const auto& info=node->entry->info;node->info={available&&info.kind==FileKind::directory,available&&info.kind==FileKind::regular?info.size:0,info.modified,index_for(physical.u16string(),info.inode),!available};return node;
 }
 ProjectedNodePtr directory_node(const fs::path& physical,std::u16string path,std::u16string name,bool synthetic=false){auto node=std::make_shared<ProjectedNode>();node->physical=physical;node->path=std::move(path);node->name=std::move(name);node->synthetic=synthetic;node->info={true,0,synthetic?0:modified(physical),index_for(physical.u16string(),0)};return node;}
-std::vector<ProjectedNodePtr> archive_children(const ProjectedNodePtr& parent){if(!parent||!parent->entry||!parent->info.directory)throw std::invalid_argument("not a projected directory");std::vector<ProjectedNodePtr> result;for(auto& child:parent->archive->children(parent->entry))if(supported(child))result.push_back(archive_node(parent->archive,child,parent->physical,child_path(parent->path,child->windows_name),child->windows_name,parent->lease));return result;}
+std::vector<ProjectedNodePtr> archive_children(const ProjectedNodePtr& parent){if(!parent||!parent->entry||!parent->info.directory)throw std::invalid_argument("not a projected directory");std::vector<ProjectedNodePtr> result;for(auto& child:parent->archive->children(parent->entry))result.push_back(archive_node(parent->archive,child,parent->physical,child_path(parent->path,child->windows_name),child->windows_name,parent->lease));return result;}
 bool projected_host(std::u16string_view host){return equal(host,u"sfs$")||equal(host,u"sfs.localhost")||(host.size()>4&&equal(host.substr(0,4),u"sfs.")&&host.size()>=10&&equal(host.substr(host.size()-10),u".localhost"));}
 bool projected_source(const fs::path& path){
 #ifdef _WIN32
@@ -250,9 +252,13 @@ ProjectedNodePtr project_archive(const std::shared_ptr<ImagePool>& pool,std::sha
         if(node->info.kind!=FileKind::directory)return {};
         auto found=tree->children(node);
         auto it=std::find_if(found.begin(),found.end(),[&](auto const& n){return equal(n->windows_name,parts[i]);});
-        if(it==found.end()||!supported(*it))return {};
+        if(it==found.end())return {};
         node=*it;path=child_path(path,node->windows_name);
-        if(node->info.kind==FileKind::regular&&(is_image_extension(node->windows_name)||i+1<parts.size())){
+        auto target=tree->resolve_link(node);
+        if(!supported(target)){if(i+1<parts.size())return {};break;}
+        auto projected_name=node->windows_name;
+        node=std::move(target);
+        if(node->info.kind==FileKind::regular&&(is_image_extension(projected_name)||i+1<parts.size())){
             if(depth>=32)throw std::runtime_error("nested image depth exceeds 32");
             auto source=std::make_shared<NestedSource>(tree,node);
             auto key=u"nested:"+to_utf16(std::to_string(reinterpret_cast<std::uintptr_t>(tree.get())))+u":"+tree->path_of(node);
@@ -266,14 +272,14 @@ ProjectedNodePtr project_archive(const std::shared_ptr<ImagePool>& pool,std::sha
 }
 std::vector<ProjectedNodePtr> list_projected_archive(const ProjectedNodePtr& directory){
     auto result=archive_children(directory);
-    for(auto& child:result)if(!child->info.directory&&is_image_extension(child->name)){
+    for(auto& child:result)if(!child->info.unavailable&&!child->info.directory&&is_image_extension(child->name)){
         auto candidate=std::make_shared<ProjectedNode>(*child);
         candidate->info.directory=true;candidate->info.size=0;child=std::move(candidate);
     }
     return result;
 }
 void Projection::validate(const ProjectedNodePtr& node)const{if(!node)throw std::invalid_argument("missing projected node");if(node->archive)node->archive->info();if(node->source)node->source->validate();}
-std::size_t Projection::read(const ProjectedNodePtr& node,std::uint64_t offset,std::span<std::byte> output)const{validate(node);if(node->info.directory)throw std::invalid_argument("not a projected file");if(node->source){if(offset>=node->info.size)return 0;auto n=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),node->info.size-offset));node->source->read_exact(offset,output.first(n));return n;}if(!node->archive||!node->entry)throw std::invalid_argument("not a projected file");return node->archive->read(node->entry,offset,output);}
+std::size_t Projection::read(const ProjectedNodePtr& node,std::uint64_t offset,std::span<std::byte> output)const{validate(node);if(node->info.unavailable)throw std::invalid_argument("archive object has no readable file target");if(node->info.directory)throw std::invalid_argument("not a projected file");if(node->source){if(offset>=node->info.size)return 0;auto n=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),node->info.size-offset));node->source->read_exact(offset,output.first(n));return n;}if(!node->archive||!node->entry)throw std::invalid_argument("not a projected file");return node->archive->read(node->entry,offset,output);}
 std::shared_ptr<Projection> mount_projection(std::shared_ptr<ArchiveTree> tree){if(!tree)throw std::invalid_argument("missing archive");return std::make_shared<Disk>(std::move(tree));}
 std::shared_ptr<Projection> unc_projection(Share share,std::shared_ptr<ImagePool> pool){return std::make_shared<Unc>(std::move(share),std::move(pool));}
 bool is_image_extension(std::u16string_view name){auto ext=name.rfind(u'.');if(ext==std::u16string_view::npos)return false;auto e=name.substr(ext);return equal(e,u".squashfs")||equal(e,u".sqfs")||equal(e,u".sfs")||equal(e,u".dwarfs")||equal(e,u".erofs");}
