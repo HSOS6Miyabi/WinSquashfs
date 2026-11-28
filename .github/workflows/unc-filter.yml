@@ -1,0 +1,60 @@
+name: Native UNC alias filter
+on:
+  push:
+    branches: ['refactor/native-cpp-validation', 'refactor/native-cpp', 'main']
+    paths: ['native/unc-filter/**', '.github/workflows/unc-filter.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  alias-parser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test UTF-16 path parser under sanitizers
+        run: |
+          clang++ -std=c++23 -Wall -Wextra -Wpedantic -Werror -O1 -g -fsanitize=address,undefined native/unc-filter/tests/alias_path.cpp -o /tmp/alias-path-tests
+          /tmp/alias-path-tests
+  driver:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            compiler: x64
+            package: Microsoft.Windows.WDK.x64
+          - arch: arm64
+            compiler: x64_arm64
+            package: Microsoft.Windows.WDK.ARM64
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.compiler }}
+      - uses: actions/cache@v4
+        with:
+          path: .deps/unc-wdk
+          key: unc-wdk-${{ matrix.arch }}-26100.6584
+      - name: Restore official WDK headers and libraries
+        shell: pwsh
+        run: |
+          nuget install '${{ matrix.package }}' -Version 10.0.26100.6584 -ExcludeVersion -NonInteractive -OutputDirectory .deps/unc-wdk -Source https://api.nuget.org/v3/index.json
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+      - name: Compile native minifilter
+        shell: pwsh
+        run: |
+          ./native/unc-filter/build.ps1 -Architecture '${{ matrix.arch }}' -KitRoot .deps/unc-wdk
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          $driver="artifacts/unc-filter-${{ matrix.arch }}/ArchiveFsUncFilter.sys"
+          $headers=dumpbin /headers $driver | Out-String
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          $expected=if('${{ matrix.arch }}' -eq 'arm64'){'AA64'}else{'8664'}
+          if($headers -notmatch "(?im)^\s*$expected\s+machine" -or $headers -notmatch '(?im)\bNative\b'){throw 'Unexpected driver PE architecture or subsystem'}
+          dumpbin /imports $driver
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ArchiveFsUncFilter-unsigned-${{ matrix.arch }}
+          path: artifacts/unc-filter-${{ matrix.arch }}/
+          if-no-files-found: error
