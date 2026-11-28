@@ -120,11 +120,26 @@ try{
   Navigate $w 'NavUnc'
   $scroll=(Control $w 'PageScroll').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
   if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,100)}
+  $null=Wait-Until {!(Control $w 'ExtraShareName' $false).Current.IsOffscreen -and !(Control $w 'ExtraSharePath' $false).Current.IsOffscreen -and !(Control $w 'AddExtraShare' $false).Current.IsOffscreen} 'visible directory alias fields'
   Set-Value $w 'ExtraShareName' 'ui-extra'
   Set-Value $w 'ExtraSharePath' $root
+  $null=Wait-Until {(Value $w 'ExtraShareName') -eq 'ui-extra' -and (Value $w 'ExtraSharePath') -eq $root} 'entered directory alias values'
   Invoke-Control $w 'AddExtraShare'
+  try {
+    $null=Wait-Until {(Value $w 'ExtraShareName') -eq '' -and (Value $w 'ExtraSharePath') -eq ''} 'directory alias added'
+  } catch {
+    Save-WindowScreenshot $p 'alias-add-error'
+    throw "Directory alias addition failed: $((Control $w 'StatusText' $false).Current.Name)"
+  }
+  Save-WindowScreenshot $p 'unc-alias-editor'
   Invoke-Control $w 'ApplyUnc'
-  $null=Wait-Until {((Get-Content $settings -Raw|ConvertFrom-Json).ExtraShares|Where-Object {$_.Alias -eq 'ui-extra'}).Count -eq 1} 'saved additional share'
+  try {
+    $null=Wait-Until {@((Get-Content $settings -Raw|ConvertFrom-Json).ExtraShares|Where-Object {$_.Alias -eq 'ui-extra' -and $_.Root -eq $root}).Count -eq 1} 'saved additional share'
+  } catch {
+    Save-WindowScreenshot $p 'alias-save-error'
+    throw "Directory alias save failed: $((Control $w 'StatusText' $false).Current.Name)"
+  }
+  $null=Control $w 'PageScroll'
   if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,0)}
   Invoke-Control $w 'StartUnc'
   $unc='\\sfs$\'+$alias+'\'+[IO.Path]::GetFileName($image)

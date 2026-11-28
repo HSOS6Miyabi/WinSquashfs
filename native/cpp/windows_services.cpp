@@ -238,7 +238,7 @@ public:
             auto path=application_directory()/L"Assets"/L"app-icon.ico";
             icon_=static_cast<HICON>(LoadImageW(nullptr,path.c_str(),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),LR_LOADFROMFILE));
             owns_icon_=icon_!=nullptr;
-            if(!icon_)icon_=LoadIconW(nullptr,IDI_APPLICATION);
+            if(!icon_)icon_=LoadIconW(nullptr,MAKEINTRESOURCEW(32512));
             window_=CreateWindowExW(WS_EX_TOOLWINDOW,class_name,L"WinArchiveFSPro UNC",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,this);
             if(window_)add_icon();
         }catch(...){}
@@ -264,7 +264,9 @@ private:
         AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
         AppendMenuW(menu,MF_STRING,2,chinese_?L"停止 UNC 访问":L"Stop UNC access");
         SetForegroundWindow(window_);
+        auto timer=SetTimer(window_,1,100,nullptr);
         auto choice=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,cursor.x,cursor.y,0,window_,nullptr);
+        if(timer)KillTimer(window_,timer);
         DestroyMenu(menu);PostMessageW(window_,WM_NULL,0,0);
         if(choice==1)open_gui();else if(choice==2)SetEvent(stop_);
     }
@@ -274,6 +276,7 @@ private:
         if(self){
             if(self->taskbar_created_&&msg==self->taskbar_created_){self->add_icon();return 0;}
             if(msg==callback){if(lparam==WM_LBUTTONDBLCLK)self->open_gui();else if(lparam==WM_RBUTTONUP||lparam==WM_CONTEXTMENU)self->menu();return 0;}
+            if(msg==WM_TIMER&&wparam==1){if(WaitForSingleObject(self->stop_,0)==WAIT_OBJECT_0)EndMenu();return 0;}
             if(msg==WM_CLOSE)return 0;
         }
         return DefWindowProcW(hwnd,msg,wparam,lparam);
