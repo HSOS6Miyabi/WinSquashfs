@@ -7,6 +7,8 @@
 #include <map>
 #include <set>
 #include <thread>
+#include <cstdio>
+#include <cstdlib>
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -54,7 +56,7 @@ std::shared_ptr<ImagePool::Lease> ImagePool::acquire(const fs::path& path){
         try{
             if(promise){try{promise->set_value(state_->opener(absolute,SourcePolicy::transient_handle));}catch(...){promise->set_exception(std::current_exception());}}
             auto tree=entry->future.get();if(!tree)throw std::runtime_error("archive opener returned no image");tree->validate_path();return std::shared_ptr<Lease>(new Lease(state_,entry,std::move(tree)));
-        }catch(...){state_->release(entry);{std::lock_guard lock(state_->mutex);state_->erase_if_current(entry);}if(promise||attempt)throw;}
+        }catch(...){if(std::getenv("ARCHIVEFS_TRACE")){try{throw;}catch(const std::exception& e){std::fprintf(stderr,"Image acquisition failed: %s\n",e.what());}catch(...){}}state_->release(entry);{std::lock_guard lock(state_->mutex);state_->erase_if_current(entry);}if(promise||attempt)throw;}
     }throw std::runtime_error("cannot acquire image");
 }
 namespace {

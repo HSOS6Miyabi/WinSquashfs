@@ -173,9 +173,12 @@ jobs:
           path: .deps/vcpkg-installed
           key: ${{ steps.core-cache.outputs.cache-primary-key }}
       - name: Compile Windows core and run unit tests
+        env:
+          ARCHIVEFS_TRACE: '1'
         shell: pwsh
         run: ./native/cpp/scripts/build.ps1 -Stage Tests
       - name: Compile WinUI application
+        if: always()
         shell: pwsh
         run: |
           $core=Join-Path $PWD '.deps/archivefs-test/archivefs_core.lib'
