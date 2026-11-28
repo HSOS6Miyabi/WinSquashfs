@@ -41,6 +41,22 @@ int main(){try{
     char ch=0;DWORD got=0;
     check(ReadFile(snapshot.value,&ch,1,&got,nullptr)&&got==1&&ch=='b',"old snapshot intact");
     snapshot.close();
+    // An exclusive external handle must not turn a transient open conflict
+    // into a failed settings read. A persistent conflict remains bounded.
+    FileHandle exclusive(CreateFileW(path.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,0,nullptr));
+    check(exclusive.value!=INVALID_HANDLE_VALUE,"open exclusive external reader");
+    bool busy=false;
+    try{(void)read_text(path,1u<<20,50ms);}
+    catch(const std::system_error& e){busy=transient_file_error(static_cast<DWORD>(e.code().value()));}
+    check(busy,"persistent read sharing conflict reported");
+    auto pending=std::async(std::launch::async,[&]{return read_text(path,1u<<20);});
+    check(pending.wait_for(150ms)==std::future_status::timeout,"reader waits for exclusive handle");
+    exclusive.close();
+    check(pending.get()==old,"read after sharing conflict");
+    bool missing=false;
+    try{(void)read_text(temp.directory/L"missing.json",1u<<20);}
+    catch(const std::system_error& e){missing=e.code().value()==ERROR_FILE_NOT_FOUND;}
+    check(missing,"missing settings reported");
     std::atomic<bool> done=false;
     auto reader=std::async(std::launch::async,[&]{
         while(!done.load()){auto s=read_text(path,1u<<20);check(s==old||s==next,"reader saw incomplete settings");}

@@ -31,12 +31,29 @@ struct FileHandle {
 [[noreturn]] inline void file_error(DWORD code,const char* action){
     throw std::system_error(static_cast<int>(code),std::system_category(),action);
 }
+inline bool transient_file_error(DWORD error)noexcept{
+    return error==ERROR_ACCESS_DENIED||error==ERROR_SHARING_VIOLATION||
+           error==ERROR_LOCK_VIOLATION||error==ERROR_DELETE_PENDING;
+}
 // Open a stable snapshot while permitting an atomic replacement by a writer.
-inline std::string read_text(const fs::path& path,std::size_t limit){
-    FileHandle file(CreateFileW(path.c_str(),GENERIC_READ,
-        FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
-        FILE_FLAG_SEQUENTIAL_SCAN,nullptr));
-    if(file.value==INVALID_HANDLE_VALUE)file_error(GetLastError(),"open settings");
+// NTFS may return a transient delete-pending or sharing error while resolving
+// the old name during replacement. Retry the open, never reuse a stale handle.
+inline std::string read_text(const fs::path& path,std::size_t limit,
+                             std::chrono::milliseconds timeout=2500ms){
+    FileHandle file(INVALID_HANDLE_VALUE);
+    const auto deadline=std::chrono::steady_clock::now()+timeout;
+    auto delay=1ms;
+    for(;;){
+        file.value=CreateFileW(path.c_str(),GENERIC_READ,
+            FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
+            FILE_FLAG_SEQUENTIAL_SCAN,nullptr);
+        if(file.value!=INVALID_HANDLE_VALUE)break;
+        auto error=GetLastError();
+        if(!transient_file_error(error)||std::chrono::steady_clock::now()>=deadline)
+            file_error(error,"open settings");
+        std::this_thread::sleep_for(delay);
+        delay=std::min(delay*2,50ms);
+    }
     LARGE_INTEGER size{};
     if(!GetFileSizeEx(file.value,&size))file_error(GetLastError(),"size settings");
     if(size.QuadPart<0||static_cast<std::uint64_t>(size.QuadPart)>limit)
@@ -120,8 +137,7 @@ inline void write_text_atomic(const fs::path& path,std::string_view text,const c
                            MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))return;
             error=GetLastError();
         }
-        if((error!=ERROR_ACCESS_DENIED&&error!=ERROR_SHARING_VIOLATION&&
-            error!=ERROR_LOCK_VIOLATION)||std::chrono::steady_clock::now()>=deadline)
+        if(!transient_file_error(error)||std::chrono::steady_clock::now()>=deadline)
             file_error(error,action);
         std::this_thread::sleep_for(delay);
         delay=std::min(delay*2,100ms);
