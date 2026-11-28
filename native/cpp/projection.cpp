@@ -21,7 +21,7 @@
 namespace archivefs {
 namespace fs=std::filesystem;
 using Clock=std::chrono::steady_clock;
-ArchiveOpener make_archive_opener(fs::path decoders,std::size_t cache_bytes){return [decoders=std::move(decoders),cache_bytes](const fs::path& path,SourcePolicy policy){auto backend=open_decoder_backend(open_file_source(path,policy),decoders,cache_bytes);auto info=backend->info();auto page=info.block_size?std::clamp<std::size_t>(info.block_size,4096,1u<<20):256u<<10;return std::make_shared<ArchiveTree>(std::make_shared<ArchiveReader>(std::move(backend),cache_bytes,page));};}
+ArchiveOpener make_archive_opener(fs::path decoders,std::size_t cache_bytes){return [decoders=std::move(decoders),cache_bytes](const fs::path& path,SourcePolicy policy){auto backend=open_decoder_backend(open_file_source(path,policy),decoders,cache_bytes);auto info=backend->info();auto page=recommended_page_size(info);return std::make_shared<ArchiveTree>(std::make_shared<ArchiveReader>(std::move(backend),cache_bytes,page));};}
 struct ImagePool::Entry {std::u16string key;std::shared_future<std::shared_ptr<ArchiveTree>> future;std::size_t active=0;Clock::time_point idle=Clock::time_point::max();};
 struct ImagePool::State {
     State(ArchiveOpener fn,Settings cfg):opener(std::move(fn)),settings(cfg){}

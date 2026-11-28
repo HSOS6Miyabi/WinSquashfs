@@ -41,6 +41,10 @@ public:
 };
 
 ArchiveFormat detect_format(const RandomAccessSource& source);
+inline std::size_t recommended_page_size(const ArchiveInfo& info) noexcept {
+    if(info.format==ArchiveFormat::erofs)return std::clamp<std::size_t>(info.block_size,64u<<10,1u<<20);
+    return info.block_size?std::clamp<std::size_t>(info.block_size,4096,1u<<20):256u<<10;
+}
 
 struct PageKey {
     InodeId inode;
@@ -82,7 +86,11 @@ public:
         if (file.kind != FileKind::regular) throw std::invalid_argument("not a regular file");
         if (offset >= file.size || output.empty()) return 0;
         const auto length = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), file.size - offset));
-        if (!caching_) {
+        // Large contiguous reads should be decompressed directly into the
+        // caller's buffer. Avoid re-reading compressed extents for each
+        // cache page or evicting hot random-read pages with sequential data.
+        const bool streaming=length>=(256u<<10)&&length/page_size_>=2;
+        if (!caching_||streaming) {
             backend_->read_exact(id, offset, output.first(length));
             backend_->validate_source();
             cancelled(stop);

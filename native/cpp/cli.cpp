@@ -89,7 +89,7 @@ std::shared_ptr<ArchiveReader> open_archive(const std::filesystem::path& source,
     auto backend=open_decoder_backend(std::move(input),modules);
     auto info=backend->info();
     // A format-specific block size avoids splitting normal SquashFS blocks.
-    auto page_size=info.block_size?std::clamp<std::size_t>(info.block_size,64u<<10,1u<<20):256u<<10;
+    auto page_size=recommended_page_size(info);
     return std::make_shared<ArchiveReader>(std::move(backend),64u<<20,page_size);
 }
 int cli(std::vector<std::u16string> args) {

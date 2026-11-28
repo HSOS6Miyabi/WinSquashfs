@@ -20,7 +20,7 @@ void benchmark(const fs::path& image,const fs::path& decoder,const std::vector<s
     auto source=open_file_source(image);
     auto backend=open_decoder_backend(source,decoder,budget);
     auto info=backend->info();
-    auto reader=std::make_shared<ArchiveReader>(backend,budget,std::max<std::size_t>(4096,info.block_size));
+    auto reader=std::make_shared<ArchiveReader>(backend,budget,recommended_page_size(info));
     ArchiveTree tree(reader);
     auto file=tree.find(u"payload.bin");
     check(file&&file->info.size==original.size(),"benchmark file size mismatch");
