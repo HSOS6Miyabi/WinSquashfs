@@ -34,6 +34,9 @@ git clone --depth 1 --branch v1.3.2 https://github.com/AgentD/squashfs-tools-ng.
   -o "$out/winsqfs-native.dll"
 cp "$prefix"/bin/*.dll "$out/"
 cp "$prefix/bin/tar2sqfs.exe" "$out/tools/archivefs-tar2sqfs.exe"
+for tool in gensquashfs rdsquashfs sqfs2tar sqfsdiff; do
+  cp "$prefix/bin/$tool.exe" "$out/tools/"
+done
 cp "$sq"/COPYING* "$out/licenses/"
 commit=7e52cbffa83fbe9eb10bbf110cb12d503a048081
 git init "$er"

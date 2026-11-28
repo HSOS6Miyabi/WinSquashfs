@@ -4,11 +4,11 @@ on:
     branches: ['refactor/native-cpp-validation', 'refactor/native-cpp']
     paths:
       - 'scripts/build-alternate-readers.sh'
-      - 'native/cpp/scripts/build.ps1'
-      - 'native/cpp/image_creation.cpp'
-      - 'native/cpp/projection.cpp'
-      - 'native/cpp/scripts/native_readers_test.py'
-      - 'native/cpp/scripts/squashfs_creator_patch.py'
+      - 'native/cpp/**'
+      - 'installer/**'
+      - 'tests/**'
+      - 'Directory.Build.props'
+      - 'scripts/install-winfsp.ps1'
       - '.github/workflows/windows-native-decoders.yml'
   workflow_dispatch:
 permissions:
@@ -30,7 +30,7 @@ jobs:
             compiler: clang
             extra: 'lzo2:p libdeflate:p'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
+    timeout-minutes: 160
     steps:
       - run: git config --global core.autocrlf input
       - uses: actions/checkout@v4
@@ -123,7 +123,7 @@ jobs:
           $triplet="$arch-windows-static-md"
           $env:PKG_CONFIG_PATH="$ports/$triplet/lib/pkgconfig"
           $env:PATH="$ports/$triplet/tools/pkgconf;$env:PATH"
-          cmake -S native/cpp -B build/production -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$triplet" "-DVCPKG_INSTALLED_DIR=$ports" "-DCMAKE_PREFIX_PATH=$prefix" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DARCHIVEFS_WITH_DWARFS=ON -DBUILD_TESTING=OFF -DVCPKG_MANIFEST_MODE=OFF
+          cmake -S native/cpp -B build/production -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$triplet" "-DVCPKG_INSTALLED_DIR=$ports" "-DCMAKE_PREFIX_PATH=$prefix" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DARCHIVEFS_WITH_DWARFS=ON -DARCHIVEFS_BUILD_SHELL=ON -DBUILD_TESTING=OFF -DVCPKG_MANIFEST_MODE=OFF
           if($LASTEXITCODE){exit $LASTEXITCODE}
           cmake --build build/production --parallel 2
           if($LASTEXITCODE){exit $LASTEXITCODE}
@@ -161,4 +161,67 @@ jobs:
         with:
           name: WinArchiveFSPro-native-readers-${{ matrix.arch }}
           path: artifacts/readers-${{ matrix.arch }}
+          if-no-files-found: error
+
+      - name: Assemble architecture-native application
+        shell: pwsh
+        run: ./native/cpp/scripts/package_alternate.ps1 -Architecture ${{ matrix.arch }}
+      - name: Verify portable distribution and real filesystem operations
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          $arch='${{ matrix.arch }}'
+          $out="artifacts/dist-$arch"
+          $version=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup.Version
+          ./tests/distribution.ps1 -AppDirectory $out -Version $version
+          python -u native/cpp/scripts/windows_integration.py $out
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          ./native/cpp/scripts/windows_ui.ps1 -AppDirectory $out -Language en-US
+          ./native/cpp/scripts/windows_ui.ps1 -AppDirectory $out -Language zh-CN
+      - name: Build and validate architecture-specific NSIS installer
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          $arch='${{ matrix.arch }}'
+          choco install nsis --yes --no-progress
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          $nsis=Join-Path ([Environment]::GetEnvironmentVariable('ProgramFiles(x86)')) 'NSIS\makensis.exe'
+          $props=([xml](Get-Content Directory.Build.props -Raw)).Project.PropertyGroup
+          & $nsis "/DPRODUCT_VERSION=$($props.Version)" "/DWINFSP_MIN_VERSION=$($props.WinFspRuntimeVersion).0" "/DPRODUCT_ARCH=$arch" "/DDIST_DIR=..\artifacts\dist-$arch" installer/WinArchiveFSPro.nsi
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          $setup=(Resolve-Path "artifacts/WinArchiveFSPro-Setup-$arch.exe").Path
+          $regView=if($arch -eq 'x86'){[Microsoft.Win32.RegistryView]::Registry32}else{[Microsoft.Win32.RegistryView]::Registry64}
+          $registry=[Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,$regView)
+          $p=Start-Process $setup -ArgumentList '/S','/LANG=1033' -PassThru -Wait
+          if($p.ExitCode -ne 0){throw "Installation failed: $($p.ExitCode)"}
+          $key=$registry.OpenSubKey('SOFTWARE\WinArchiveFSPro')
+          if(!$key){throw 'Missing installation registry key'}
+          $install=$key.GetValue('InstallDir')
+          $key.Dispose()
+          try {
+            if($arch -eq 'arm64'){
+              ./tests/distribution.ps1 -AppDirectory "$install/app" -Version $props.Version -ShellEject
+              ./tests/association.ps1 -AppDirectory "$install/app"
+            }else{
+              ./tests/distribution.ps1 -AppDirectory "$install/app" -Version $props.Version
+            }
+            ./tests/pack-shell.ps1 -AppDirectory "$install/app" -Harness (Resolve-Path build/production/pack-shell.exe).Path
+          }finally{
+            $p=Start-Process "$install/Uninstall.exe" -ArgumentList '/S' -PassThru -Wait
+            if($p.ExitCode -ne 0){throw "Uninstallation failed: $($p.ExitCode)"}
+            if($registry.OpenSubKey('SOFTWARE\WinArchiveFSPro')){throw 'Application registry key remains after uninstall'}
+            $registry.Dispose()
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WinArchiveFSPro-screenshots-${{ matrix.arch }}
+          path: artifacts/screenshots/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-${{ matrix.arch }}
+          path: |
+            artifacts/WinArchiveFSPro-Setup-${{ matrix.arch }}.exe
+            artifacts/dist-${{ matrix.arch }}/
           if-no-files-found: error

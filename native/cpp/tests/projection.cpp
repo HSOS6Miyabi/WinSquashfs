@@ -62,7 +62,7 @@ int main(int argc,char** argv){try{check(argc==2,"module dir");Temp temp;auto ro
                     return std::shared_ptr<ArchiveTree>(owner,owner->tree.get());
                 }
                 return tree;
-            },ImagePool::Settings{std::chrono::milliseconds(0),8});
+            },ImagePool::Settings{std::chrono::milliseconds(100),8});
         auto slow=slow_pool->acquire(first);
         auto unrelated=slow_pool->acquire(second);
         slow.reset();

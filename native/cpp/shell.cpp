@@ -28,8 +28,12 @@ bool Chinese()
 {
     DWORD language = 0, size = sizeof(language), type = 0;
     HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WinArchiveFSPro", 0,
-        KEY_QUERY_VALUE | KEY_WOW64_64KEY, &key) == ERROR_SUCCESS)
+    LONG status = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WinArchiveFSPro", 0,
+        KEY_QUERY_VALUE | KEY_WOW64_64KEY, &key);
+    if (status != ERROR_SUCCESS)
+        status = RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\WinArchiveFSPro", 0,
+            KEY_QUERY_VALUE | KEY_WOW64_32KEY, &key);
+    if (status == ERROR_SUCCESS)
     {
         LONG result = RegQueryValueExW(key, L"InstallerLanguage", nullptr, &type,
             reinterpret_cast<BYTE *>(&language), &size);

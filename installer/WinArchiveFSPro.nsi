@@ -11,14 +11,35 @@ ManifestDPIAwareness "PerMonitorV2,System"
 !ifndef WINFSP_MIN_VERSION
   !error "Pass /DWINFSP_MIN_VERSION from Directory.Build.props"
 !endif
+!ifndef PRODUCT_ARCH
+  !define PRODUCT_ARCH "x64"
+!endif
+!ifndef DIST_DIR
+  !define DIST_DIR "..\\artifacts\\dist"
+!endif
+!if "${PRODUCT_ARCH}" == "x86"
+  !define PRODUCT_REGVIEW 32
+  !define PRODUCT_PROGRAMFILES "$PROGRAMFILES32"
+  !define WINFSP_ARCH "x86"
+!else if "${PRODUCT_ARCH}" == "arm64"
+  !define PRODUCT_REGVIEW 64
+  !define PRODUCT_PROGRAMFILES "$PROGRAMFILES64"
+  !define WINFSP_ARCH "a64"
+!else if "${PRODUCT_ARCH}" == "x64"
+  !define PRODUCT_REGVIEW 64
+  !define PRODUCT_PROGRAMFILES "$PROGRAMFILES64"
+  !define WINFSP_ARCH "x64"
+!else
+  !error "Unsupported PRODUCT_ARCH"
+!endif
 VIProductVersion "${PRODUCT_VERSION}.0"
 !define PROGID "WinSquashfs.Image"
 !define EJECT_CLSID "{9B20352F-1BC4-48E6-AE3B-146F32657DA9}"
 !define PACK_CLSID "{57AB2C11-7881-46EB-9AF8-33194EDF6071}"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\WinArchiveFSPro"
 Name "WinArchiveFSPro"
-OutFile "..\artifacts\WinArchiveFSPro-Setup-x64.exe"
-InstallDir "$PROGRAMFILES64\WinArchiveFSPro"
+OutFile "..\artifacts\WinArchiveFSPro-Setup-${PRODUCT_ARCH}.exe"
+InstallDir "${PRODUCT_PROGRAMFILES}\WinArchiveFSPro"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 !define MUI_ICON "..\src\App\Assets\app-icon.ico"
@@ -84,7 +105,7 @@ LangString DriverRestart ${LANG_ENGLISH} "Restart Windows before mounting images
 LangString DriverRestart ${LANG_SIMPCHINESE} "请重新启动 Windows 后再挂载镜像或启动 UNC 访问。"
 
 Function .onInit
-  SetRegView 64
+  SetRegView ${PRODUCT_REGVIEW}
   ${GetParameters} $R0
   ClearErrors
   ${GetOptions} $R0 "/LANG=" $R1
@@ -137,12 +158,12 @@ FunctionEnd
 Function ReadWinFspVersion
   SetRegView 32
   ReadRegStr $0 HKLM "SOFTWARE\WinFsp" "InstallDir"
-  SetRegView 64
+  SetRegView ${PRODUCT_REGVIEW}
   StrCpy $4 ""
   StrCpy $5 0
   ${If} $0 != ""
     ClearErrors
-    GetDLLVersion "$0\bin\winfsp-x64.dll" $2 $3
+    GetDLLVersion "$0\bin\winfsp-${WINFSP_ARCH}.dll" $2 $3
     ${IfNot} ${Errors}
       IntOp $5 $2 >> 16
       IntOp $6 $2 & 0xFFFF
@@ -172,7 +193,7 @@ Section "WinFsp runtime"
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
   File /oname=winfsp.msi "..\artifacts\winfsp.msi"
-  ExecWait 'msiexec.exe /i "$PLUGINSDIR\winfsp.msi" /qn /norestart /L*v "$TEMP\WinArchiveFSPro-WinFsp-install.log"' $1
+  ExecWait 'msiexec.exe /i "$PLUGINSDIR\winfsp.msi" /qn /norestart ADDLOCAL=ALL /L*v "$TEMP\WinArchiveFSPro-WinFsp-install.log"' $1
   ${If} $1 == 3010
     SetRebootFlag true
     DetailPrint "$(DriverRestart)"
@@ -196,7 +217,7 @@ Section "WinFsp runtime"
 SectionEnd
 
 Section "WinArchiveFSPro"
-  SetRegView 64
+  SetRegView ${PRODUCT_REGVIEW}
   ReadRegStr $0 HKLM "Software\WinSquashfs" "InstallDir"
   ${If} $0 != ""
     IfFileExists "$0\Uninstall.exe" 0 old_uninstall_missing
@@ -216,10 +237,10 @@ Section "WinArchiveFSPro"
   ${EndIf}
   IfFileExists "$INSTDIR\app\WinArchiveFSPro.Unc.exe" 0 +2
     ExecWait '"$INSTDIR\app\WinArchiveFSPro.Unc.exe" --stop'
-  SetRegView 64
+  SetRegView ${PRODUCT_REGVIEW}
   SetShellVarContext all
   SetOutPath "$INSTDIR\app"
-  File /r "..\artifacts\dist\*"
+  File /r "${DIST_DIR}\*"
   ExecWait '"$INSTDIR\app\archivefs.exe" migrate-settings' $1
   ${If} $1 != 0
     DetailPrint "User settings will be imported when the application starts."
@@ -270,7 +291,7 @@ Section "WinArchiveFSPro"
 SectionEnd
 
 Function un.onInit
-  SetRegView 64
+  SetRegView ${PRODUCT_REGVIEW}
   ReadRegDWORD $0 HKLM "Software\WinArchiveFSPro" "InstallerLanguage"
   ${If} $0 == 2052
     StrCpy $LANGUAGE 2052
@@ -286,7 +307,7 @@ Section "Uninstall"
   ${If} $0 == '"$INSTDIR\app\WinArchiveFSPro.Unc.exe"'
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "WinArchiveFSProUNC"
   ${EndIf}
-  SetRegView 64
+  SetRegView ${PRODUCT_REGVIEW}
   SetShellVarContext all
   !insertmacro UnregisterExtension ".squashfs"
   !insertmacro UnregisterExtension ".sqfs"

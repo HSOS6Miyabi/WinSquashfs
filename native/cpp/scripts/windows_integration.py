@@ -83,7 +83,11 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
     for suffix in ("squashfs","erofs"):
         fixture=root/("links."+suffix)
         if suffix=="squashfs":
-            command=[str(app/"tools"/"mksquashfs.exe"),"-",fixture.as_posix(),"-tar","-noappend","-no-progress","-comp","zstd"]
+            standard=app/"tools"/"mksquashfs.exe"
+            if standard.is_file():
+                command=[str(standard),"-",fixture.as_posix(),"-tar","-noappend","-no-progress","-comp","zstd"]
+            else:
+                command=[str(app/"tools"/"archivefs-tar2sqfs.exe"),"-q","-c","zstd",str(fixture)]
         else:
             command=[str(app/"tools"/"mkfs.erofs.exe"),"--tar=f","-zlz4",str(fixture)]
         subprocess.run(command,input=link_tar.getvalue(),check=True,capture_output=True,timeout=90)
