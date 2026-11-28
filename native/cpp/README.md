@@ -56,7 +56,7 @@ Use `--lang en-US`, `--lang zh-CN` or `--lang system` to select the command-line
 - `ArchiveReader`: concurrent page caching, capacity-based eviction and request coalescing.
 - `ArchiveTree`: directory indexing, Windows filename encoding, recursive search, verification and extraction.
 - `ImageCreator`: eight compression presets, format-specific options, multiple sources, individual archive batches, binary TAR streaming, child-process cancellation and atomic output publication.
-- `Projection` and `ImagePool`: read-only drive and UNC namespace projection, concurrent image opening, active leases and idle expiration.
+- `Projection` and `ImagePool`: read-only drive and UNC namespace projection, concurrent image opening, active leases, aggregate decoded-data cache reservations and idle expiration.
 - `NativeMount`: WinFsp native callbacks and volume lifecycle.
 - `Settings`, `MountedVolume` and the UNC agent: per-user settings, background access, notification area controls, mount management and Explorer integration.
 

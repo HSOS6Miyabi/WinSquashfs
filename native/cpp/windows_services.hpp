@@ -10,7 +10,7 @@ struct Settings {
     std::vector<LocalAlias> extra_shares;
     std::u16string alias=u"path";
     bool include_drives=true,start_at_login=false,show_tray_icon=true;
-    unsigned idle_seconds=60,max_idle_images=8,cache_mib=64;
+    unsigned idle_seconds=60,max_idle_images=8,cache_mib=64,total_cache_mib=512;
     std::string language="system",theme="system";
     static Settings load();
     void save() const;

@@ -9,7 +9,7 @@ A native Windows application for browsing, creating, extracting, verifying and m
 - WinUI 3 interface in English and Simplified Chinese, previews, recursive file search, recent images, appearance settings and drag and drop.
 - Multi-file and directory selection, eight compression presets, format-specific advanced settings, and batch creation and extraction.
 - Native WinFsp read-only drive mounts and UNC access, with parallel random reads and no temporary extracted file tree.
-- Shared image caching, configurable per-image cache capacity and idle expiration.
+- Shared image caching, configurable per-image and aggregate decoded-data cache capacities and idle expiration.
 - Explorer Open/Edit, multi-selection archive creation and eject commands.
 
 | Format | Reader | Creator |

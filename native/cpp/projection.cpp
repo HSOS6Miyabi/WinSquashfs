@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "projection.hpp"
 #include "decoder_backend.hpp"
+#include "cache_budget.hpp"
 #include "image_creation.hpp"
 #include "file_time.hpp"
 #include <condition_variable>
@@ -22,7 +23,19 @@
 namespace archivefs {
 namespace fs=std::filesystem;
 using Clock=std::chrono::steady_clock;
-ArchiveOpener make_archive_opener(fs::path decoders,std::size_t cache_bytes){return [decoders=std::move(decoders),cache_bytes](const fs::path& path,SourcePolicy policy){auto backend=open_decoder_backend(open_file_source(path,policy),decoders,cache_bytes);auto info=backend->info();auto page=recommended_page_size(info);return std::make_shared<ArchiveTree>(std::make_shared<ArchiveReader>(std::move(backend),cache_bytes,page));};}
+ArchiveOpener make_archive_opener(fs::path decoders,std::size_t cache_bytes,std::size_t total_cache_bytes){
+    auto budget=std::make_shared<CacheBudget>(total_cache_bytes);
+    return [decoders=std::move(decoders),cache_bytes,budget](const fs::path& path,SourcePolicy policy){
+        struct TreeLifetime {std::shared_ptr<CacheBudget::Reservation> reservation;std::shared_ptr<ArchiveTree> tree;};
+        auto reservation=std::make_shared<CacheBudget::Reservation>(budget,cache_bytes);
+        const auto bytes=reservation->bytes();
+        auto backend=open_decoder_backend(open_file_source(path,policy),decoders,bytes);
+        auto page=recommended_page_size(backend->info());
+        auto tree=std::make_shared<ArchiveTree>(std::make_shared<ArchiveReader>(std::move(backend),bytes,page));
+        auto holder=std::make_shared<TreeLifetime>(TreeLifetime{std::move(reservation),std::move(tree)});
+        return std::shared_ptr<ArchiveTree>(holder,holder->tree.get());
+    };
+}
 std::vector<fs::path> extract_batch(const std::vector<fs::path>& sources,const fs::path& directory,
                                     const ArchiveOpener& opener,std::stop_token stop){
     if(!opener)throw std::invalid_argument("missing archive opener");

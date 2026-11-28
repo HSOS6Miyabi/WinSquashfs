@@ -54,6 +54,14 @@ foreach($file in @($settingsFile,$languageFile)){
     if(Test-Path $file){$backup[$file]=[IO.File]::ReadAllBytes($file)}
 }
 $agentStarted=$false
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ArchiveFSTray {
+    [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    public static extern IntPtr FindWindow(string className, string windowName);
+}
+'@
 try {
     $source=Join-Path $root '源文件'
     New-Item -ItemType Directory -Force $source,$settingsDirectory|Out-Null
@@ -146,6 +154,7 @@ try {
         $agentStarted=$true
         Write-Host "Starting $language agent from $other CLI with redirected output"
         Invoke-Cli --lang $other unc-start|Out-Null
+        if([ArchiveFSTray]::FindWindow('WinArchiveFSPro.Unc.Tray',$null) -eq [IntPtr]::Zero){throw 'Notification area window missing'}
         Write-Host "Agent started; checking both languages and UNC data"
         if((Invoke-Cli --lang en-US unc-status) -ne 'Running'){throw 'English status did not detect running agent'}
         if((Invoke-Cli --lang zh-CN unc-status) -ne '运行中'){throw 'Chinese status did not detect running agent'}
@@ -159,11 +168,13 @@ try {
     }
     # A second directory alias and a drive created after the agent starts must
     # be accessible without restarting or replacing existing shares.
+    $settings.ShowTrayIcon=$false
     $settings.IncludeDrives=$true
     $settings.ExtraShares=@(@{Alias='extra-dist';Root=$root})
     [IO.File]::WriteAllText($settingsFile,($settings|ConvertTo-Json -Depth 4 -Compress))
     $agentStarted=$true
     Invoke-Cli unc-start|Out-Null
+    if([ArchiveFSTray]::FindWindow('WinArchiveFSPro.Unc.Tray',$null) -ne [IntPtr]::Zero){throw 'Disabled notification area window exists'}
     if([Convert]::ToHexString([IO.File]::ReadAllBytes('\\sfs$\extra-dist\测试镜像.squashfs\测试.txt')) -ne '0001027FFF'){throw 'Additional directory alias read mismatch'}
     $letter=$null
     foreach($c in [char[]]'ZYXWVUTSRQPONMLKJIHGFED'){if(![IO.Directory]::Exists(([string]$c+':\'))){$letter=[string]$c;break}}

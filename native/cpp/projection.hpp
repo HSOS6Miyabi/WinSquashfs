@@ -3,13 +3,15 @@
 #include "archive_tree.hpp"
 #include <chrono>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <thread>
 #include <vector>
 namespace archivefs {
 using ArchiveOpener=std::function<std::shared_ptr<ArchiveTree>(const std::filesystem::path&,SourcePolicy)>;
-ArchiveOpener make_archive_opener(std::filesystem::path decoders,std::size_t cache_bytes=64u<<20);
+ArchiveOpener make_archive_opener(std::filesystem::path decoders,std::size_t cache_bytes=64u<<20,
+                                  std::size_t total_cache_bytes=std::numeric_limits<std::size_t>::max());
 std::vector<std::filesystem::path> extract_batch(const std::vector<std::filesystem::path>& sources,
     const std::filesystem::path& directory,const ArchiveOpener& opener,std::stop_token stop={});
 class ImagePool {

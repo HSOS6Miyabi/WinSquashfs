@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "../concurrent_cache.hpp"
+#include "../cache_budget.hpp"
 #include <atomic>
 #include <barrier>
 #include <chrono>
@@ -71,5 +72,25 @@ int main() {
     Cache count_limit(1000, 2);
     for (int i = 0; i < 50; ++i) count_limit.get(i, [] { return Cache::Buffer(); });
     require(count_limit.statistics().entries == 2);
+    auto budget=std::make_shared<archivefs::CacheBudget>(100);
+    {
+        auto first=std::make_shared<archivefs::CacheBudget::Reservation>(budget,64);
+        auto second=std::make_shared<archivefs::CacheBudget::Reservation>(budget,64);
+        require(first->bytes()==64&&second->bytes()==36&&budget->reserved()==100);
+        auto no_cache=std::make_shared<archivefs::CacheBudget::Reservation>(budget,64);
+        require(no_cache->bytes()==0);
+        first.reset();
+        auto third=std::make_shared<archivefs::CacheBudget::Reservation>(budget,64);
+        require(third->bytes()==64&&budget->reserved()==100);
+    }
+    require(budget->reserved()==0);
+    std::barrier reserved(16);
+    for(int i=0;i<16;++i)threads.emplace_back([&]{
+        archivefs::CacheBudget::Reservation reservation(budget,20);
+        reserved.arrive_and_wait();
+        require(budget->reserved()<=100);
+    });
+    threads.clear();
+    require(budget->reserved()==0);
     std::cout << "PASS coalescing, independent loads, LRU, byte and entry budgets, lease lifetime, failure retry\n";
 }
