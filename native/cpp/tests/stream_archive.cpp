@@ -4,6 +4,7 @@
 #include "projection.hpp"
 #include <archive.h>
 #include <archive_entry.h>
+#include <lzma.h>
 #include <array>
 #include <atomic>
 #include <future>
@@ -128,6 +129,58 @@ void gzip_checkpoints(){
     require(rejected,"truncated GZIP member rejected");
     std::cout<<"PASS bounded GZIP checkpoints, concatenated members, backwards reads and truncated members\n";
 }
+std::vector<std::byte> multiblock_xz(std::span<const std::byte> input){
+    lzma_stream stream=LZMA_STREAM_INIT;
+    struct End{lzma_stream& stream;~End(){lzma_end(&stream);}} end{stream};
+    require(lzma_easy_encoder(&stream,1,LZMA_CHECK_CRC64)==LZMA_OK,"initialize multiblock XZ writer");
+    std::vector<std::byte> result(input.size()+(1u<<20));
+    stream.next_out=reinterpret_cast<uint8_t*>(result.data());stream.avail_out=result.size();
+    while(!input.empty()){
+        auto n=std::min<std::size_t>(input.size(),1u<<20);
+        stream.next_in=reinterpret_cast<const uint8_t*>(input.data());stream.avail_in=n;
+        input=input.subspan(n);
+        auto action=input.empty()?LZMA_FINISH:LZMA_FULL_FLUSH;
+        for(;;){
+            auto rc=lzma_code(&stream,action);
+            if(rc==LZMA_STREAM_END)break;
+            require(rc==LZMA_OK&&stream.avail_out,"write XZ block");
+        }
+        require(!stream.avail_in,"XZ encoder consumed block");
+    }
+    result.resize(result.size()-stream.avail_out);return result;
+}
+void xz_blocks(){
+    std::vector<std::byte> payload((10u<<20)+457);
+    std::mt19937 rng(30121);
+    for(auto& b:payload)b=static_cast<std::byte>(rng()&255);
+    auto raw=make_archive(archive_write_set_format_pax_restricted,archive_write_add_filter_none,payload);
+    auto xz=multiblock_xz(raw);
+    auto source=std::make_shared<MemorySource>(xz);
+    auto backend=open_decoder_backend(source,{},8u<<20);
+    require(backend->info().format==ArchiveFormat::tar&&backend->info().compression==ARCHIVE_FILTER_XZ,"indexed XZ TAR");
+    require(backend->info().image_size==xz.size(),"XZ compressed size");
+    require(backend->cache_reservation_bytes()>0&&backend->cache_reservation_bytes()<=4u<<20,"bounded XZ block cache");
+    require(source->bytes_read<payload.size()/2,"XZ index avoids reading intervening blocks");
+    auto entry=backend->list(backend->info().root).at(0);
+    auto before=source->bytes_read.load();
+    std::array<std::byte,1024> bytes{};
+    for(auto offset:{(9u<<20)+17,(4u<<20)+93,(9u<<20)+123,(1u<<20)-1000}){
+        backend->read_exact(entry.info.inode,offset,bytes);
+        require(std::equal(bytes.begin(),bytes.end(),payload.begin()+offset),"XZ block random read");
+    }
+    require(source->bytes_read-before<6u<<20,"XZ reads only selected blocks");
+    auto small=open_decoder_backend(source,{},256u<<10);
+    require(small->cache_reservation_bytes()<=128u<<10,"bounded XZ streaming memory reservation");
+    small->read_exact(entry.info.inode,(9u<<20)+17,bytes);
+    require(std::equal(bytes.begin(),bytes.end(),payload.begin()+(9u<<20)+17),"large XZ block streaming");
+    require(source->active==0,"XZ source handles released");
+    xz[xz.size()-6]^=std::byte{1};
+    bool rejected=false;
+    try{(void)open_decoder_backend(std::make_shared<MemorySource>(std::move(xz)),{},8u<<20);}
+    catch(const std::runtime_error&){rejected=true;}
+    require(rejected,"corrupt XZ index or footer rejected");
+    std::cout<<"PASS XZ block index, cross-block reads, bounded cache and streaming large blocks\n";
+}
 }
 int main(){
     try{
@@ -140,6 +193,7 @@ int main(){
                         archive_write_add_filter_lzip,archive_write_add_filter_compress})
             exercise(archive_write_set_format_pax_restricted,filter,ArchiveFormat::tar,payload);
         gzip_checkpoints();
+        xz_blocks();
         exercise(archive_write_set_format_zip,archive_write_add_filter_none,ArchiveFormat::zip,payload);
         exercise(archive_write_set_format_7zip,archive_write_add_filter_none,ArchiveFormat::seven_zip,payload);
         exercise(archive_write_set_format_ar_bsd,archive_write_add_filter_none,ArchiveFormat::ar,payload);

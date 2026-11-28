@@ -2,6 +2,7 @@
 #include "stream_archive_backend.hpp"
 #include "decoder_backend.hpp"
 #include "gzip_index.hpp"
+#include "xz_index.hpp"
 #include <archive.h>
 #include <archive_entry.h>
 #include <array>
@@ -254,7 +255,7 @@ struct Node {
 class StreamBackend final:public ArchiveBackend {
 public:
     StreamBackend(std::shared_ptr<const RandomAccessSource> source,ArchiveFormat hint,
-                  std::optional<std::uint64_t> gzip_size={},std::size_t reserved=0)
+                  std::optional<std::uint64_t> outer_size={},std::uint32_t outer_filter=0,std::size_t reserved=0)
         :source_(std::move(source)),hint_(hint),reserved_(reserved){
         nodes_.emplace_back();nodes_.back().info={1,FileKind::directory,0,0};
         Cursor cursor(source_,hint_);
@@ -356,7 +357,7 @@ public:
             if(!target){node.info.kind=FileKind::special;node.info.size=0;continue;}
             copy_payload(node,at(*target));
         }
-        if(gzip_size){info_.image_size=*gzip_size;info_.compression=ARCHIVE_FILTER_GZIP;}
+        if(outer_size){info_.image_size=*outer_size;info_.compression=outer_filter;}
         source_->validate();
     }
     ArchiveInfo info()const override{return info_;}
@@ -507,7 +508,10 @@ std::shared_ptr<const ArchiveBackend> open_stream_archive_backend(
     if(hint==ArchiveFormat::unknown){
         auto indexed=index_gzip_tar(source,cache_bytes/2);
         if(indexed.source)return std::make_shared<StreamBackend>(std::move(indexed.source),
-            ArchiveFormat::tar,source->size(),indexed.reserved);
+            ArchiveFormat::tar,source->size(),ARCHIVE_FILTER_GZIP,indexed.reserved);
+        auto xz=index_xz_tar(source,cache_bytes/2);
+        if(xz.source)return std::make_shared<StreamBackend>(std::move(xz.source),
+            ArchiveFormat::tar,source->size(),ARCHIVE_FILTER_XZ,xz.reserved);
     }
     return std::make_shared<StreamBackend>(std::move(source),hint);
 }
