@@ -1,3 +1,4 @@
+param([ValidateSet('x64','x86','arm64')][string]$Architecture='x64')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $dir = Join-Path $root 'artifacts'
@@ -15,7 +16,8 @@ try {
     if(!$key){throw 'WinFsp installation is not registered'}
     try {$installDir=$key.GetValue('InstallDir')}finally{$key.Dispose()}
 } finally {$machine.Dispose()}
-$dll=Join-Path $installDir 'bin\winfsp-x64.dll'
+$arch=if($Architecture -eq 'arm64'){'a64'}else{$Architecture}
+$dll=Join-Path $installDir "bin\winfsp-$arch.dll"
 $info=[Diagnostics.FileVersionInfo]::GetVersionInfo($dll)
 $installed=[version]::new($info.FileMajorPart,$info.FileMinorPart,$info.FileBuildPart,$info.FilePrivatePart)
 $required=[version]($versions.WinFspRuntimeVersion + '.0')

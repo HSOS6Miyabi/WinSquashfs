@@ -1,0 +1,79 @@
+name: Native Windows architecture compatibility
+on:
+  push:
+    branches: ['refactor/native-cpp-validation', 'refactor/native-cpp']
+    paths:
+      - 'native/cpp/**'
+      - 'scripts/install-winfsp.ps1'
+      - '.github/workflows/windows-architectures.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core-and-ui:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            arch: x86
+            compiler: x86
+            platform: Win32
+            pe: '014c'
+          - runner: windows-11-arm
+            arch: arm64
+            compiler: arm64
+            platform: ARM64
+            pe: 'aa64'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install WinFsp SDK and driver
+        shell: pwsh
+        run: ./scripts/install-winfsp.ps1 -Architecture ${{ matrix.arch }}
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.compiler }}
+      - uses: actions/cache@v4
+        with:
+          path: .deps/vcpkg-installed
+          key: archivefs-core-static-md-v1-${{ matrix.arch }}-${{ matrix.runner }}
+      - name: Build dependencies and native test applications
+        shell: pwsh
+        run: |
+          $arch='${{ matrix.arch }}'
+          $triplet="$arch-windows-static-md"
+          $vcpkg=$env:VCPKG_INSTALLATION_ROOT
+          if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
+          if(!$vcpkg){throw 'vcpkg is not installed on this runner'}
+          $ports=Join-Path $PWD '.deps/vcpkg-installed'
+          & "$vcpkg/vcpkg.exe" install 'libarchive[core]' nlohmann-json --classic "--triplet=$triplet" "--x-install-root=$ports"
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          cmake -S native/cpp -B build/architecture -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$triplet" "-DVCPKG_INSTALLED_DIR=$ports" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DARCHIVEFS_WITH_DWARFS=OFF -DBUILD_TESTING=ON -DVCPKG_MANIFEST_MODE=OFF
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          cmake --build build/architecture --parallel 2
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+          ctest --test-dir build/architecture --output-on-failure
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+      - name: Compile WinUI for target architecture
+        shell: pwsh
+        run: |
+          $core=Join-Path $PWD 'build/architecture/archivefs_core.lib'
+          $out=Join-Path $PWD 'artifacts/architecture-ui'
+          msbuild native/cpp/gui/WinArchiveFSPro.vcxproj /restore /m /p:Configuration=Release /p:Platform=${{ matrix.platform }} "/p:ArchiveFSCoreLib=$core" "/p:OutDir=$out/" /p:WindowsAppSDKSelfContained=true
+          if($LASTEXITCODE){exit $LASTEXITCODE}
+      - name: Validate native executable architecture and WinFsp
+        shell: pwsh
+        run: |
+          $expected=[Convert]::ToUInt16('${{ matrix.pe }}',16)
+          foreach($file in @('build/architecture/archivefs-read.exe','build/architecture/archivefs_core.dll','build/architecture/WinArchiveFSPro.Unc.exe','artifacts/architecture-ui/WinArchiveFSPro.exe')){
+            $bytes=[IO.File]::ReadAllBytes((Resolve-Path $file).Path)
+            $offset=[BitConverter]::ToInt32($bytes,60)
+            if([BitConverter]::ToUInt16($bytes,$offset+4) -ne $expected){throw "Incorrect PE architecture: $file"}
+          }
+          & build/architecture/archivefs-read.exe doctor
+          if($LASTEXITCODE){exit $LASTEXITCODE}

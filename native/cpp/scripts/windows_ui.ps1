@@ -107,11 +107,14 @@ try{
   Navigate $w 'NavBrowse'
   Save-WindowScreenshot $p 'browser-dark'
   Navigate $w 'NavUnc'
+  $scroll=(Control $w 'PageScroll').GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+  if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,100)}
   Set-Value $w 'ExtraShareName' 'ui-extra'
   Set-Value $w 'ExtraSharePath' $root
   Invoke-Control $w 'AddExtraShare'
   Invoke-Control $w 'ApplyUnc'
   $null=Wait-Until {((Get-Content $settings -Raw|ConvertFrom-Json).ExtraShares|Where-Object {$_.Alias -eq 'ui-extra'}).Count -eq 1} 'saved additional share'
+  if($scroll.Current.VerticallyScrollable){$scroll.SetScrollPercent(-1,0)}
   Invoke-Control $w 'StartUnc'
   $unc='\\sfs$\'+$alias+'\'+[IO.Path]::GetFileName($image)
   $null=Wait-Until {[IO.File]::Exists($unc+'\extra.txt')} 'UNC start'

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "windows_services.hpp"
+#include <limits>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -52,7 +53,7 @@ void validate(const Settings& s){
         !std::any_of(alias.begin(),alias.end(),[](char16_t c){return c<32;});};
     std::set<std::u16string,WindowsNameLess> aliases{u"UNC"};
     if(s.root.empty()||!s.root.is_absolute()||!valid_alias(s.alias)||!aliases.insert(s.alias).second||
-       s.idle_seconds>86400||s.max_idle_images>1024||s.cache_mib>4096||s.extra_shares.size()>64)throw std::invalid_argument("invalid UNC settings");
+       s.idle_seconds>86400||s.max_idle_images>1024||s.cache_mib>4096||s.cache_mib>(std::numeric_limits<std::size_t>::max()>>20)||s.extra_shares.size()>64)throw std::invalid_argument("invalid UNC settings");
     for(auto const& extra:s.extra_shares)
         if(extra.root.empty()||!extra.root.is_absolute()||!valid_alias(extra.name)||!aliases.insert(extra.name).second)
             throw std::invalid_argument("invalid or duplicate directory alias");
