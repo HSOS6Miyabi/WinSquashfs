@@ -210,17 +210,15 @@ public:
     void request_stop()const noexcept{SetEvent(stop_.get());}
     bool broken()const noexcept{return WaitForSingleObject(signal_.get(),0)==WAIT_OBJECT_0;}
     void join(){if(worker_.joinable())worker_.join();}
-    void monitor(std::function<void()> invalidate,std::shared_mutex& io){
-        worker_=std::thread([this,invalidate=std::move(invalidate),&io]{
+    void monitor(std::function<void()> release,std::shared_mutex& io){
+        worker_=std::thread([this,release=std::move(release),&io]{
             HANDLE events[]{signal_.get(),stop_.get()};
             auto result=WaitForMultipleObjects(2,events,FALSE,INFINITE);
             if(result!=WAIT_OBJECT_0){CancelIoEx(file_->get(),&request_);WaitForSingleObject(signal_.get(),INFINITE);}
-            // Prevent new reads, cancel outstanding I/O and wait for read
-            // operations to leave the handle. Closing the handle acknowledges
-            // the oplock break even when a read session still exists.
-            invalidate();
-            CancelIoEx(file_->get(),nullptr);
-            {std::unique_lock lock(io);file_->close();}
+            // Close only after current positioned reads finish. An oplock break
+            // can result from another reader; file identity determines whether
+            // the cached archive generation is still valid.
+            {std::unique_lock lock(io);release();file_->close();}
             file_.reset();
         });
     }
@@ -238,17 +236,7 @@ class FileSource final : public RandomAccessSource, public std::enable_shared_fr
             owner_->ensure_valid();
             try {
                 retained_=owner_->retained_handle();
-                if (retained_) {
-#ifdef _WIN32
-                    std::shared_lock lock(owner_->retained_io_);
-                    owner_->ensure_valid();
-#endif
-                    handle_ = retained_->get();
-                } else {
-                    temporary_ = std::make_unique<Handle>(open_handle(owner_->path_, owner_->policy_));
-                    handle_ = temporary_->get();
-                }
-                owner_->check_for_read(handle_,static_cast<bool>(retained_));
+                if(!retained_) open_temporary();
             } catch (...) { owner_->invalidate(); throw; }
         }
         void read_exact(std::uint64_t offset, std::span<std::byte> output) const override {
@@ -257,12 +245,30 @@ class FileSource final : public RandomAccessSource, public std::enable_shared_fr
                 throw std::out_of_range("source read outside file");
             owner_->ensure_valid();
             try {
+                if(retained_) {
 #ifdef _WIN32
-                std::shared_lock lock(owner_->retained_io_,std::defer_lock);
-                if(retained_)lock.lock();
-                owner_->ensure_valid();
+                    std::shared_lock lock(owner_->retained_io_);
+                    owner_->ensure_valid();
+                    if(retained_->get()!=invalid_handle &&
+                        (owner_->policy_==SourcePolicy::protected_handle ||
+                         !owner_->oplock_ || !owner_->oplock_->broken())) {
+                        positioned_read(retained_->get(),offset,output);
+                        owner_->ensure_valid();
+                        return;
+                    }
+#else
+                    owner_->check(retained_->get());
+                    positioned_read(retained_->get(),offset,output);
+                    owner_->check(retained_->get());
+                    return;
 #endif
-                positioned_read(handle_, offset, output);
+                }
+                // The monitor can close the cached handle between callbacks.
+                // Reopen outside the shared lock and verify the original file.
+                retained_.reset();
+                if(!temporary_)open_temporary();
+                owner_->check(temporary_->get());
+                positioned_read(temporary_->get(),offset,output);
                 owner_->ensure_valid();
             } catch (...) { owner_->invalidate(); throw; }
         }
@@ -270,21 +276,24 @@ class FileSource final : public RandomAccessSource, public std::enable_shared_fr
             if (finished_) return;
             finished_ = true;
             try {
-                owner_->check_for_read(handle_,static_cast<bool>(retained_));
-                if (temporary_) {
-                    // Check the named file, not only the handle that may now
-                    // refer to a file that has been renamed or removed.
-                    owner_->check_named_path();
-                }
+                if(temporary_)owner_->check(temporary_->get());
+#ifndef _WIN32
+                if(retained_)owner_->check(retained_->get());
+#endif
+                if(owner_->policy_==SourcePolicy::transient_handle)
+                    owner_->validate_path();
                 owner_->ensure_valid();
-            } catch (...) { owner_->invalidate(); temporary_.reset(); throw; }
+            } catch (...) { owner_->invalidate(); temporary_.reset();retained_.reset();throw; }
             temporary_.reset();retained_.reset();
         }
     private:
+        void open_temporary() const {
+            temporary_=std::make_unique<Handle>(open_handle(owner_->path_,owner_->policy_));
+            owner_->check(temporary_->get());
+        }
         std::shared_ptr<const FileSource> owner_;
-        std::unique_ptr<Handle> temporary_;
-        std::shared_ptr<Handle> retained_;
-        RawHandle handle_ = invalid_handle;
+        mutable std::unique_ptr<Handle> temporary_;
+        mutable std::shared_ptr<Handle> retained_;
         bool finished_ = false;
     };
 public:
@@ -312,32 +321,63 @@ public:
     }
     void start_monitor(){
 #ifdef _WIN32
-        if(oplock_)oplock_->monitor([this]{invalidate();},retained_io_);
+        if(oplock_)oplock_->monitor([this]{
+            std::lock_guard lock(retained_mutex_);retained_.reset();
+        },retained_io_);
 #endif
     }
     std::uint64_t size() const noexcept override { return original_.size; }
     void validate() const override {
         ensure_valid();
         try {
-            if (auto retained=retained_handle()) {
 #ifdef _WIN32
-                {std::shared_lock lock(retained_io_);ensure_valid();check_for_read(retained->get(),true);}
-#else
-                check_for_read(retained->get(),true);
-#endif
-#ifdef _WIN32
-                if(policy_==SourcePolicy::transient_handle){auto now=std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();auto previous=last_probe_.load();if(now-previous>=500&&last_probe_.compare_exchange_strong(previous,now)){check_named_path();}}
-#endif
+            if(auto retained=retained_handle()){
+                std::shared_lock lock(retained_io_);
+                ensure_valid();
+                if(retained->get()!=invalid_handle &&
+                   (policy_==SourcePolicy::protected_handle || !oplock_ || !oplock_->broken())){
+                    if(policy_==SourcePolicy::protected_handle)return;
+                    auto now=std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch()).count();
+                    auto previous=last_probe_.load();
+                    if(now-previous<500 || !last_probe_.compare_exchange_strong(previous,now))return;
+                }
             }
-            else { check_named_path(); }
-            ensure_valid();
+#endif
+            validate_path();
         } catch (...) { invalidate(); throw; }
     }
     void validate_path() const override {
-        if(policy_ == SourcePolicy::protected_handle) { validate(); return; }
         ensure_valid();
-        try { check_named_path(); ensure_valid(); }
-        catch (...) { invalidate(); throw; }
+        try {
+            if(policy_==SourcePolicy::protected_handle){
+#ifdef _WIN32
+                std::shared_lock lock(retained_io_);
+#endif
+                auto retained=retained_handle();
+                if(!retained)throw std::runtime_error("source handle is unavailable");
+                check(retained->get());
+                return;
+            }
+#ifdef _WIN32
+            // When the read/handle oplock is healthy, the retained read handle
+            // excludes writers. A metadata probe detects ancestor renames.
+            if(auto retained=retained_handle()){
+                bool cached=false;
+                {std::shared_lock lock(retained_io_);
+                    cached=retained->get()!=invalid_handle&&oplock_&&!oplock_->broken();}
+                if(cached){
+                    check_named_path();
+                    if(!oplock_->broken()){ensure_valid();return;}
+                }
+            }
+#endif
+            // After revocation, use a data handle that excludes concurrent
+            // writes while checking identity and the committed modification time.
+            auto probe=open_handle(path_,policy_);
+            check(probe.get());
+            ensure_valid();
+        } catch (...) { invalidate(); throw; }
     }
     std::unique_ptr<ReadSession> begin_read() const override {
         return std::make_unique<Session>(shared_from_this());
@@ -351,11 +391,8 @@ private:
 #endif
     }
     void ensure_valid() const {
-        if (invalid_.load(std::memory_order_acquire)
-#ifdef _WIN32
-            ||(oplock_&&oplock_->broken())
-#endif
-        ) throw std::runtime_error("source generation is invalid");
+        if (invalid_.load(std::memory_order_acquire))
+            throw std::runtime_error("source generation is invalid");
     }
     std::shared_ptr<Handle> retained_handle() const {
         std::lock_guard lock(retained_mutex_);return retained_;
@@ -374,16 +411,6 @@ private:
     }
     void check(RawHandle handle) const {
         if (!original_.matches(stamp(handle))) throw std::runtime_error("source was modified or replaced");
-    }
-    void check_for_read(RawHandle handle,bool retained) const {
-#ifdef _WIN32
-        // FILE_SHARE_READ on the retained Windows handle excludes writers and
-        // delete/rename access. No metadata query is needed on that fast path.
-        if (retained) {ensure_valid();return;}
-#else
-        (void)retained;
-#endif
-        check(handle);
     }
     const std::filesystem::path path_;
     const SourcePolicy policy_;

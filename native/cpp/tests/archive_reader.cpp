@@ -76,6 +76,18 @@ int main() {
     {
         auto source=open_file_source(path,SourcePolicy::transient_handle);
         auto session=source->begin_read();
+        std::array<std::byte,100> data{};
+        { std::ifstream other(path,std::ios::binary); require(static_cast<bool>(other)); }
+        source->validate();
+        session->read_exact(7,data);
+        require(std::equal(data.begin(),data.end(),input.begin()+7));
+        session->finish();
+        source->read_exact(9,data);
+        require(std::equal(data.begin(),data.end(),input.begin()+9));
+    }
+    {
+        auto source=open_file_source(path,SourcePolicy::transient_handle);
+        auto session=source->begin_read();
         source.reset();
         std::array<std::byte,100> data{};
         session->read_exact(7,data);
