@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import socket
+from mock_adb import Server as MockAdb, COMPONENT as MOCK_COMPONENT
 
 app = Path(sys.argv[1]).resolve()
 cli = app / 'archivefs.exe'
@@ -184,6 +186,64 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
         shutil.copyfile(image,nested_source / image.name)
     outer = root / 'nested.squashfs'
     invoke('create','SquashFS',4,outer,*list(nested_source.iterdir()))
+    # Exercise the real UNC filesystem with a local ADB smart-socket server.
+    # Use an ephemeral port, leaving any real ADB server untouched.
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1",0))
+        port=probe.getsockname()[1]
+    mock=None
+    invoke('unc-stop')
+    try:
+        settings_path.write_text(json.dumps({'Root':str(root),'Alias':'path-test','IncludeDrives':False,
+            'AdbPort':port,'EnableMtp':True,'EnableAdb':True,'EnableAdbRoot':True,
+            'ShowOpenProgress':False,'StartAtLogin':False,'Language':'en-US'}),encoding='utf-8')
+        invoke('unc-start')
+        adb=Path(r'\\sfs$\adb')
+        adb_root=Path(r'\\sfs$\adb.r')
+        for path in (adb,adb_root):
+            try:
+                list(path.iterdir())
+            except OSError as error:
+                assert error.winerror is not None, error
+                print(f"PASS absent ADB Server rejected {path}: {error.winerror}")
+            else:
+                raise AssertionError("Missing ADB Server returned a directory")
+        invoke('devices','mtp')  # Physical hardware may be absent on the runner.
+        mtp=Path(r'\\sfs$\mtp')
+        assert mtp.is_dir()
+        list(mtp.iterdir())
+        mock=MockAdb(port,{'/中文文件😀.bin':data,'/nested.squashfs':outer.read_bytes()})
+        wait_until(lambda: adb.is_dir())
+        assert list(adb.iterdir())==[]
+        assert list(adb_root.iterdir())==[]
+        mock.attached=True
+        device=adb/MOCK_COMPONENT
+        privileged=adb_root/MOCK_COMPONENT
+        wait_until(device.is_dir)
+        wait_until(privileged.is_dir)
+        assert (device/'中文文件😀.bin').read_bytes()==data
+        assert (privileged/'中文文件😀.bin').read_bytes()==data
+        assert not (device/'root-only.txt').exists()
+        assert (privileged/'root-only.txt').read_bytes()==b'root authorized'
+        for image in images:
+            nested=device/'nested.squashfs'/image.name/'文件.bin'
+            assert nested.read_bytes()==data
+        def device_read(offset):
+            with (device/'中文文件😀.bin').open('rb') as stream:
+                stream.seek(offset)
+                return stream.read(4096)
+        offsets=[rng.randrange(0,len(data)-4096) for _ in range(64)]
+        with concurrent.futures.ThreadPoolExecutor(8) as workers:
+            assert list(workers.map(device_read,offsets))==[data[n:n+4096] for n in offsets]
+        assert any(command.startswith('shell,v2,raw:su -c ') for command in mock.commands)
+        assert 'sync:' in mock.commands
+        assert all('start-server' not in command and 'host:kill' not in command for command in mock.commands)
+        print("PASS ADB UNC absence/empty/device states, Unicode, Root, concurrent reads and nested images")
+    finally:
+        invoke('unc-stop')
+        if mock is not None:mock.close()
+        if old_settings is not None:settings_path.write_bytes(old_settings)
+        elif settings_path.exists():settings_path.unlink()
     # Explicit temporary share exercises both first access and source deletion.
     process = subprocess.Popen([str(cli),'serve','test-native',str(root),'1'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
     try:
