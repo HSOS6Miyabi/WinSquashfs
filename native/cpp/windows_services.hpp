@@ -17,6 +17,9 @@ struct Settings {
 };
 std::filesystem::path application_directory();
 std::filesystem::path settings_directory();
+std::vector<std::filesystem::path> recent_images();
+void remember_image(const std::filesystem::path& path);
+void clear_recent_images();
 void open_in_explorer(std::u16string_view path);
 void start_agent(std::stop_token stop={});
 void stop_agent(std::stop_token stop={});
@@ -30,6 +33,7 @@ public:
     MountedVolume(const MountedVolume&)=delete;
     MountedVolume& operator=(const MountedVolume&)=delete;
     std::u16string drive()const;
+    const std::filesystem::path& source()const;
     bool mounted()const noexcept;
     void wait(std::stop_token stop={});
     void unmount();

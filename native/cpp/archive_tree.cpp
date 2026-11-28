@@ -146,6 +146,7 @@ std::u16string encode_windows_name(std::string_view input) {
     return result;
 }
 bool WindowsNameLess::operator()(std::u16string_view a,std::u16string_view b) const {
+    if(a.empty()||b.empty())return a.empty()&&!b.empty();
 #ifdef _WIN32
     static_assert(sizeof(wchar_t)==sizeof(char16_t));
     if(a.size()>static_cast<std::size_t>(INT_MAX)||b.size()>static_cast<std::size_t>(INT_MAX))

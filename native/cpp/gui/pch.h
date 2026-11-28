@@ -19,6 +19,9 @@
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
+#include <winrt/Windows.Storage.h>
+#include <winrt/Windows.System.h>
+#include <limits>
 #include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <microsoft.ui.xaml.window.h>
 #include <shobjidl.h>
@@ -27,5 +30,8 @@
 #include <functional>
 #include <memory>
 #include <stop_token>
+#include <array>
+#include <atomic>
+#include <cmath>
 #include "windows_services.hpp"
 #include "image_creation.hpp"

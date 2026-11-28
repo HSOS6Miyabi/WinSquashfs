@@ -16,7 +16,7 @@ jobs:
         id: erofs
         with:
           path: artifacts/erofs
-          key: archivefs-erofs-${{ hashFiles('native/erofs-reader.c', 'scripts/build-erofs.sh', 'native/cpp/scripts/erofs_binary.py') }}
+          key: archivefs-erofs-${{ hashFiles('native/erofs-reader.c', 'scripts/build-erofs.sh', 'native/cpp/scripts/erofs_binary.py', 'native/cpp/erofs_abi.c', 'native/cpp/scripts/prepare_native.py') }}
       - if: steps.erofs.outputs.cache-hit != 'true'
         run: bash scripts/build-erofs-cpp.sh
       - uses: actions/upload-artifact@v4
@@ -62,6 +62,11 @@ jobs:
         run: ./native/cpp/scripts/build.ps1
       - name: Test real archives and mounted filesystem
         run: python native/cpp/scripts/windows_integration.py artifacts/dist
+      - name: WinUI interaction and localization tests
+        shell: powershell
+        run: |
+          ./native/cpp/scripts/windows_ui.ps1 -AppDirectory artifacts/dist -Language en-US
+          ./native/cpp/scripts/windows_ui.ps1 -AppDirectory artifacts/dist -Language zh-CN
       - name: Build installer
         shell: pwsh
         run: |
@@ -84,6 +89,11 @@ jobs:
           if (!(Test-Path "$app/archivefs.exe")) { throw 'Missing native CLI' }
           python native/cpp/scripts/windows_integration.py $app
           if($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ./tests/native-association.ps1 -AppDirectory $app
+          if($LASTEXITCODE) { exit $LASTEXITCODE }
+          $harness=Resolve-Path artifacts/native-tests/pack-shell.exe
+          & ./tests/native-pack-shell.ps1 -AppDirectory $app -Harness $harness
+          if($LASTEXITCODE) { exit $LASTEXITCODE }
           $gui=Start-Process "$app/WinArchiveFSPro.exe" -PassThru
           try {
             $null=$gui.WaitForInputIdle(30000)
@@ -93,6 +103,12 @@ jobs:
           } finally { if (!$gui.HasExited) { $gui.CloseMainWindow() | Out-Null; if (!$gui.WaitForExit(5000)) { $gui.Kill() } } }
           $p=Start-Process (Join-Path $env:ProgramFiles 'WinArchiveFSPro/Uninstall.exe') -ArgumentList '/S' -Wait -PassThru
           if ($p.ExitCode) { throw "Uninstaller exit $($p.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WinArchiveFSPro-UI-screenshots
+          path: artifacts/screenshots/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: WinArchiveFSPro-windows-x64

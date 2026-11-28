@@ -27,6 +27,7 @@
   <ItemGroup><PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001"/><PackageReference Include="Microsoft.Windows.CppWinRT" Version="2.0.250303.1"/></ItemGroup>
   <ItemGroup><ApplicationDefinition Include="App.xaml"/><Page Include="MainWindow.xaml"/><Midl Include="Project.idl"/><Manifest Include="app.manifest"/></ItemGroup>
   <ItemGroup><ClCompile Include="App.xaml.cpp"/><ClCompile Include="MainWindow.xaml.cpp"/><ClCompile Include="$(GeneratedFilesDir)module.g.cpp"/></ItemGroup>
+  <ItemGroup><ResourceCompile Include="Resources.rc"/></ItemGroup>
   <ItemGroup><ClInclude Include="App.xaml.h"/><ClInclude Include="MainWindow.xaml.h"/><ClInclude Include="pch.h"/></ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets"/>
   <Target Name="CheckCore" BeforeTargets="ClCompile"><Error Condition="!Exists('$(ArchiveFSCoreLib)')" Text="Specify ArchiveFSCoreLib as the full path to the native archivefs_core import library."/></Target>

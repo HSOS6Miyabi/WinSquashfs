@@ -93,3 +93,9 @@ installer = replace_once(installer, 'Section "WinArchiveFSPro"\n', r'''Section "
   ${EndIf}
 ''')
 write('installer/WinArchiveFSPro.nsi', installer)
+
+# Reuse the original Explorer interaction tests with the stable association ID.
+for filename in ('association.ps1','pack-shell.ps1'):
+    source = read('tests/' + filename).replace('WinSquashfs', 'WinArchiveFSPro').replace('winsqfs.exe', 'archivefs.exe')
+    source = source.replace('WinArchiveFSPro.Image', 'WinSquashfs.Image')
+    write('tests/native-' + filename, source)

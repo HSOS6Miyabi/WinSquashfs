@@ -4,6 +4,7 @@
 #define NOMINMAX
 #include <winfsp/winfsp.h>
 #include <sddl.h>
+#include <winver.h>
 #include <array>
 #include <cstring>
 #include <mutex>
@@ -17,6 +18,7 @@ std::u16string narrow(PWSTR s){return s?std::u16string(reinterpret_cast<const ch
 void status(NTSTATUS s,const char* message){if(s<0)throw std::runtime_error(std::string(message)+" (NTSTATUS "+std::to_string(static_cast<std::uint32_t>(s))+")");}
 struct Api {
     HMODULE module=nullptr;
+    std::string version;
     decltype(&FspFileSystemCreate) create=nullptr;
     decltype(&FspFileSystemDelete) destroy=nullptr;
     decltype(&FspFileSystemSetMountPointEx) mount=nullptr;
@@ -33,6 +35,16 @@ struct Api {
         if(result!=ERROR_SUCCESS){bytes=sizeof(path);result=RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\WinFsp",L"InstallDir",RRF_RT_REG_SZ|RRF_SUBKEY_WOW6432KEY,path,&bytes);}
         if(result!=ERROR_SUCCESS)throw std::system_error(static_cast<int>(result),std::system_category(),"WinFsp InstallDir");
         auto dll=std::filesystem::path(path)/L"bin"/L"winfsp-" L"" FSP_FSCTL_PRODUCT_FILE_ARCH L".dll";
+        DWORD ignored=0;const auto bytes_version=GetFileVersionInfoSizeW(dll.c_str(),&ignored);
+        if(!bytes_version)fail("read WinFsp version");
+        std::vector<std::byte> version_bytes(bytes_version);
+        if(!GetFileVersionInfoW(dll.c_str(),0,bytes_version,version_bytes.data()))fail("read WinFsp version");
+        void* data=nullptr;UINT size=0;
+        if(!VerQueryValueW(version_bytes.data(),L"\\",&data,&size)||size<sizeof(VS_FIXEDFILEINFO))throw std::runtime_error("invalid WinFsp version information");
+        const auto& v=*static_cast<VS_FIXEDFILEINFO*>(data);
+        auto major=HIWORD(v.dwFileVersionMS),minor=LOWORD(v.dwFileVersionMS),build=HIWORD(v.dwFileVersionLS),revision=LOWORD(v.dwFileVersionLS);
+        version=std::to_string(major)+"."+std::to_string(minor)+"."+std::to_string(build)+"."+std::to_string(revision);
+        if(major!=2||minor<2||(minor==2&&build<26323))throw std::runtime_error("WinFsp 2.2.26323 or newer 2.x is required; installed: "+version);
         module=LoadLibraryExW(dll.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_SYSTEM32);
         if(!module)fail("LoadLibraryExW WinFsp");
         try{create=get<decltype(create)>("FspFileSystemCreate");destroy=get<decltype(destroy)>("FspFileSystemDelete");mount=get<decltype(mount)>("FspFileSystemSetMountPointEx");start=get<decltype(start)>("FspFileSystemStartDispatcher");stop=get<decltype(stop)>("FspFileSystemStopDispatcher");add_dir=get<decltype(add_dir)>("FspFileSystemAddDirInfo");from_win32=get<decltype(from_win32)>("FspNtStatusFromWin32");}catch(...){FreeLibrary(module);throw;}
@@ -99,5 +111,5 @@ NativeMount::NativeMount(std::shared_ptr<Projection> projection,std::u16string m
 NativeMount::~NativeMount()=default;
 std::u16string NativeMount::mount_point()const{return impl_->point;}
 void NativeMount::unmount(){impl_->unmount();}
-std::string winfsp_runtime_info(){api();return "WinFsp native runtime loaded";}
+std::string winfsp_runtime_info(){try{return "WinFsp "+api().version+" native runtime loaded";}catch(const std::exception& e){throw std::runtime_error(std::string("WinFsp could not initialize: ")+e.what());}}
 }
