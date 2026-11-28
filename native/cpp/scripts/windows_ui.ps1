@@ -56,6 +56,7 @@ try{
   $entry.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
   $null=Wait-Until {(Value $w 'FilePreview') -like '*second selected file*'} 'file preview'
   Save-WindowScreenshot $p 'browser-preview'
+  if((Control $w 'FilePreview' $false).Current.IsOffscreen){throw 'Preview is offscreen at the default desktop resolution'}
   $before=@([IO.DriveInfo]::GetDrives().Name)
   Invoke-Control $w 'MountImage'
   $drive=Wait-Until {foreach($d in [IO.DriveInfo]::GetDrives()){if($d.Name -notin $before -and [IO.File]::Exists($d.Name+'extra.txt')){return $d.Name}}} 'mounted drive'
