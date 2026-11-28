@@ -1,0 +1,40 @@
+name: Android device protocol integration
+on:
+  push:
+    branches: ['refactor/native-cpp-validation', 'refactor/native-cpp']
+    paths:
+      - 'native/cpp/adb_provider.cpp'
+      - 'native/cpp/device_provider.hpp'
+      - 'native/cpp/tests/adb_live.cpp'
+      - 'native/cpp/scripts/adb_live.py'
+      - '.github/workflows/android-device.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  actual-adbd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native client test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libarchive-dev libssl-dev
+          cmake -S native/cpp -B build/adb-live -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/adb-live --target adb_live_tests --parallel 2
+      - name: Enable KVM for the test emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0660", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-archivefs-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo chown root:"$(id -gn)" /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Test with real Android adbd
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none
+          script: python3 native/cpp/scripts/adb_live.py build/adb-live/adb_live_tests --serial emulator-5554
