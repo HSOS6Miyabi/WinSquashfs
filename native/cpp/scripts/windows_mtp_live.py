@@ -18,7 +18,7 @@ import time
 def relative_parts(value):
     path = PureWindowsPath(value)
     if path.drive or path.root or not path.parts or any(
-        p in (".", "..") or ":" in p or "\0" in p for p in path.parts
+        p.rstrip(" .") == "" or ":" in p or "\0" in p for p in path.parts
     ):
         raise ValueError("Expected a relative device path")
     return path.parts
@@ -83,11 +83,12 @@ $target=$shell.NameSpace($env:ARCHIVEFS_MTP_DEST)
 if($null -eq $target){throw 'Cannot open local destination'}
 $clock=[Diagnostics.Stopwatch]::StartNew()
 $target.CopyHere($item,4+16+1024)
-$path=Join-Path $env:ARCHIVEFS_MTP_DEST $item.Name
 while($clock.Elapsed.TotalSeconds -lt [double]$env:ARCHIVEFS_MTP_TIMEOUT){
-    if(Test-Path -LiteralPath $path -PathType Leaf){
+    $files=@(Get-ChildItem -LiteralPath $env:ARCHIVEFS_MTP_DEST -File -Force)
+    if($files.Count -gt 1){throw 'Unexpected files in copy destination'}
+    if($files.Count -eq 1){
         try{
-            $stream=[IO.File]::Open($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
+            $stream=[IO.File]::Open($files[0].FullName,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::None)
             try{if($stream.Length -eq [long]$env:ARCHIVEFS_MTP_SIZE){
                 Write-Output ($clock.Elapsed.TotalSeconds.ToString([Globalization.CultureInfo]::InvariantCulture))
                 exit 0
@@ -105,7 +106,10 @@ throw 'Portable-device copy did not complete'
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
         env=env, check=True, capture_output=True, text=True, timeout=timeout + 15
     )
-    return destination / parts[-1], float(completed.stdout.strip().splitlines()[-1])
+    files = list(destination.iterdir())
+    if len(files) != 1 or not files[0].is_file():
+        raise ValueError("Unexpected Explorer copy destination contents")
+    return files[0], float(completed.stdout.strip().splitlines()[-1])
 
 
 def worker(args):
@@ -139,7 +143,7 @@ def self_test():
             pass
         else:
             raise AssertionError("Incorrect digest was accepted")
-        for value in ("../file", r"C:\file", r"\\host\share"):
+        for value in ("../file", ".. /file", r"C:\file", r"\\host\share"):
             try:
                 relative_parts(value)
             except ValueError:

@@ -104,16 +104,16 @@ try{
   $observedDpi=@()
   $observedDisplays=@()
   foreach($screen in [System.Windows.Forms.Screen]::AllScreens){
-      Save-WindowScreenshot $p "browser-display-$screenIndex" 1200 780 $screen
-      Assert-WindowDpiAwareness $p
-      $p.Refresh()
-      $actualScreen=[System.Windows.Forms.Screen]::FromHandle($p.MainWindowHandle)
-      if($actualScreen.DeviceName -ne $screen.DeviceName){throw "Window did not move to $($screen.DeviceName)"}
-      $observedDpi+= [WindowCapture]::GetDpiForWindow($p.MainWindowHandle)
-      $observedDisplays+= $actualScreen.DeviceName
-      foreach($id in @('MountImage','ExtractSelected','ExtractAll')){
-        if((Control $w $id).Current.IsOffscreen){throw "Monitor transition hid $id"}
-      }
+    Save-WindowScreenshot $p "browser-display-$screenIndex" 1200 780 $screen
+    Assert-WindowDpiAwareness $p
+    $p.Refresh()
+    $actualScreen=[System.Windows.Forms.Screen]::FromHandle($p.MainWindowHandle)
+    if($actualScreen.DeviceName -ne $screen.DeviceName){throw "Window did not move to $($screen.DeviceName)"}
+    $observedDpi+= [WindowCapture]::GetDpiForWindow($p.MainWindowHandle)
+    $observedDisplays+= $actualScreen.DeviceName
+    foreach($id in @('MountImage','ExtractSelected','ExtractAll')){
+      if((Control $w $id).Current.IsOffscreen){throw "Monitor transition hid $id"}
+    }
     $screenIndex++
   }
   if($RequireMixedDpi -and (@($observedDisplays | Sort-Object -Unique).Count -lt 2 -or @($observedDpi | Sort-Object -Unique).Count -lt 2)){
