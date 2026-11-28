@@ -30,6 +30,7 @@ struct Table {
     std::vector<Frame> frames;
     std::uint64_t logical_size=0;
 };
+void verify_empty_frame(const ReadSession& source,const Frame& frame);
 std::optional<Table> read_table(const RandomAccessSource& source,std::size_t budget){
     if(source.size()<17)return {};
     auto input=source.begin_read();
@@ -68,7 +69,9 @@ std::optional<Table> read_table(const RandomAccessSource& source,std::size_t bud
             if(c<8||compressed>start||c>start-compressed||
                u>static_cast<std::uint64_t>(INT64_MAX)-logical)
                 throw std::runtime_error("Zstandard seek table frame range exceeds stream");
-            if(u)result.frames.push_back({logical,compressed,c,u,checked?le32(entry.subspan(8)):0,checked});
+            Frame frame{logical,compressed,c,u,checked?le32(entry.subspan(8)):0,checked};
+            if(u)result.frames.push_back(frame);
+            else verify_empty_frame(*input,frame);
             compressed+=c;logical+=u;
         }
         i+=entries;
@@ -150,6 +153,19 @@ private:
     std::uint64_t next_,end_,position_=0;
     bool eof_=false;
 };
+void verify_empty_frame(const ReadSession& source,const Frame& frame){
+    std::array<std::byte,8> header{};
+    source.read_exact(frame.physical,header);
+    if((le32(header)&0xfffffff0u)==0x184d2a50u){
+        if(static_cast<std::uint64_t>(le32(std::span(header).subspan(4)))+8!=frame.compressed)
+            throw std::runtime_error("Zstandard skippable frame length differs from seek table");
+        if(frame.checked&&static_cast<std::uint32_t>(XXH64("",0,0))!=frame.checksum)
+            throw std::runtime_error("Zstandard empty frame checksum mismatch");
+    }else{
+        Decoder decoder(frame);
+        decoder.read_at(source,0,{});
+    }
+}
 class ZstdSource final:public RandomAccessSource {
     using Cache=ConcurrentCache<std::uint64_t,std::byte>;
 public:

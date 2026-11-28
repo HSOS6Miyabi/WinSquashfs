@@ -186,9 +186,25 @@ void xz_blocks(){
 void append32(std::vector<std::byte>& data,std::uint32_t v){
     for(unsigned i=0;i<4;++i)data.push_back(static_cast<std::byte>((v>>(i*8))&255));
 }
-std::vector<std::byte> seekable_zstd(std::span<const std::byte> raw,bool checksums){
+std::vector<std::byte> seekable_zstd(std::span<const std::byte> raw,bool checksums,bool false_empty=false){
     std::vector<std::byte> result,index;
     std::uint32_t count=0;
+    auto empty_entry=[&](std::uint32_t compressed){
+        append32(index,compressed);append32(index,0);
+        if(checksums)append32(index,static_cast<std::uint32_t>(XXH64("",0,0)));
+        ++count;
+    };
+    // A skippable frame and an ordinary empty Zstandard frame both have
+    // zero logical length. Their physical ranges must still be validated.
+    append32(result,0x184d2a50);append32(result,3);
+    result.insert(result.end(),3,std::byte{0x55});empty_entry(11);
+    const std::string_view empty_payload=false_empty?"unexpected data":"";
+    const auto start=result.size();
+    result.resize(start+ZSTD_compressBound(empty_payload.size()));
+    auto empty_size=ZSTD_compress(result.data()+start,result.size()-start,
+                                  empty_payload.data(),empty_payload.size(),1);
+    require(!ZSTD_isError(empty_size),"write empty Zstandard frame");
+    result.resize(start+empty_size);empty_entry(static_cast<std::uint32_t>(empty_size));
     while(!raw.empty()){
         auto piece=raw.first(std::min<std::size_t>(raw.size(),1u<<20));raw=raw.subspan(piece.size());
         auto at=result.size();result.resize(at+ZSTD_compressBound(piece.size()));
@@ -232,7 +248,7 @@ void zstd_frames(){
         require(source->active==0,"Zstandard source handles released");
         if(checksums){
             auto damaged=compressed;
-            auto count=(raw.size()+(1u<<20)-1)/(1u<<20);
+            auto count=(raw.size()+(1u<<20)-1)/(1u<<20)+2;
             auto first_checksum=damaged.size()-9-count*12+8;
             damaged[first_checksum]^=std::byte{1};
             bool rejected=false;
@@ -240,6 +256,10 @@ void zstd_frames(){
             catch(const std::runtime_error&){rejected=true;}
             require(rejected,"Zstandard seek table checksum rejected");
         }
+        bool false_empty_rejected=false;
+        try{(void)open_decoder_backend(std::make_shared<MemorySource>(seekable_zstd(raw,checksums,true)),{},8u<<20);}
+        catch(const std::runtime_error&){false_empty_rejected=true;}
+        require(false_empty_rejected,"nonempty Zstandard frame declared empty rejected");
         compressed[compressed.size()-5]|=std::byte{4};
         bool rejected=false;
         try{(void)open_decoder_backend(std::make_shared<MemorySource>(std::move(compressed)),{},8u<<20);}
