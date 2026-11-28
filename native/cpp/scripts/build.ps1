@@ -54,7 +54,7 @@ Invoke-Checked cmake (@('-S','native/cpp','-B',$test,'-DARCHIVEFS_WITH_DWARFS=OF
 Invoke-Checked cmake @('--build',$test,'--parallel','2')
 Invoke-Checked ctest @('--test-dir',$test,'--output-on-failure')
 if ($Stage -eq 'Tests') { return }
-Invoke-Checked cmake (@('-S','native/cpp','-B',$build,'-DARCHIVEFS_WITH_DWARFS=ON','-DBUILD_TESTING=OFF','-DVCPKG_MANIFEST_MODE=OFF',"-DCMAKE_PREFIX_PATH=$prefix")+$flags)
+Invoke-Checked cmake (@('-S','native/cpp','-B',$build,'-DARCHIVEFS_WITH_DWARFS=ON','-DBUILD_TESTING=OFF','-DARCHIVEFS_BUILD_BENCHMARKS=ON','-DVCPKG_MANIFEST_MODE=OFF',"-DCMAKE_PREFIX_PATH=$prefix")+$flags)
 Invoke-Checked cmake @('--build',$build,'--parallel','2')
 Copy-Item "$build/archivefs_core.dll","$build/WinArchiveFSPro.Unc.exe" $dist -Force
 Copy-Item "$build/archivefs-read.exe" "$dist/archivefs.exe" -Force

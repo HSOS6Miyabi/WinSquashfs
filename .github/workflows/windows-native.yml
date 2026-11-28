@@ -86,6 +86,14 @@ jobs:
         run: ./native/cpp/scripts/build.ps1 -Stage CoreDistribution
       - name: Test real archives and mounted filesystem
         run: python native/cpp/scripts/windows_integration.py artifacts/dist
+      - name: Benchmark real compressed images
+        run: python native/cpp/scripts/windows_benchmark.py artifacts/dist .deps/archivefs-build/archivefs-benchmark.exe artifacts/benchmarks/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WinArchiveFSPro-benchmarks
+          path: artifacts/benchmarks/
+          if-no-files-found: ignore
       - name: Compile and package WinUI
         if: success() || failure()
         shell: pwsh
@@ -200,7 +208,7 @@ jobs:
       - name: Configure sanitized core
         run: >
           cmake -S native/cpp -B build/sanitizers -G Ninja
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=clang++ -DARCHIVEFS_BUILD_FUZZERS=ON
           "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer"
           "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
           "-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined"
@@ -211,6 +219,8 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: ctest --test-dir build/sanitizers --output-on-failure --repeat until-fail:10
+      - name: Fuzz malformed names and image signatures
+        run: build/sanitizers/archivefs-fuzz -runs=30000 -max_len=4096
   installer-runtime:
     needs: windows
     runs-on: windows-2025
