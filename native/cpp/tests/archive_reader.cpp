@@ -26,10 +26,11 @@ static std::byte value(std::uint64_t offset) { return std::byte(static_cast<unsi
 
 class TestBackend final : public ArchiveBackend {
 public:
-    ArchiveInfo info() const override { return {ArchiveFormat::squashfs, 1, 8193, 256}; }
+    explicit TestBackend(std::uint64_t size=8193):size_(size){}
+    ArchiveInfo info() const override { return {ArchiveFormat::squashfs, 1, size_, 256}; }
     FileInfo stat(InodeId id) const override {
         if (id == 1) return {id, FileKind::directory, 0, 0};
-        if (id == 2) return {id, FileKind::regular, 8193, 0};
+        if (id == 2) return {id, FileKind::regular, size_, 0};
         throw std::out_of_range("inode");
     }
     std::vector<DirectoryEntry> list(InodeId id) const override {
@@ -37,13 +38,15 @@ public:
         return {{"data.bin", stat(2)}};
     }
     void read_exact(InodeId id, std::uint64_t offset, std::span<std::byte> output) const override {
-        require(id == 2 && offset <= 8193 && output.size() <= 8193 - offset);
+        require(id == 2 && offset <= size_ && output.size() <= size_ - offset);
         ++reads;
         for (auto& byte : output) byte = value(offset++);
     }
     void validate_source() const override { if (!valid) throw std::runtime_error("invalid source"); }
     mutable std::atomic<unsigned> reads{0};
     std::atomic<bool> valid{true};
+private:
+    const std::uint64_t size_;
 };
 
 int main() {
@@ -176,5 +179,20 @@ int main() {
     require(uncached.cache_statistics().entries == 0 && backend->reads == 34);
     backend->valid = false;
     require_failure([&] { reader.read_at(2, 0, result); });
+    // A large sequential read must not repeatedly decompress small cache pages.
+    auto large_backend=std::make_shared<TestBackend>(2u<<20);
+    ArchiveReader streaming(large_backend,64u<<20,64u<<10);
+    std::vector<std::byte> block(1u<<20);
+    require(streaming.read_at(2,127,block)==block.size());
+    require(large_backend->reads==1);
+    require(streaming.cache_statistics().entries==0);
+    for(std::size_t i=0;i<block.size();++i)require(block[i]==value(i+127));
+    std::array<std::byte,4096> small{};
+    require(streaming.read_at(2,10,small)==small.size());
+    require(large_backend->reads==2);
+    require(streaming.read_at(2,10,small)==small.size());
+    require(large_backend->reads==2);
+    for(std::size_t i=0;i<small.size();++i)require(small[i]==value(i+10));
+    require(recommended_page_size({ArchiveFormat::erofs,1,1024,4096})==65536);
     std::cout << "PASS positioned I/O, source generation, format detection, concurrent random reads, EOF, cancellation\n";
 }
