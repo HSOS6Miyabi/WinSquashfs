@@ -345,10 +345,14 @@ int run_agent(){
     update_mounts(shares,true);
     DWORD drive_mask=GetLogicalDrives();
     std::vector<std::unique_ptr<NativeMount>> device_mounts;
+    std::vector<std::shared_ptr<DeviceProvider>> providers;
+    // Cancel active device I/O before destroying the WinFsp dispatchers.
+    struct CancelProviders{std::vector<std::shared_ptr<DeviceProvider>>& providers;~CancelProviders(){for(auto& p:providers)p->cancel();}} cancel_providers{providers};
     auto reserved=shares;
     for(auto server:{u"sfs$",u"sfs.localhost"})for(auto kind:{u"mtp",u"adb",u"adb.r"})reserved.push_back({kind,{},false,server});
     for(auto const& kind:enabled_device_shares(settings)){
-        auto projection=device_projection(make_device_provider(kind,settings),pool,kind,[notifications,kind,chinese,port=settings.adb_port](const DeviceFailure& e){
+        auto provider=make_device_provider(kind,settings);providers.push_back(provider);
+        auto projection=device_projection(std::move(provider),pool,kind,[notifications,kind,chinese,port=settings.adb_port](const DeviceFailure& e){
             auto title=kind+(chinese?u" 设备访问失败":u" device access failed");
             std::u16string message;
             if(kind!=u"mtp"&&e.code()==DeviceError::unavailable)
@@ -368,7 +372,7 @@ int run_agent(){
     HANDLE events[]{stop.value,aliases.value};
     for(;;){
         auto result=MsgWaitForMultipleObjectsEx(2,events,settings.include_drives?1000:INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
-        if(result==WAIT_OBJECT_0)break;
+        if(result==WAIT_OBJECT_0){for(auto& provider:providers)provider->cancel();break;}
         if(result==WAIT_OBJECT_0+1){try{remote.refresh();}catch(const std::exception&){}}
         else if(result==WAIT_OBJECT_0+2)AgentTray::dispatch();
         else if(result!=WAIT_TIMEOUT)fail("wait for UNC agent");

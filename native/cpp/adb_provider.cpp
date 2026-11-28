@@ -9,6 +9,7 @@
 #include <bit>
 #include <mutex>
 #include <map>
+#include <stop_token>
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -45,7 +46,8 @@ void init_socket(){}
 #endif
 class Connection {
 public:
-    explicit Connection(const AdbOptions& o){
+    explicit Connection(const AdbOptions& o,std::stop_token stop):stop_(stop){
+        cancelled();
         init_socket();
 #ifdef _WIN32
         socket_=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
@@ -98,11 +100,15 @@ public:
 private:
     Socket socket_=invalid;
     Clock::time_point deadline_;
+    std::stop_token stop_;
+    void cancelled()const{if(stop_.stop_requested())throw DeviceFailure(DeviceError::offline,"ADB operation cancelled");}
     [[noreturn]] static void unavailable(unsigned port){throw DeviceFailure(DeviceError::unavailable,"ADB Server is not listening on 127.0.0.1:"+std::to_string(port));}
     void wait(bool writing,Clock::time_point end){
         for(;;){
+            cancelled();
             auto left=std::chrono::duration_cast<std::chrono::milliseconds>(end-Clock::now());
             if(left.count()<=0)throw DeviceFailure(DeviceError::timeout,"ADB connection or request timed out");
+            left=std::min(left,std::chrono::milliseconds(100));
 #ifdef _WIN32
             fd_set set,errors;FD_ZERO(&set);FD_ZERO(&errors);FD_SET(socket_,&set);FD_SET(socket_,&errors);
             timeval tv{static_cast<long>(left.count()/1000),static_cast<long>((left.count()%1000)*1000)};
@@ -112,7 +118,7 @@ private:
             int ready=poll(&descriptor,1,static_cast<int>(std::min<std::int64_t>(left.count(),std::numeric_limits<int>::max())));
 #endif
             if(ready>0)return;
-            if(!ready)throw DeviceFailure(DeviceError::timeout,"ADB connection or request timed out");
+            if(!ready)continue;
             if(!pending(socket_error()))throw DeviceFailure(DeviceError::offline,"ADB socket failed");
         }
     }
@@ -191,8 +197,9 @@ class Adb final:public DeviceProvider {
 public:
     explicit Adb(AdbOptions options):options_(options){if(!options.port||options.connect_timeout.count()<=0||options.io_timeout.count()<=0)throw std::invalid_argument("Invalid ADB endpoint or timeout");}
     std::string root_id()const override{return "/";}
+    void cancel()noexcept override{stop_.request_stop();}
     std::vector<RemoteDevice> devices()override{
-        Connection c(options_);c.service("host:devices-l");auto data=c.message();
+        Connection c(options_,stop_.get_token());c.service("host:devices-l");auto data=c.message();
         std::vector<RemoteDevice> result;
         for(auto line:fields(data,'\n')){
             if(line.empty())continue;
@@ -208,7 +215,7 @@ public:
     RemoteObject stat(std::string_view device,std::string_view object)override{
         check_path(object);
         if(object.size()<=1024&&binary_metadata(device)){
-            Connection c(options_);transport(c,device);c.service("sync:");return sync_stat(c,object);
+            Connection c(options_,stop_.get_token());transport(c,device);c.service("sync:");return sync_stat(c,object);
         }
         auto cmd="stat -L -c '%f %s %Y %d %i %Z' "+adb_shell_quote(object);
         return parse_stat(object,name_of(object),shell(device,cmd,4096));
@@ -249,6 +256,7 @@ public:
     }
 private:
     AdbOptions options_;
+    std::stop_source stop_;
     struct Features{bool binary;Clock::time_point expires;};
     std::mutex features_mutex_;
     std::map<std::string,Features> features_;
@@ -264,7 +272,7 @@ private:
         }
         bool enabled=false;
         try{
-            Connection c(options_);
+            Connection c(options_,stop_.get_token());
             c.service("host-serial:"+std::string(device)+":features");
             auto data=c.message();auto parts=fields(data,',');
             enabled=std::find(parts.begin(),parts.end(),"stat_v2")!=parts.end()&&std::find(parts.begin(),parts.end(),"ls_v2")!=parts.end();
@@ -282,7 +290,7 @@ private:
         return sync_metadata(path,name_of(path),c.read_string(68));
     }
     std::vector<RemoteObject> sync_list(std::string_view device,std::string_view path){
-        Connection c(options_);transport(c,device);c.service("sync:");
+        Connection c(options_,stop_.get_token());transport(c,device);c.service("sync:");
         sync_request(c,"LIS2",path);
         std::vector<RemoteObject> result;
         std::vector<std::string> symlinks;
@@ -313,7 +321,7 @@ private:
     std::string shell(std::string_view device,std::string command,std::size_t maximum){
         if(device.empty()||device.find_first_of("\r\n")!=device.npos||device.find('\0')!=device.npos)throw std::invalid_argument("Invalid ADB serial");
         if(options_.root)command="su -c "+adb_shell_quote("[ \"$(id -u)\" = 0 ] || exit 77; "+command);
-        Connection c(options_);c.service("host:transport:"+std::string(device));c.service("shell,v2,raw:"+command);
+        Connection c(options_,stop_.get_token());c.service("host:transport:"+std::string(device));c.service("shell,v2,raw:"+command);
         c.write(std::string_view("\x04\0\0\0\0",5));
         std::string out,error;
         for(;;){

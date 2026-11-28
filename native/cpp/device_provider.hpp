@@ -32,6 +32,7 @@ struct RemoteObject {
 class DeviceProvider {
 public:
     virtual ~DeviceProvider()=default;
+    virtual void cancel()noexcept{}
     virtual std::vector<RemoteDevice> devices()=0;
     virtual std::string root_id()const=0;
     virtual std::vector<RemoteObject> children(std::string_view device,std::string_view parent)=0;

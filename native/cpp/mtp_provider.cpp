@@ -23,6 +23,7 @@
 #include <oleauto.h>
 #include <mutex>
 #include <thread>
+#include <stop_token>
 namespace archivefs {
 namespace {
 using Microsoft::WRL::ComPtr;
@@ -234,9 +235,10 @@ void write_all(HANDLE pipe,const void* raw,std::size_t size){
     auto p=static_cast<const std::byte*>(raw);
     while(size){DWORD n=0;auto count=static_cast<DWORD>(std::min<std::size_t>(size,64u<<10));if(!WriteFile(pipe,p,count,&n,nullptr)||!n)failure(DeviceError::offline,"Portable device worker pipe closed");size-=n;p+=n;}
 }
-void timed_read(HANDLE pipe,HANDLE process,void* raw,std::size_t size,Clock::time_point deadline){
+void timed_read(HANDLE pipe,HANDLE process,void* raw,std::size_t size,Clock::time_point deadline,std::stop_token stop){
     auto p=static_cast<std::byte*>(raw);
     while(size){
+        if(stop.stop_requested())failure(DeviceError::offline,"Portable device operation cancelled");
         if(Clock::now()>=deadline)failure(DeviceError::timeout,"Portable device operation timed out");
         DWORD available=0;
         if(!PeekNamedPipe(pipe,nullptr,0,nullptr,&available,nullptr))failure(DeviceError::offline,"Portable device worker disconnected");
@@ -248,11 +250,17 @@ void timed_read(HANDLE pipe,HANDLE process,void* raw,std::size_t size,Clock::tim
 }
 class Worker {
 public:
+    explicit Worker(std::stop_token stop):stop_(stop){}
     ~Worker(){reset();}
     Response request(Json const& request,const SeekProgress& progress={}){
         std::unique_lock lock(mutex_,std::defer_lock);
-        if(!lock.try_lock_for(20s))failure(DeviceError::timeout,"Portable device is busy");
+        const auto lock_deadline=Clock::now()+20s;
+        while(!lock.try_lock_for(100ms)){
+            if(stop_.stop_requested())failure(DeviceError::offline,"Portable device operation cancelled");
+            if(Clock::now()>=lock_deadline)failure(DeviceError::timeout,"Portable device is busy");
+        }
         try{
+            if(stop_.stop_requested())failure(DeviceError::offline,"Portable device operation cancelled");
             if(!process_||WaitForSingleObject(process_.h,0)!=WAIT_TIMEOUT){reset();start();}
             auto data=request.dump();
             if(data.size()>32768)failure(DeviceError::protocol,"Portable device request is too large");
@@ -263,9 +271,9 @@ public:
             auto deadline=Clock::now()+30s;
             Json meta;
             for(;;){
-                std::uint32_t length=0;timed_read(output_.h,process_.h,&length,sizeof(length),deadline);
+                std::uint32_t length=0;timed_read(output_.h,process_.h,&length,sizeof(length),deadline,stop_);
                 if(length>max_message)failure(DeviceError::protocol,"Portable device response is too large");
-                std::string metadata(length,'\0');timed_read(output_.h,process_.h,metadata.data(),metadata.size(),deadline);
+                std::string metadata(length,'\0');timed_read(output_.h,process_.h,metadata.data(),metadata.size(),deadline,stop_);
                 meta=Json::parse(metadata);
                 if(!meta.contains("seek"))break;
                 if(progress)progress(meta.at("seek").get<std::uint64_t>());
@@ -280,13 +288,14 @@ public:
             auto bytes=meta.value("bytes",std::size_t{0});
             if(bytes>max_read)failure(DeviceError::protocol,"Portable device binary response is too large");
             Response result{std::move(meta),std::vector<std::byte>(bytes)};
-            timed_read(output_.h,process_.h,result.bytes.data(),bytes,deadline);
+            timed_read(output_.h,process_.h,result.bytes.data(),bytes,deadline,stop_);
             return result;
         }catch(DeviceFailure const& e){if(e.code()==DeviceError::timeout||e.code()==DeviceError::offline||e.code()==DeviceError::protocol)reset();throw;}
         catch(...){reset();throw;}
     }
 private:
     std::timed_mutex mutex_;
+    std::stop_token stop_;
     Handle process_,input_,output_,job_;
     void reset()noexcept{
         if(process_&&WaitForSingleObject(process_.h,0)==WAIT_TIMEOUT){TerminateProcess(process_.h,1);WaitForSingleObject(process_.h,250);}
@@ -326,6 +335,7 @@ class Mtp final:public DeviceProvider {
     struct Entry{std::shared_ptr<Worker> worker;Clock::time_point last;};
 public:
     std::string root_id()const override{return "DEVICE";}
+    void cancel()noexcept override{stop_.request_stop();}
     std::vector<RemoteDevice> devices()override{
         auto response=enumerator_.request(Json{{"op","devices"}});
         std::vector<RemoteDevice> result;std::set<std::string> alive;
@@ -357,7 +367,8 @@ public:
         }
     }
 private:
-    Worker enumerator_;
+    std::stop_source stop_;
+    Worker enumerator_{stop_.get_token()};
     std::mutex mutex_;std::map<std::string,Entry> workers_;
     std::shared_ptr<Worker> worker(std::string_view device){
         std::lock_guard lock(mutex_);
@@ -366,7 +377,7 @@ private:
         auto id=std::string(device);
         if(auto it=workers_.find(id);it!=workers_.end()){it->second.last=now;return it->second.worker;}
         if(workers_.size()>=64)failure(DeviceError::timeout,"Too many open portable devices");
-        auto result=std::make_shared<Worker>();workers_.emplace(std::move(id),Entry{result,now});return result;
+        auto result=std::make_shared<Worker>(stop_.get_token());workers_.emplace(std::move(id),Entry{result,now});return result;
     }
 };
 }

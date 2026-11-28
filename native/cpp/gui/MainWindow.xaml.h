@@ -12,7 +12,7 @@ private:
     bool chinese_=false,busy_=false,closing_=false,source_check_pending_=false;
     int page_=-1;
     std::uint64_t preview_revision_=0;
-    std::stop_source preview_stop_;
+    std::stop_source preview_stop_,device_stop_;
     std::stop_source stop_;
     std::shared_ptr<archivefs::ArchiveTree> archive_;
     Node directory_;
@@ -42,6 +42,8 @@ private:
     void report(std::exception_ptr error);
     void navigate(int page);
     void browser();void creator();void mount_page();void unc_page();void about_page();void device_page();
+    fire_and_forget refresh_devices(archivefs::Settings settings,Microsoft::UI::Xaml::Controls::ListView list,
+        std::shared_ptr<std::vector<std::u16string>> paths,Microsoft::UI::Xaml::Controls::TextBlock state,Microsoft::UI::Xaml::Controls::Button refresh);
     void open_image(std::filesystem::path path,int mode=0);
     void refresh_entries();
     void search_subtree();fire_and_forget preview_selected();void extract(bool all);void mount_image();

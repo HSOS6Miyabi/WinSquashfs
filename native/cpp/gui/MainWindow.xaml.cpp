@@ -11,6 +11,7 @@
 #include <cwctype>
 #include <array>
 #include <climits>
+#include <future>
 namespace winrt::WinArchiveFSPro::implementation {
 using namespace Microsoft::UI::Xaml;
 using namespace Microsoft::UI::Xaml::Controls;
@@ -59,7 +60,7 @@ MainWindow::MainWindow(){
     nav_host_.Content(content);Grid::SetRow(nav_host_,1);root.Children().Append(nav_host_);
     auto footer=panel(true);progress_=ProgressRing();progress_.Width(20);progress_.Height(20);progress_.IsActive(false);progress_.Visibility(Visibility::Collapsed);footer.Children().Append(progress_);status_=identify(label(tr(L"Ready",L"就绪")),L"StatusText");cancel_=button(tr(L"Cancel",L"取消"),[this]{stop_.request_stop();});cancel_.IsEnabled(false);footer.Children().Append(cancel_);footer.Children().Append(status_);Grid::SetRow(footer,2);root.Children().Append(footer);
     mount_timer_=DispatcherQueue().CreateTimer();mount_timer_.Interval(std::chrono::seconds(1));mount_timer_.Tick([this](auto const&,auto const&){auto count=mounts_.size();std::erase_if(mounts_,[](auto& m){return !m->mounted();});if(count!=mounts_.size()&&!busy_){refresh_mounts();refresh_drive_choices();}if(!busy_)check_source();});mount_timer_.Start();
-    Closed([this](auto const&,auto const&){closing_=true;stop_.request_stop();preview_stop_.request_stop();mount_timer_.Stop();mounts_.clear();});
+    Closed([this](auto const&,auto const&){closing_=true;stop_.request_stop();preview_stop_.request_stop();device_stop_.request_stop();mount_timer_.Stop();mounts_.clear();});
     navigate(0);
 }
 HWND MainWindow::hwnd(){HWND result=nullptr;check_hresult(get_strong().as<Microsoft::UI::Xaml::Window>().as<IWindowNative>()->get_WindowHandle(&result));return result;}
@@ -84,7 +85,7 @@ void MainWindow::report(std::exception_ptr error){try{if(error)std::rethrow_exce
 fire_and_forget MainWindow::run(Task task,hstring message){auto lifetime=get_strong();if(busy_||closing_)co_return;busy_=true;stop_=std::stop_source();auto token=stop_.get_token();nav_host_.IsEnabled(false);scroll_.IsEnabled(false);page_actions_.IsHitTestVisible(false);progress_.Visibility(Visibility::Visible);progress_.IsActive(true);cancel_.IsEnabled(true);status_.Text(message);apartment_context ui;std::exception_ptr error;std::function<void()> finish;
     co_await resume_background();try{finish=task(token);}catch(...){error=std::current_exception();}try{co_await ui;}catch(...){co_return;}if(closing_)co_return;busy_=false;nav_host_.IsEnabled(true);scroll_.IsEnabled(true);page_actions_.IsHitTestVisible(true);progress_.IsActive(false);progress_.Visibility(Visibility::Collapsed);cancel_.IsEnabled(false);if(error){report(error);co_return;}status_.Text(tr(L"Completed",L"已完成"));try{if(finish)finish();}catch(...){report(std::current_exception());}}
 std::vector<fs::path> MainWindow::pick(bool folder,bool multi,bool save){com_ptr<IFileDialog> dialog;if(save){auto value=create_instance<IFileSaveDialog>(CLSID_FileSaveDialog);dialog=value.as<IFileDialog>();}else dialog=create_instance<IFileOpenDialog>(CLSID_FileOpenDialog).as<IFileDialog>();DWORD flags=0;check_hresult(dialog->GetOptions(&flags));check_hresult(dialog->SetOptions(flags|FOS_FORCEFILESYSTEM|FOS_NOCHANGEDIR|(folder?FOS_PICKFOLDERS:0)|(multi?FOS_ALLOWMULTISELECT:0)));auto hr=dialog->Show(hwnd());if(hr==HRESULT_FROM_WIN32(ERROR_CANCELLED))return {};check_hresult(hr);std::vector<fs::path> result;auto append=[&](IShellItem* item){PWSTR p=nullptr;check_hresult(item->GetDisplayName(SIGDN_FILESYSPATH,&p));result.emplace_back(p);CoTaskMemFree(p);};if(multi){auto open=dialog.as<IFileOpenDialog>();com_ptr<IShellItemArray> items;check_hresult(open->GetResults(items.put()));DWORD n=0;check_hresult(items->GetCount(&n));for(DWORD i=0;i<n;++i){com_ptr<IShellItem> item;check_hresult(items->GetItemAt(i,item.put()));append(item.get());}}else{com_ptr<IShellItem> item;check_hresult(dialog->GetResult(item.put()));append(item.get());}return result;}
-void MainWindow::navigate(int page){if(busy_||page<0||page>5)return;page_=page;++preview_revision_;preview_stop_.request_stop();if(nav_host_.SelectedItem()!=nav_items_[page])nav_host_.SelectedItem(nav_items_[page]);body_.Children().Clear();page_actions_.Children().Clear();body_.AllowDrop(false);scroll_.ChangeView(nullptr,0.0,nullptr,true);try{switch(page){case 0:browser();break;case 1:creator();break;case 2:mount_page();break;case 3:unc_page();break;case 4:about_page();break;default:device_page();}}catch(...){report(std::current_exception());}}
+void MainWindow::navigate(int page){if(busy_||page<0||page>5)return;page_=page;++preview_revision_;preview_stop_.request_stop();device_stop_.request_stop();if(nav_host_.SelectedItem()!=nav_items_[page])nav_host_.SelectedItem(nav_items_[page]);body_.Children().Clear();page_actions_.Children().Clear();body_.AllowDrop(false);scroll_.ChangeView(nullptr,0.0,nullptr,true);try{switch(page){case 0:browser();break;case 1:creator();break;case 2:mount_page();break;case 3:unc_page();break;case 4:about_page();break;default:device_page();}}catch(...){report(std::current_exception());}}
 void MainWindow::browser(){
     auto children=body_.Children();children.Append(label(tr(L"Archive browser",L"存档浏览器"),24));
     image_summary_=identify(label(L""),L"ImageSummary");children.Append(image_summary_);
@@ -241,31 +242,17 @@ void MainWindow::device_page(){
     auto notification=identify(check(tr(L"Show progress notifications for slow archive opens",L"镜像打开耗时较长时显示进度通知"),settings_.show_open_progress),L"OpenProgress");children.Append(notification);
     auto list=identify(ListView(),L"DeviceList");list.Height(180);children.Append(list);
     auto paths=std::make_shared<std::vector<std::u16string>>();
-    auto refresh=[this,list,paths,port,mtp,adb,root]{
+    auto device_status=identify(label(tr(L"Refreshing devices",L"正在刷新设备")),L"DeviceStatus");children.Append(device_status);
+    Button refresh_button;refresh_button.Content(box_value(tr(L"Refresh",L"刷新")));identify(refresh_button,L"RefreshDevices");
+    auto refresh=[this,list,paths,port,mtp,adb,root,device_status,weak=make_weak(refresh_button)]{
         try{
             auto settings=settings_;settings.adb_port=number(port,65535);
+            if(!settings.adb_port)throw std::invalid_argument("invalid ADB Server port");
             settings.enable_mtp=checked(mtp);settings.enable_adb=checked(adb);settings.enable_adb_root=checked(root);
-            run([this,list,paths,settings](std::stop_token token){
-                std::vector<std::pair<std::u16string,std::u16string>> rows;
-                for(auto const& kind:enabled_device_shares(settings)){
-                    if(token.stop_requested())break;
-                    try{
-                        auto devices=list_connected_devices(make_device_provider(kind,settings));
-                        if(devices.empty())rows.emplace_back(kind+u": "+(chinese_?u"没有连接的设备":u"No connected devices"),u"");
-                        for(auto& d:devices){
-                            auto path=u"\\\\sfs$\\"+kind+u"\\"+d.component;
-                            rows.emplace_back(path+u"  ·  "+to_utf16(d.device.state),path);
-                        }
-                    }catch(std::exception const& e){rows.emplace_back(kind+u": "+to_utf16(e.what()),u"");}
-                }
-                return [this,list,paths,rows=std::move(rows)]{
-                    list.Items().Clear();paths->clear();
-                    for(auto const& row:rows){list.Items().Append(box_value(text(row.first)));paths->push_back(row.second);}
-                    status_.Text(tr(L"Device list updated",L"设备列表已更新"));
-                };
-            },tr(L"Enumerating devices",L"正在枚举设备"));
+            if(auto button=weak.get())refresh_devices(std::move(settings),list,paths,device_status,button);
         }catch(...){report(std::current_exception());}
     };
+    refresh_button.Click([refresh](auto const&,auto const&){refresh();});
     auto root_buttons=panel(true);
     for(auto const& kind:{std::u16string(u"mtp"),std::u16string(u"adb"),std::u16string(u"adb.r")}){
         auto path=u"\\\\sfs$\\"+kind;
@@ -274,7 +261,7 @@ void MainWindow::device_page(){
         },kind==u"mtp"?L"OpenMtp":kind==u"adb"?L"OpenAdb":L"OpenAdbRoot"));
     }
     children.Append(root_buttons);
-    page_actions_.Children().Append(button(tr(L"Refresh",L"刷新"),refresh,L"RefreshDevices"));
+    page_actions_.Children().Append(refresh_button);
     page_actions_.Children().Append(button(tr(L"Open selected",L"打开选中设备"),[this,list,paths]{
         auto i=list.SelectedIndex();if(i<0||static_cast<std::size_t>(i)>=paths->size()||(*paths)[i].empty())return;auto path=(*paths)[i];
         run([path](std::stop_token token){start_agent(token);open_in_explorer(path);return std::function<void()>{};},tr(L"Opening device",L"正在打开设备"));
@@ -285,6 +272,47 @@ void MainWindow::device_page(){
         }catch(...){report(std::current_exception());}
     },L"ApplyDevices");accent(save);page_actions_.Children().Append(save);
     refresh();
+}
+fire_and_forget MainWindow::refresh_devices(Settings settings,ListView list,std::shared_ptr<std::vector<std::u16string>> paths,TextBlock state,Button refresh){
+    auto lifetime=get_strong();
+    if(closing_)co_return;
+    device_stop_.request_stop();device_stop_=std::stop_source();
+    auto token=device_stop_.get_token();auto revision=preview_revision_;auto chinese=chinese_;
+    refresh.IsEnabled(false);list.Items().Clear();paths->clear();state.Text(tr(L"Enumerating devices",L"正在枚举设备"));
+    apartment_context ui;
+    using Row=std::pair<std::u16string,std::u16string>;
+    std::vector<Row> rows;
+    std::exception_ptr error;
+    co_await resume_background();
+    try{
+        auto query=[&](std::u16string kind){
+            std::vector<Row> result;
+            if(token.stop_requested())return result;
+            try{
+                auto provider=make_device_provider(kind,settings);
+                std::stop_callback cancel(token,[&]{provider->cancel();});
+                auto devices=list_connected_devices(provider);
+                if(devices.empty())result.emplace_back(kind+u": "+(chinese?u"没有连接的设备":u"No connected devices"),u"");
+                for(auto& d:devices){
+                    auto path=u"\\\\sfs$\\"+kind+u"\\"+d.component;
+                    result.emplace_back(path+u"  ·  "+to_utf16(d.device.state),path);
+                }
+            }catch(const std::exception& e){
+                try{result.emplace_back(kind+u": "+to_utf16(e.what()),u"");}
+                catch(...){result.emplace_back(kind+(chinese?u": 无法枚举设备":u": Cannot enumerate devices"),u"");}
+            }
+            return result;
+        };
+        std::vector<std::future<std::vector<Row>>> requests;
+        for(auto const& kind:enabled_device_shares(settings))requests.push_back(std::async(std::launch::async,query,kind));
+        for(auto& request:requests){auto result=request.get();rows.insert(rows.end(),std::make_move_iterator(result.begin()),std::make_move_iterator(result.end()));}
+    }catch(...){error=std::current_exception();}
+    try{co_await ui;}catch(...){co_return;}
+    if(closing_||page_!=5||revision!=preview_revision_||token.stop_requested())co_return;
+    refresh.IsEnabled(true);
+    if(error){state.Text(tr(L"Cannot enumerate devices",L"无法枚举设备"));report(error);co_return;}
+    for(auto const& row:rows){list.Items().Append(box_value(text(row.first)));paths->push_back(row.second);}
+    state.Text(tr(L"Device list updated",L"设备列表已更新"));
 }
 void MainWindow::about_page(){body_.Children().Append(label(L"WinArchiveFSPro",28));body_.Children().Append(label(tr(L"Appearance",L"外观"),18));auto current_theme=identify(label(L""),L"CurrentTheme");auto theme_label=[this,current_theme](std::string_view value){current_theme.Text(value=="dark"?tr(L"Current appearance: Dark",L"当前外观：深色"):value=="light"?tr(L"Current appearance: Light",L"当前外观：浅色"):tr(L"Current appearance: System",L"当前外观：跟随系统"));};theme_label(settings_.theme);body_.Children().Append(current_theme);auto themes=panel(true);auto set_theme=[this,theme_label](std::string value){try{auto s=Settings::load();s.theme=std::move(value);s.save();settings_=s;LayoutRoot().RequestedTheme(s.theme=="dark"?ElementTheme::Dark:s.theme=="light"?ElementTheme::Light:ElementTheme::Default);theme_label(s.theme);}catch(...){report(std::current_exception());}};themes.Children().Append(button(tr(L"System",L"跟随系统"),[set_theme]{set_theme("system");},L"ThemeSystem"));themes.Children().Append(button(tr(L"Light",L"浅色"),[set_theme]{set_theme("light");},L"ThemeLight"));themes.Children().Append(button(tr(L"Dark",L"深色"),[set_theme]{set_theme("dark");},L"ThemeDark"));body_.Children().Append(themes);body_.Children().Append(label(tr(L"Read-only archive filesystem manager\nSquashFS · DwarFS · EROFS\nC++23 · WinUI 3 · WinFsp",L"只读存档文件系统管理器\nSquashFS · DwarFS · EROFS\nC++23 · WinUI 3 · WinFsp")));body_.Children().Append(button(tr(L"Check WinFsp runtime",L"检查 WinFsp 运行时"),[this]{try{status_.Text(text(winfsp_runtime_info()));}catch(...){report(std::current_exception());}}));body_.Children().Append(button(tr(L"Open tools folder",L"打开工具目录"),[this]{try{open_in_explorer((application_directory()/L"tools").u16string());}catch(...){report(std::current_exception());}}));}
 void MainWindow::apply_command_line(){try{int count=0;auto raw=CommandLineToArgvW(GetCommandLineW(),&count);if(!raw)return;struct Guard{LPWSTR* p;~Guard(){LocalFree(p);}}guard{raw};std::vector<fs::path> args;for(int i=1;i<count;++i)args.emplace_back(raw[i]);if(args.empty())return;if(args[0]==L"--pack-list"&&args.size()==2){auto list=fs::absolute(args[1]);if(fs::file_size(list)>16u<<20)throw std::runtime_error("selection list too large");std::ifstream in(list,std::ios::binary);if(!in)throw std::runtime_error("cannot read selection list");std::vector<char> bytes((std::istreambuf_iterator<char>(in)),{});if(bytes.size()%2||bytes.size()>16u<<20)throw std::runtime_error("invalid selection list");std::u16string name;for(size_t i=0;i<bytes.size();i+=2){auto ch=static_cast<char16_t>(static_cast<unsigned char>(bytes[i])|(static_cast<unsigned>(static_cast<unsigned char>(bytes[i+1]))<<8));if(ch)name+=ch;else if(!name.empty()){sources_.emplace_back(name);name.clear();}}if(!name.empty())throw std::runtime_error("invalid selection list");in.close();if(fs::equivalent(list.parent_path(),fs::temp_directory_path())&&list.filename().wstring().starts_with(L"wsq")){std::error_code ec;fs::remove(list,ec);}navigate(1);}else if(args[0]==L"--pack"&&args.size()>1){sources_.assign(args.begin()+1,args.end());navigate(1);}else if(args[0]==L"--unc"&&args.size()==2){auto p=args[1];run([this,p](std::stop_token s){open_unc(p,s);return [this]{Close();};},tr(L"Opening UNC path",L"正在打开 UNC 路径"));}else if(args[0]==L"--eject"&&args.size()==2){auto d=args[1].u16string();run([this,d](std::stop_token){eject_volume(d);return [this]{Close();};},tr(L"Ejecting",L"正在弹出"));}else if(args.size()==1)open_image(args[0]);else if(args.size()==2&&(args[0]==L"--open"||args[0]==L"--mount"||args[0]==L"--extract"))open_image(args[1],args[0]==L"--mount"?1:args[0]==L"--extract"?2:0);else throw std::invalid_argument("invalid command line");}catch(...){report(std::current_exception());}}

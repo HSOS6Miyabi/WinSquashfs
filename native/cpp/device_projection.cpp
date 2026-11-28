@@ -92,14 +92,14 @@ public:
     }
     std::uint64_t size()const noexcept override{return object_.size;}
     std::unique_ptr<ReadSession> begin_read()const override{return std::make_unique<Session>(shared_from_this());}
-    bool source_changed()const noexcept override{return invalid_.load()||Clock::now().time_since_epoch().count()>=next_check_.load();}
+    bool source_changed()const noexcept override{return invalid_.load();}
     void validate_path()const override{validate();}
     void validate()const override{
         if(invalid_.load())throw DeviceFailure(DeviceError::offline,"Device file generation is no longer valid");
-        if(!source_changed())return;
+        if(!needs_validation())return;
         std::lock_guard lock(mutex_);
         if(invalid_.load())throw DeviceFailure(DeviceError::offline,"Device file generation is no longer valid");
-        if(!source_changed())return;
+        if(!needs_validation())return;
         try{
             auto now=provider_->stat(device_,object_.id);
             if(now.directory||now.size!=object_.size||now.modified!=object_.modified||now.revision!=object_.revision)
@@ -115,6 +115,7 @@ private:
     mutable std::mutex mutex_;
     mutable std::atomic<bool> invalid_{false};
     mutable std::atomic<Clock::duration::rep> next_check_{0};
+    bool needs_validation()const noexcept{return Clock::now().time_since_epoch().count()>=next_check_.load();}
     void read(std::uint64_t offset,std::span<std::byte> output,const SeekProgress& progress)const{
         if(offset>size()||output.size()>size()-offset)throw std::out_of_range("device read outside file");
         validate();
