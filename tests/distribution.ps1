@@ -172,17 +172,7 @@ try {
     try{
         & subst.exe $mapping $root
         if($LASTEXITCODE){throw 'Cannot create drive mapping'}
-        foreach($server in @('sfs
-}
-finally {
-    if($agentStarted){try {Invoke-Cli --lang en-US unc-stop|Out-Null}catch{Write-Warning $_.Exception.Message}}
-    foreach($file in @($settingsFile,$languageFile)){
-        if($backup.ContainsKey($file)){[IO.File]::WriteAllBytes($file,$backup[$file])}
-        elseif(Test-Path $file){Remove-Item -LiteralPath $file -Force}
-    }
-    if(Test-Path $root){Remove-Item -LiteralPath $root -Recurse -Force}
-}
-,'sfs.localhost')){
+        foreach($server in @('sfs$','sfs.localhost')){
             $mapped='\\'+$server+'\'+$letter+'\测试镜像.squashfs\测试.txt'
             $deadline=[DateTime]::UtcNow.AddSeconds(25)
             while(![IO.File]::Exists($mapped) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 300}
