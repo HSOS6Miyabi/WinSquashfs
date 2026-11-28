@@ -234,5 +234,10 @@
   "Cannot read {0} directory (error {1}).": "无法读取 {0} 目录（错误代码：{1}）。",
   "Unsupported or invalid read-only image.": "不支持此只读镜像格式，或镜像已损坏。",
   "Image-defined compression": "镜像内定义的压缩算法",
-  "Invalid directory hierarchy.": "目录层级无效。"
+  "Invalid directory hierarchy.": "目录层级无效。",
+  "Invalid block size.": "数据块大小无效。",
+  "Add at least one source file or folder.": "请至少添加一个源文件或目录。",
+  "Selected sources have duplicate names at the image root.": "所选源文件或目录在镜像根目录中存在重名项。",
+  "Unexpected output image format.": "输出镜像格式不符合预期。",
+  "Preparing selected sources…": "正在准备所选源文件…"
 }

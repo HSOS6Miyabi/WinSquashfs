@@ -72,13 +72,13 @@ public sealed record PackOptions(string Codec = "zstd", int BlockSize = 131072, 
 public static class SquashTools
 {
     public static string ToolPath(string path) => Path.GetFullPath(path).Replace('\\','/');
-    public static async Task RunAsync(string tool, IEnumerable<string> args, Action<string>? log, CancellationToken token = default)
+    public static async Task RunAsync(string tool, IEnumerable<string> args, Action<string>? log, CancellationToken token = default, Func<Stream,CancellationToken,Task>? input = null)
     {
-        if (tool is not ("mksquashfs" or "unsquashfs" or "sqfscat")) throw new ArgumentException(Localization.T("Unknown tool."));
+        if (tool is not ("mksquashfs" or "unsquashfs" or "sqfscat" or "dwarfs-universal" or "mkfs.erofs" or "fsck.erofs")) throw new ArgumentException(Localization.T("Unknown tool."));
         var exe = Path.Combine(AppContext.BaseDirectory, "tools", tool + ".exe");
         var si = new ProcessStartInfo(exe)
         {
-            UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true,
+            UseShellExecute = false, RedirectStandardError = true, RedirectStandardOutput = true, CreateNoWindow = true, RedirectStandardInput = input != null,
             StandardOutputEncoding = System.Text.Encoding.UTF8, StandardErrorEncoding = System.Text.Encoding.UTF8
         };
         si.Environment["LC_ALL"] = "C.UTF-8";
@@ -90,28 +90,37 @@ public static class SquashTools
         if (!p.Start()) throw new IOException(Localization.T("Cannot start {0}", tool));
         p.BeginOutputReadLine(); p.BeginErrorReadLine();
         using var registration = token.Register(() => { try { if (!p.HasExited) p.Kill(true); } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { } });
+        if(input!=null)
+        {
+            try { await input(p.StandardInput.BaseStream,token); }
+            catch { try { if(!p.HasExited) p.Kill(true); } catch {} await p.WaitForExitAsync(); throw; }
+            finally { p.StandardInput.Close(); }
+        }
         await p.WaitForExitAsync();
         p.WaitForExit();
         token.ThrowIfCancellationRequested();
         if (p.ExitCode != 0) throw new IOException(Localization.T("{0} exited with code {1}.", tool, p.ExitCode));
     }
 
-    public static async Task PackAsync(string source, string output, PackOptions options, Action<string>? log, CancellationToken token = default)
+    public static Task PackAsync(string source, string output, PackOptions options, Action<string>? log, CancellationToken token = default)
     {
-        source = Path.GetFullPath(source); output = Path.GetFullPath(output);
         if (!Directory.Exists(source)) throw new DirectoryNotFoundException(source);
+        return PackSourcesAsync(new[]{source},output,options,log,token);
+    }
+
+    public static async Task PackSourcesAsync(IEnumerable<string> sources, string output, PackOptions options, Action<string>? log, CancellationToken token = default)
+    {
+        var items=ImageCreator.NormalizeSources(sources);
+        output = Path.GetFullPath(output);
         if (File.Exists(output) || Directory.Exists(output)) throw new IOException(Localization.T("Output already exists."));
-        string relative = Path.GetRelativePath(source, output);
-        if (!Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            throw new IOException(Localization.T("Output must be outside the source directory."));
         string outputDirectory = Path.GetDirectoryName(output) ?? throw new IOException(Localization.T("Output already exists."));
         if (!Directory.Exists(outputDirectory)) throw new DirectoryNotFoundException(outputDirectory);
-        if (WindowsPath.ContainsDirectory(source, outputDirectory))
+        if (items.Any(source => Directory.Exists(source) && WindowsPath.ContainsDirectory(source, outputDirectory)))
             throw new IOException(Localization.T("Output must be outside the source directory."));
         string temporary = Path.Combine(outputDirectory, ".winsqfs-" + Guid.NewGuid().ToString("N") + ".partial");
         try
         {
-            var args = new[] { ToolPath(source), ToolPath(temporary) }.Concat(options.Arguments());
+            var args = items.Select(ToolPath).Append(ToolPath(temporary)).Concat(options.Arguments());
             await RunAsync("mksquashfs", args, log, token);
             token.ThrowIfCancellationRequested();
             // Validate the completed filesystem before making the image visible at its final path.

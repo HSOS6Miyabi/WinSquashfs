@@ -89,6 +89,10 @@ try
         case ["pack", var source, var output, ..] when args.Length is 3 or 4:
             await SquashTools.PackAsync(source, output, new PackOptions(Codec: args.Length == 4 ? args[3] : "zstd"), Console.WriteLine);
             break;
+        case ["create", var format, var preset, var output, ..] when args.Length>=5:
+            var creation=CreationOptions.ForPreset(Enum.Parse<ImageFormat>(format,true),(CompressionPreset)int.Parse(preset));
+            await ImageCreator.CreateAsync(args.Skip(4),output,creation,Console.WriteLine);
+            break;
         case ["unpack", var image, var output]:
             await SquashTools.UnpackAsync(image, output, Console.WriteLine);
             break;
