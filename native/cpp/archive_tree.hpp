@@ -13,6 +13,7 @@ std::u16string to_utf16(std::string_view utf8);
 std::string to_utf8(std::u16string_view utf16);
 std::u16string encode_windows_name(std::string_view utf8);
 struct WindowsNameLess {
+    using is_transparent=void;
     bool operator()(std::u16string_view a, std::u16string_view b) const;
 };
 
