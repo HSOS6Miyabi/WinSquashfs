@@ -23,6 +23,12 @@ git clone --depth 1 --branch v1.3.2 https://github.com/AgentD/squashfs-tools-ng.
   # Explicitly declare wctype() with both MinGW CRT header variants.
   sed -i '/^#include <stdlib.h>$/a #include <wctype.h>' lib/compat/fnmatch.c
   python3 "$root/native/cpp/scripts/squashfs_creator_patch.py" "$sq"
+  mkdir -p "$deps/getsubopt-test"
+  touch "$deps/getsubopt-test/compat.h"
+  "$CC" -std=c11 -Wall -Wextra -Werror -Dgetsubopt=archivefs_getsubopt \
+    -I"$deps/getsubopt-test" lib/compat/getsubopt.c \
+    "$root/native/cpp/tests/getsubopt_compat.c" -o "$deps/getsubopt-test/check.exe"
+  "$deps/getsubopt-test/check.exe"
   autoreconf -fi
   ./configure --host="$host" --prefix="$prefix" --enable-shared --disable-static \
     --with-gzip --with-xz --with-lzo --with-lz4 --with-zstd --without-selinux
