@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "../alias_path.h"
+#include "../../cpp/unc_alias_policy.hpp"
 #include <algorithm>
 #include <array>
 #include <iostream>
@@ -9,7 +10,7 @@
 #include <vector>
 
 namespace {
-using Text=std::basic_string<uint16_t>;
+using Text=std::vector<ArchiveFsChar>;
 Text units(std::u16string_view s){return {s.begin(),s.end()};}
 void require(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 void mapped(std::u16string_view path,std::u16string_view expected,bool unqualified=true){
@@ -41,6 +42,11 @@ int main(){
         rejected(u"\\sfs.nas\\share",ArchiveFsAliasUnrelated,false);
         for(auto name:{u"\\sfs.\\share",u"\\sfs.nas",u"\\sfs.nas\\",u"\\sfs..nas\\share",u"\\sfs.sfs.nas\\share",u"\\sfs.nas\\..\\file",u"\\sfs.nas\\share\\.. \\file",u"\\sfs.nas\\share\\\\file",u"\\sfs.nas\\share\\a:b",u"\\sfs.-nas\\share",u"\\sfs.nas\\share\\a."})
             rejected(name,ArchiveFsAliasInvalid);
+        require(archivefs::reserved_archive_host(u"SFS.NAS",true),"unqualified alias reservation");
+        require(!archivefs::reserved_archive_host(u"SFS.NAS",false),"ordinary DNS hostname when disabled");
+        require(archivefs::reserved_archive_host(u"sfs.nas.localhost",false),"qualified alias reservation");
+        require(archivefs::reserved_archive_host(u"sfs$",false),"fixed UNC namespace");
+        require(!archivefs::reserved_archive_host(u"nas.localhost",true),"unrelated hostname");
         auto embedded=units(u"\\sfs.nas\\share\\file");embedded[15]=0;
         ArchiveFsAlias alias{};
         require(ArchiveFsParseAlias(embedded.data(),embedded.size(),1,&alias)==ArchiveFsAliasInvalid,"embedded NUL rejected");

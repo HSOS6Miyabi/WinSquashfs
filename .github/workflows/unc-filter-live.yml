@@ -1,0 +1,54 @@
+name: Signed UNC filter live integration
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful x64 native integration run ID for this commit
+        type: string
+        required: true
+      require_unqualified:
+        description: Require the signed driver package to enable short aliases
+        type: boolean
+        default: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: archivefs-unc-filter-live
+  cancel-in-progress: false
+jobs:
+  kernel-integration:
+    runs-on: [self-hosted, Windows, X64, archivefs-kernel]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate source run
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          if($env:RUN_ID -notmatch '^\d+$'){throw 'Invalid run ID'}
+          $run=gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:RUN_ID" | ConvertFrom-Json
+          if($LASTEXITCODE -or $run.head_sha -ne $env:GITHUB_SHA -or $run.conclusion -ne 'success' -or $run.path -ne '.github/workflows/windows-native.yml'){throw 'Use a successful native integration run for the same commit'}
+          if((Get-Process -Id $PID).SessionId -eq 0 -or ![Environment]::UserInteractive){throw 'Use an interactive dedicated Windows test computer'}
+          fltmc instances -f ArchiveFsUncFilter
+          if($LASTEXITCODE){throw 'Install and load the Microsoft-signed driver before testing'}
+      - uses: actions/download-artifact@v4
+        with:
+          name: WinArchiveFSPro-windows-x64
+          path: artifacts/kernel-test
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test real first-access aliases and unload
+        shell: pwsh
+        env:
+          REQUIRE_UNQUALIFIED: ${{ inputs.require_unqualified }}
+        run: |
+          $flags=@()
+          if($env:REQUIRE_UNQUALIFIED -eq 'true'){$flags+='--require-unqualified'}
+          python -u native/unc-filter/tests/windows_live.py --app-directory artifacts/kernel-test/dist --check-unload @flags
+          if($LASTEXITCODE){exit $LASTEXITCODE}

@@ -1,5 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
+#pragma warning(push, 0)
 #include <fltKernel.h>
+#pragma warning(pop)
+#define ARCHIVEFS_KERNEL 1
 #include "alias_path.h"
 
 static PFLT_FILTER ArchiveFsFilter;
@@ -64,7 +67,7 @@ static ArchiveFsAliasResult ArchiveFsMatch(PFILE_OBJECT FileObject, ArchiveFsAli
     if (!FileObject || FileObject->RelatedFileObject || !FileObject->FileName.Buffer ||
         (FileObject->FileName.Length % sizeof(WCHAR)) != 0)
         return ArchiveFsAliasUnrelated;
-    return ArchiveFsParseAlias((const uint16_t *)FileObject->FileName.Buffer,
+    return ArchiveFsParseAlias((const ArchiveFsChar *)FileObject->FileName.Buffer,
         FileObject->FileName.Length / sizeof(WCHAR), IncludeUnqualified != FALSE, Alias);
 }
 
@@ -103,8 +106,8 @@ static FLT_PREOP_CALLBACK_STATUS FLTAPI ArchiveFsCreate(
 #pragma warning(suppress:4996)
     target = ExAllocatePoolWithTag(PagedPool, bytes, 'fAsW');
     if (!target) return Complete(Data, STATUS_INSUFFICIENT_RESOURCES, 0);
-    ArchiveFsMakeAlias((const uint16_t *)file->FileName.Buffer,
-        file->FileName.Length / sizeof(WCHAR), &alias, (uint16_t *)target);
+    ArchiveFsMakeAlias((const ArchiveFsChar *)file->FileName.Buffer,
+        file->FileName.Length / sizeof(WCHAR), &alias, (ArchiveFsChar *)target);
     status = IoReplaceFileObjectName(file, target, bytes);
     ExFreePoolWithTag(target, 'fAsW');
     if (!NT_SUCCESS(status)) return Complete(Data, status, 0);

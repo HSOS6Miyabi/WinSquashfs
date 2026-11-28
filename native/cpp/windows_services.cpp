@@ -2,6 +2,7 @@
 #include "windows_services.hpp"
 #include "desktop_notifications.hpp"
 #include "windows_atomic_file.hpp"
+#include "unc_alias_policy.hpp"
 #include <limits>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -94,8 +95,7 @@ std::u16string Settings::unc_path(const fs::path& source)const{auto p=fs::absolu
         auto value=p.u16string();auto end=value.find(u'\\',2);
         if(end!=value.npos){
             auto host=std::u16string_view(value).substr(2,end-2);
-            WindowsNameLess less;auto equal=[&](std::u16string_view a,std::u16string_view b){return !less(a,b)&&!less(b,a);};
-            if(equal(host,u"sfs$")||equal(host,u"sfs.localhost")||(host.size()>14&&equal(host.substr(0,4),u"sfs.")&&equal(host.substr(host.size()-10),u".localhost")))return value;
+            if(reserved_archive_host(host))return value;
         }
     }for(auto& s:shares())if(s.server==u"sfs$"&&s.network==remote)if(auto path=image_unc_path(s,p))return *path;throw std::invalid_argument("image is outside the configured UNC shares");}
 std::vector<std::u16string> enabled_device_shares(const Settings& settings){
@@ -138,12 +138,7 @@ bool alias_component(std::u16string_view value){
 bool equal_name(std::u16string_view a,std::u16string_view b){
     WindowsNameLess less;return !less(a,b)&&!less(b,a);
 }
-bool reserved_host(std::u16string_view host){
-    if(equal_name(host,u"sfs$")||equal_name(host,u"sfs.localhost"))return true;
-    if(host.size()>=14&&equal_name(host.substr(0,4),u"sfs.")&&
-        equal_name(host.substr(host.size()-10),u".localhost"))return true;
-    return false;
-}
+bool reserved_host(std::u16string_view host){return reserved_archive_host(host);}
 RemoteAlias parse_alias(std::u16string host,std::u16string share){
     if(!alias_component(host)||!alias_component(share)||reserved_host(host))
         throw std::invalid_argument("invalid remote UNC source");
@@ -382,6 +377,18 @@ std::u16string register_unc_alias(const fs::path& source,std::stop_token stop){
     if(!alias)return fallback;
     start_agent(stop);
     cancelled(stop);
+    // A running optional filter resolves qualified aliases on their first
+    // open. Avoid registering or persisting a per-share WinFsp mount.
+    if(unc_filter_running()){
+        auto normalized=source;
+        auto value=normalized.u16string();
+        if(value.starts_with(u"\\\\?\\UNC\\"))normalized=fs::path(u"\\\\"+value.substr(8));
+        const bool qualified=!unc_filter_unqualified_policy()||equal_name(alias->host,u"localhost");
+        if(auto path=image_unc_path(alias->projection(qualified),normalized)){
+            auto attributes=GetFileAttributesW(wide(*path).c_str());
+            if(attributes!=INVALID_FILE_ATTRIBUTES&&(attributes&FILE_ATTRIBUTE_DIRECTORY))return *path;
+        }
+    }
     auto preferred=alias->prefix();
     if(preferred.size()>=192)return fallback;
     request_alias(*alias);

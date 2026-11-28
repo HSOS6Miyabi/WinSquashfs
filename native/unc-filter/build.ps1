@@ -42,7 +42,7 @@ $driver=Join-Path $OutputDirectory 'ArchiveFsUncFilter.sys'
 $include=@("/I$km","/I$shared")
 if(Test-Path (Join-Path $km "crt")){$include+="/I$km/crt"}
 $compile=@('/nologo','/c','/TC','/std:c17','/kernel','/GS','/Zl','/O2','/Oi','/W4','/WX',
-    "/D$archDefine",'/DNTDDI_VERSION=0x0A000006','/D_WIN32_WINNT=0x0A00','/DPOOL_NX_OPTIN=1',
+    "/D$archDefine",'/DNTDDI_VERSION=0x0A000006','/D_WIN32_WINNT=0x0A00','/DPOOL_NX_OPTIN=1','/Gz',
     "/Fo$obj",(Join-Path $PSScriptRoot 'unc_filter.c'))+$include
 & $cl @compile
 if($LASTEXITCODE){exit $LASTEXITCODE}

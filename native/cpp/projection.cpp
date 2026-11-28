@@ -4,6 +4,7 @@
 #include "cache_budget.hpp"
 #include "image_creation.hpp"
 #include "file_time.hpp"
+#include "unc_alias_policy.hpp"
 #include <condition_variable>
 #include <future>
 #include <map>
@@ -180,7 +181,7 @@ ProjectedNodePtr archive_node(std::shared_ptr<ArchiveTree> archive,ArchiveTree::
 }
 ProjectedNodePtr directory_node(const fs::path& physical,std::u16string path,std::u16string name,bool synthetic=false){auto node=std::make_shared<ProjectedNode>();node->physical=physical;node->path=std::move(path);node->name=std::move(name);node->synthetic=synthetic;node->info={true,0,synthetic?0:modified(physical),index_for(physical.u16string(),0)};return node;}
 std::vector<ProjectedNodePtr> archive_children(const ProjectedNodePtr& parent){if(!parent||!parent->entry||!parent->info.directory)throw std::invalid_argument("not a projected directory");std::vector<ProjectedNodePtr> result;for(auto& child:parent->archive->children(parent->entry))result.push_back(archive_node(parent->archive,child,parent->physical,child_path(parent->path,child->windows_name),child->windows_name,parent->lease));return result;}
-bool projected_host(std::u16string_view host){return equal(host,u"sfs$")||equal(host,u"sfs.localhost")||(host.size()>4&&equal(host.substr(0,4),u"sfs.")&&host.size()>=10&&equal(host.substr(host.size()-10),u".localhost"));}
+bool projected_host(std::u16string_view host){return reserved_archive_host(host); }
 bool projected_source(const fs::path& path){
 #ifdef _WIN32
     auto value=path.u16string();if(value.starts_with(u"\\\\?\\UNC\\"))value=u"\\\\"+value.substr(8);if(value.starts_with(u"\\\\")){

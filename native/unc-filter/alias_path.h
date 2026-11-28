@@ -2,8 +2,13 @@
 #ifndef ARCHIVEFS_ALIAS_PATH_H
 #define ARCHIVEFS_ALIAS_PATH_H
 
+#ifdef ARCHIVEFS_KERNEL
+typedef USHORT ArchiveFsChar;
+#else
 #include <stddef.h>
 #include <stdint.h>
+typedef uint16_t ArchiveFsChar;
+#endif
 
 /*
  * Pure UTF-16 name handling shared by the kernel filter and its tests.
@@ -23,22 +28,22 @@ typedef struct ArchiveFsAlias {
     size_t target_length;
 } ArchiveFsAlias;
 
-static inline uint16_t ArchiveFsLower(uint16_t ch)
+static inline ArchiveFsChar ArchiveFsLower(ArchiveFsChar ch)
 {
-    return (ch >= 'A' && ch <= 'Z') ? (uint16_t)(ch + ('a' - 'A')) : ch;
+    return (ch >= 'A' && ch <= 'Z') ? (ArchiveFsChar)(ch + ('a' - 'A')) : ch;
 }
 
-static inline int ArchiveFsAsciiEqual(const uint16_t *s, size_t n, const char *literal)
+static inline int ArchiveFsAsciiEqual(const ArchiveFsChar *s, size_t n, const char *literal)
 {
     size_t i;
     for (i = 0; i < n; ++i) {
-        if (!literal[i] || ArchiveFsLower(s[i]) != (uint16_t)(unsigned char)literal[i])
+        if (!literal[i] || ArchiveFsLower(s[i]) != (ArchiveFsChar)(unsigned char)literal[i])
             return 0;
     }
     return literal[n] == 0;
 }
 
-static inline int ArchiveFsHostValid(const uint16_t *s, size_t n)
+static inline int ArchiveFsHostValid(const ArchiveFsChar *s, size_t n)
 {
     size_t i, label = 0;
     if (!n || n > 253 || s[0] == '.' || s[n - 1] == '.')
@@ -47,7 +52,7 @@ static inline int ArchiveFsHostValid(const uint16_t *s, size_t n)
     if (n >= 4 && ArchiveFsAsciiEqual(s, 4, "sfs."))
         return 0;
     for (i = 0; i < n; ++i) {
-        uint16_t ch = ArchiveFsLower(s[i]);
+        ArchiveFsChar ch = ArchiveFsLower(s[i]);
         if (ch == '.') {
             if (!label || s[i - 1] == '-') return 0;
             label = 0;
@@ -62,7 +67,7 @@ static inline int ArchiveFsHostValid(const uint16_t *s, size_t n)
     return label && s[n - 1] != '-';
 }
 
-static inline int ArchiveFsPathValid(const uint16_t *s, size_t n)
+static inline int ArchiveFsPathValid(const ArchiveFsChar *s, size_t n)
 {
     size_t i, begin = 0;
     for (i = 0; i <= n; ++i) {
@@ -75,7 +80,7 @@ static inline int ArchiveFsPathValid(const uint16_t *s, size_t n)
                 return 0;
             begin = i + 1;
         } else {
-            uint16_t ch = s[i];
+            ArchiveFsChar ch = s[i];
             if (ch < 32 || ch == ':' || ch == '/' || ch == '*' ||
                 ch == '?' || ch == '"' || ch == '<' || ch == '>' || ch == '|')
                 return 0;
@@ -94,7 +99,7 @@ static inline int ArchiveFsPathValid(const uint16_t *s, size_t n)
 #define ARCHIVEFS_ALIAS_TARGET "\\Device\\Mup\\sfs$\\UNC\\"
 #define ARCHIVEFS_ALIAS_TARGET_LENGTH (sizeof(ARCHIVEFS_ALIAS_TARGET) - 1u)
 
-static inline ArchiveFsAliasResult ArchiveFsParseAlias(const uint16_t *name, size_t n,
+static inline ArchiveFsAliasResult ArchiveFsParseAlias(const ArchiveFsChar *name, size_t n,
                                                         int include_unqualified,
                                                         ArchiveFsAlias *result)
 {
@@ -131,12 +136,12 @@ static inline ArchiveFsAliasResult ArchiveFsParseAlias(const uint16_t *name, siz
     return ArchiveFsAliasMatched;
 }
 
-static inline void ArchiveFsMakeAlias(const uint16_t *name, size_t n,
-                                      const ArchiveFsAlias *alias, uint16_t *target)
+static inline void ArchiveFsMakeAlias(const ArchiveFsChar *name, size_t n,
+                                      const ArchiveFsAlias *alias, ArchiveFsChar *target)
 {
     size_t i, pos = 0;
     const char prefix[] = ARCHIVEFS_ALIAS_TARGET;
-    for (i = 0; i < sizeof(prefix) - 1; ++i) target[pos++] = (uint16_t)(unsigned char)prefix[i];
+    for (i = 0; i < sizeof(prefix) - 1; ++i) target[pos++] = (ArchiveFsChar)(unsigned char)prefix[i];
     for (i = 0; i < alias->host_length; ++i) target[pos++] = name[alias->host_begin + i];
     target[pos++] = '\\';
     for (i = alias->share_begin; i < n; ++i) target[pos++] = name[i];
