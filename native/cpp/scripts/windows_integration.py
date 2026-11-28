@@ -13,6 +13,8 @@ import sys
 import tempfile
 import time
 import socket
+import io
+import tarfile
 from mock_adb import Server as MockAdb, COMPONENT as MOCK_COMPONENT
 
 app = Path(sys.argv[1]).resolve()
@@ -63,6 +65,46 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
             assert (output/'目录'/'empty.txt').stat().st_size == 0
             if preset == 4:
                 images.append(image)
+    # Real Linux metadata fixtures: preserve exact symlink targets in TAR
+    # rather than depending on the host's ability to represent POSIX devices.
+    link_tar=io.BytesIO()
+    link_data=b"symbolic link payload"
+    with tarfile.open(fileobj=link_tar,mode="w",format=tarfile.PAX_FORMAT) as tar:
+        entry=tarfile.TarInfo("folder");entry.type=tarfile.DIRTYPE;tar.addfile(entry)
+        entry=tarfile.TarInfo("folder/target.txt");entry.size=len(link_data);tar.addfile(entry,io.BytesIO(link_data))
+        for name,target in [("relative","folder/target.txt"),("absolute","/folder/target.txt"),("dir-link","folder"),("cycle","cycle"),("escape","../outside.txt"),("dangling","missing")]:
+            entry=tarfile.TarInfo(name);entry.type=tarfile.SYMTYPE;entry.linkname=target;tar.addfile(entry)
+        entry=tarfile.TarInfo("fifo");entry.type=tarfile.FIFOTYPE;tar.addfile(entry)
+    fixtures=[]
+    for suffix in ("squashfs","erofs"):
+        fixture=root/("links."+suffix)
+        if suffix=="squashfs":
+            command=[str(app/"tools"/"mksquashfs.exe"),"-",fixture.as_posix(),"-tar","-noappend","-no-progress","-comp","zstd"]
+        else:
+            command=[str(app/"tools"/"mkfs.erofs.exe"),"--tar=f","-zlz4",str(fixture)]
+        subprocess.run(command,input=link_tar.getvalue(),check=True,capture_output=True,timeout=90)
+        assert invoke("readlink",fixture,"absolute")=="/folder/target.txt"
+        assert invoke("readlink",fixture,"relative")=="folder/target.txt"
+        assert invoke("read",fixture,"relative",0,100)==link_data.hex().upper()
+        assert invoke("read",fixture,"dir-link/target.txt",0,100)==link_data.hex().upper()
+        assert invoke("read",fixture,"absolute",0,100)==link_data.hex().upper()
+        for name in ("cycle","escape","dangling","fifo"):
+            invoke("read",fixture,name,0,100,ok=False)
+        assert "Special file" in invoke("list",fixture)
+        fixtures.append(fixture)
+    # The official DwarFS creator accepts native directory input; create
+    # relative Windows links for a DwarFS image, then read POSIX targets.
+    link_source=root/"dwarfs-links";link_source.mkdir()
+    (link_source/"folder").mkdir();(link_source/"folder"/"target.txt").write_bytes(link_data)
+    (link_source/"relative").symlink_to(Path("folder")/"target.txt")
+    (link_source/"dir-link").symlink_to("folder",target_is_directory=True)
+    dwarfs_links=root/"links.dwarfs"
+    invoke("create","DwarFS",4,dwarfs_links,link_source)
+    assert invoke("readlink",dwarfs_links,"relative")=="folder/target.txt"
+    assert invoke("read",dwarfs_links,"relative",0,100)==link_data.hex().upper()
+    assert invoke("read",dwarfs_links,"dir-link/target.txt",0,100)==link_data.hex().upper()
+    fixtures.append(dwarfs_links)
+    print("PASS real SquashFS, EROFS and DwarFS symbolic link decoders")
     # Mutate real decoder inputs, rather than testing signatures alone.
     # Corruption may still describe a valid image; the CLI must either verify
     # it or reject it through a normal error path without crashing or hanging.
@@ -247,6 +289,19 @@ with tempfile.TemporaryDirectory(prefix='WinArchiveFSPro-') as tmp:
     # Explicit temporary share exercises both first access and source deletion.
     process = subprocess.Popen([str(cli),'serve','test-native',str(root),'1'],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
     try:
+        for fixture in fixtures:
+            alias=Path(r'\\sfs$\test-native')/fixture.name
+            wait_until(lambda:(alias/'relative').is_file())
+            assert (alias/'relative').read_bytes()==link_data
+            assert (alias/'dir-link'/'target.txt').read_bytes()==link_data
+            if fixture.suffix!=".dwarfs":
+                assert (alias/'absolute').read_bytes()==link_data
+                names={entry.name for entry in alias.iterdir()}
+                assert {"cycle","escape","dangling","fifo"}<=names
+                for name in ("cycle","escape","dangling","fifo"):
+                    try:(alias/name).read_bytes()
+                    except OSError:pass
+                    else:raise AssertionError(f"Unsafe link or special object readable: {name}")
         for image in images:
             nested_path=Path(r'\\sfs$\test-native')/outer.name/image.name/'文件.bin'
             wait_until(nested_path.is_file)

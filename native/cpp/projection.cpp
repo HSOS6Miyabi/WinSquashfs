@@ -157,7 +157,7 @@ std::int64_t modified(const fs::path& path){std::error_code ec;auto t=fs::last_w
 bool supported(const ArchiveTree::NodePtr& n){return n&& (n->info.kind==FileKind::directory||n->info.kind==FileKind::regular);}
 ProjectedNodePtr archive_node(std::shared_ptr<ArchiveTree> archive,ArchiveTree::NodePtr entry,const fs::path& physical,std::u16string path,std::u16string name,std::shared_ptr<ImagePool::Lease> lease={}){
     if(!entry)return {};
-    auto target=archive->resolve_link(entry);
+    auto target=entry->info.kind==FileKind::symlink?archive->resolve_link(entry):entry;
     const bool available=supported(target);
     auto node=std::make_shared<ProjectedNode>();node->archive=std::move(archive);node->entry=available?std::move(target):std::move(entry);node->physical=physical;node->path=std::move(path);node->name=std::move(name);node->lease=std::move(lease);const auto& info=node->entry->info;node->info={available&&info.kind==FileKind::directory,available&&info.kind==FileKind::regular?info.size:0,info.modified,index_for(physical.u16string(),info.inode),!available};return node;
 }
@@ -250,11 +250,10 @@ ProjectedNodePtr project_archive(const std::shared_ptr<ImagePool>& pool,std::sha
     unsigned depth=0;
     for(std::size_t i=0;i<parts.size();++i){
         if(node->info.kind!=FileKind::directory)return {};
-        auto found=tree->children(node);
-        auto it=std::find_if(found.begin(),found.end(),[&](auto const& n){return equal(n->windows_name,parts[i]);});
-        if(it==found.end())return {};
-        node=*it;path=child_path(path,node->windows_name);
-        auto target=tree->resolve_link(node);
+        node=tree->find_child(node,parts[i]);
+        if(!node)return {};
+        path=child_path(path,node->windows_name);
+        auto target=node->info.kind==FileKind::symlink?tree->resolve_link(node):node;
         if(!supported(target)){if(i+1<parts.size())return {};break;}
         auto projected_name=node->windows_name;
         node=std::move(target);

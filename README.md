@@ -49,3 +49,5 @@ GPL-3.0-only. See [THIRD-PARTY.md](THIRD-PARTY.md).
 Start the UNC agent to browse `\\sfs$\mtp` (MTP/PTP), `\\sfs$\adb` (existing ADB connections), and `\\sfs$\adb.r` (Android files with authorized su access). Manage these read-only namespaces and the local ADB port in the Devices page. The agent never starts or restarts an ADB server. ADB uses UTF-8 filenames and 64-bit sizes and offsets; Root access requires authorization on the Android device.
 
 Slow archive opens display a native Windows progress notification based on the furthest successfully read offset relative to the image size. Nested SquashFS, DwarFS and EROFS images are opened directly from their parent archive readers without extracting them to disk.
+
+Mounted archives resolve symbolic links within the archive, including absolute POSIX targets. Unresolved links and special files are visible as unavailable filesystem objects. Use `archivefs readlink IMAGE ENTRY` to inspect a link target.

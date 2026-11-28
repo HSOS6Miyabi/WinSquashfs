@@ -5,3 +5,5 @@
 - Parallel random reads, shared image caches and configurable memory use.
 - Multi-source creation, eight compression presets, advanced controls and Explorer integration.
 - English and Simplified Chinese interfaces.
+- MTP/PTP and Android ADB/ADB Root read-only UNC device access, nested images, device management and progress notifications.
+- Internal symbolic-link resolution, recursive search, batch creation/extraction, multiple UNC directory aliases, and configurable aggregate decoded-data cache.

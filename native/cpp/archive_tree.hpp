@@ -36,6 +36,7 @@ public:
     bool source_changed() const noexcept { return reader_->source_changed(); }
     std::vector<NodePtr> children(const NodePtr& directory) const;
     NodePtr find(std::u16string_view path) const;
+    NodePtr find_child(const NodePtr& directory,std::u16string_view name) const;
     NodePtr resolve_link(const NodePtr& node) const;
     std::string read_link(const NodePtr& node) const;
     std::u16string path_of(const NodePtr& node) const;

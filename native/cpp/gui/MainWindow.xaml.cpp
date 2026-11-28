@@ -141,7 +141,7 @@ void MainWindow::search_subtree(){
         auto result=tree->search(directory,query,10000,token);
         return [this,tree,result=std::move(result)]{
             ++preview_revision_;preview_stop_.request_stop();entries_.Items().Clear();visible_.clear();preview_.Text(L"");
-            for(auto& node:result.nodes){visible_.push_back(node);auto name=text(tree->path_of(node));auto suffix=node->info.kind==FileKind::directory?tr(L"  [Folder]",L"  [文件夹]"):text("  "+std::to_string(node->info.size)+" B");entries_.Items().Append(box_value(hstring(std::wstring(name)+std::wstring(suffix))));}
+            for(auto& node:result.nodes){visible_.push_back(node);auto name=text(tree->path_of(node));auto suffix=node->info.kind==FileKind::directory?tr(L"  [Folder]",L"  [文件夹]"):node->info.kind==FileKind::symlink?tr(L"  [Link]",L"  [符号链接]"):node->info.kind==FileKind::special?tr(L"  [Special]",L"  [特殊文件]"):text("  "+std::to_string(node->info.size)+" B");entries_.Items().Append(box_value(hstring(std::wstring(name)+std::wstring(suffix))));}
             update_browser_buttons();
             auto count=text(std::to_string(result.nodes.size()));
             auto message=result.truncated?tr(L"+ results; refine the search",L" 个以上结果，请缩小搜索范围"):tr(L" results",L" 个搜索结果");

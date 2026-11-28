@@ -269,6 +269,11 @@ std::vector<ArchiveTree::NodePtr> ArchiveTree::children(const NodePtr& directory
     reader_->stat(directory->info.inode);
     return load(directory)->nodes;
 }
+ArchiveTree::NodePtr ArchiveTree::find_child(const NodePtr& directory,std::u16string_view name) const {
+    auto entries=load(directory);
+    auto found=entries->names.find(name);
+    return found==entries->names.end()?NodePtr{}:found->second;
+}
 ArchiveTree::NodePtr ArchiveTree::find(std::u16string_view path) const {
     auto current=root_;
     while(!path.empty()) {
@@ -279,10 +284,8 @@ ArchiveTree::NodePtr ArchiveTree::find(std::u16string_view path) const {
         auto component=path.substr(0,n);
         if(current->info.kind==FileKind::symlink){current=resolve_link(current);if(!current)return {};}
         if(component==u"."||component==u".."||current->info.kind!=FileKind::directory) return {};
-        auto directory=load(current);
-        auto found=directory->names.find(std::u16string(component));
-        if(found==directory->names.end()) return {};
-        current=found->second;
+        current=find_child(current,component);
+        if(!current)return {};
         if(n==std::u16string_view::npos) break;
         path.remove_prefix(n);
     }
@@ -377,7 +380,7 @@ ArchiveTree::SearchReport ArchiveTree::search(const NodePtr& directory,std::u16s
 }
 std::size_t ArchiveTree::read(const NodePtr& node,std::uint64_t offset,std::span<std::byte> output,std::stop_token token) const {
     validate_node(node);
-    auto target=resolve_link(node);
+    auto target=node->info.kind==FileKind::symlink?resolve_link(node):node;
     if(!target||target->info.kind!=FileKind::regular)throw std::invalid_argument("entry has no readable regular file target");
     return reader_->read_at(target->info.inode,offset,output,token);
 }
