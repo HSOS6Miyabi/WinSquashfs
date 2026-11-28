@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libarchive-dev libssl-dev build-essential autoconf automake libtool pkg-config liblzo2-dev liblz4-dev liblzma-dev libzstd-dev libxxhash-dev zlib1g-dev squashfs-tools
+          sudo apt-get install -y ninja-build libarchive-dev libssl-dev libcurl4-openssl-dev libxml2-dev build-essential autoconf automake libtool pkg-config liblzo2-dev liblz4-dev liblzma-dev libzstd-dev libxxhash-dev libcurl4-openssl-dev libxml2-dev zlib1g-dev squashfs-tools
       - name: Compile the patched upstream creator
         run: |
           git clone --depth 1 --branch v1.3.2 https://github.com/AgentD/squashfs-tools-ng.git /tmp/sqfs

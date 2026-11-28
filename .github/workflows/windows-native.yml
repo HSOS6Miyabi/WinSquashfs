@@ -182,7 +182,7 @@ jobs:
           $vcpkg=$env:VCPKG_INSTALLATION_ROOT
           if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
           $ports=Join-Path $PWD '.deps/vcpkg-installed'
-          & "$vcpkg/vcpkg.exe" install 'libarchive[core,bzip2,lz4,lzma,zstd]' nlohmann-json xxhash --classic --recurse --triplet=x64-windows-static-md "--x-install-root=$ports"
+          & "$vcpkg/vcpkg.exe" install 'libarchive[core,bzip2,lz4,lzma,zstd]' nlohmann-json xxhash 'curl[core,ssl]' 'libxml2[core]' --classic --recurse --triplet=x64-windows-static-md "--x-install-root=$ports"
           if($LASTEXITCODE){exit $LASTEXITCODE}
       - uses: actions/cache/save@v4
         if: steps.core-cache.outputs.cache-hit != 'true'
@@ -216,7 +216,7 @@ jobs:
           path: ${{ runner.temp }}/WinArchiveFSPro-source.zip
           if-no-files-found: error
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang ninja-build libarchive-dev libssl-dev libzstd-dev libxxhash-dev
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build libarchive-dev libssl-dev libcurl4-openssl-dev libxml2-dev libzstd-dev libxxhash-dev
       - name: Test release archive assembly
         run: bash scripts/test-release-packaging.sh
       - name: Configure sanitized core

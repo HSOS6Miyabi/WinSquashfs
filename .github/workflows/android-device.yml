@@ -20,7 +20,7 @@ jobs:
       - name: Build native client test
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libarchive-dev libssl-dev libzstd-dev libxxhash-dev
+          sudo apt-get install -y ninja-build libarchive-dev libssl-dev libcurl4-openssl-dev libxml2-dev libzstd-dev libxxhash-dev
           cmake -S native/cpp -B build/adb-live -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/adb-live --target adb_live_tests --parallel 2
       - name: Enable KVM for the test emulator

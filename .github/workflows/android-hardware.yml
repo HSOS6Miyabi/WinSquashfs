@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Install native client dependencies
+        run: sudo apt-get install -y libcurl4-openssl-dev libxml2-dev libzstd-dev libxxhash-dev libarchive-dev liblzma-dev libssl-dev
       - name: Build native client test
         run: |
           cmake -S native/cpp -B build/adb-hardware -G Ninja -DCMAKE_BUILD_TYPE=Release
