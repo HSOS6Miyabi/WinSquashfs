@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "decoder_backend.hpp"
+#include "stream_archive_backend.hpp"
 #ifdef ARCHIVEFS_WITH_DWARFS
 #include "dwarfs_backend.hpp"
 #endif
@@ -377,7 +378,7 @@ std::shared_ptr<const ArchiveBackend> open_decoder_backend(
     std::shared_ptr<const RandomAccessSource> source, const std::filesystem::path& module_directory, std::size_t cache_bytes) {
     if (!source) throw std::invalid_argument("missing archive source");
     auto format = detect_format(*source);
-    if (format == ArchiveFormat::unknown) throw UnknownArchiveFormat();
+    if (!filesystem_image_format(format)) return open_stream_archive_backend(std::move(source),format);
 #ifdef ARCHIVEFS_WITH_DWARFS
     if(format==ArchiveFormat::dwarfs) return open_dwarfs_backend(std::move(source),cache_bytes);
 #else

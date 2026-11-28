@@ -38,7 +38,7 @@ unsigned number(NumberBox const& box,unsigned maximum){auto v=box.Value();if(!st
 std::optional<unsigned> optional_number(NumberBox const& box,unsigned maximum){return std::isnan(box.Value())?std::nullopt:std::optional<unsigned>(number(box,maximum));}
 std::string selected_text(ComboBox const& c){return to_utf8(u16(unbox_value<hstring>(c.SelectedItem())));}
 std::wstring lower(std::wstring s){for(auto& c:s)c=static_cast<wchar_t>(towlower(c));return s;}
-std::string format_name(ArchiveFormat f){return f==ArchiveFormat::squashfs?"SquashFS":f==ArchiveFormat::dwarfs?"DwarFS":f==ArchiveFormat::erofs?"EROFS":"Unknown";}
+std::string format_name(ArchiveFormat f){return std::string(archive_format_name(f));}
 }
 MainWindow::MainWindow(){
     InitializeComponent();try{settings_=Settings::load();}catch(...){settings_.root=fs::temp_directory_path();}

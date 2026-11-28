@@ -171,7 +171,7 @@ jobs:
         id: core-cache
         with:
           path: .deps/vcpkg-installed
-          key: archivefs-core-static-md-v1-${{ runner.os }}
+          key: archivefs-core-static-md-v2-${{ runner.os }}
       - name: Install core dependencies
         if: steps.core-cache.outputs.cache-hit != 'true'
         shell: pwsh
@@ -179,7 +179,7 @@ jobs:
           $vcpkg=$env:VCPKG_INSTALLATION_ROOT
           if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
           $ports=Join-Path $PWD '.deps/vcpkg-installed'
-          & "$vcpkg/vcpkg.exe" install 'libarchive[core]' nlohmann-json --classic --triplet=x64-windows-static-md "--x-install-root=$ports"
+          & "$vcpkg/vcpkg.exe" install 'libarchive[bzip2,crypto,lz4,lzma,zstd]' nlohmann-json --classic --triplet=x64-windows-static-md "--x-install-root=$ports"
           if($LASTEXITCODE){exit $LASTEXITCODE}
       - uses: actions/cache/save@v4
         if: steps.core-cache.outputs.cache-hit != 'true'

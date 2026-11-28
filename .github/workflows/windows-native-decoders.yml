@@ -122,6 +122,8 @@ jobs:
           $vcpkg=$env:VCPKG_INSTALLATION_ROOT
           if(!$vcpkg){$vcpkg=$env:VCPKG_ROOT}
           $triplet="$arch-windows-static-md"
+          & "$vcpkg/vcpkg.exe" install 'libarchive[bzip2,crypto,lz4,lzma,zstd]' nlohmann-json --classic "--triplet=$triplet" "--x-install-root=$ports"
+          if($LASTEXITCODE){exit $LASTEXITCODE}
           $env:PKG_CONFIG_PATH="$ports/$triplet/lib/pkgconfig"
           $env:PATH="$ports/$triplet/tools/pkgconf;$env:PATH"
           cmake -S native/cpp -B build/production -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$vcpkg/scripts/buildsystems/vcpkg.cmake" "-DVCPKG_TARGET_TRIPLET=$triplet" "-DVCPKG_INSTALLED_DIR=$ports" "-DCMAKE_PREFIX_PATH=$prefix" -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL -DARCHIVEFS_WITH_DWARFS=ON -DARCHIVEFS_BUILD_SHELL=ON -DBUILD_TESTING=OFF -DVCPKG_MANIFEST_MODE=OFF

@@ -9,11 +9,32 @@
 #include <stdexcept>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace archivefs {
 
-enum class ArchiveFormat { squashfs, dwarfs, erofs, unknown };
+enum class ArchiveFormat { squashfs, dwarfs, erofs, unknown, zip, seven_zip, rar, tar, cpio, cab, iso9660, ar, lha };
+inline std::string_view archive_format_name(ArchiveFormat format) noexcept {
+    switch(format){
+    case ArchiveFormat::squashfs:return "SquashFS";
+    case ArchiveFormat::dwarfs:return "DwarFS";
+    case ArchiveFormat::erofs:return "EROFS";
+    case ArchiveFormat::zip:return "ZIP";
+    case ArchiveFormat::seven_zip:return "7z";
+    case ArchiveFormat::rar:return "RAR";
+    case ArchiveFormat::tar:return "TAR";
+    case ArchiveFormat::cpio:return "CPIO";
+    case ArchiveFormat::cab:return "CAB";
+    case ArchiveFormat::iso9660:return "ISO9660";
+    case ArchiveFormat::ar:return "AR";
+    case ArchiveFormat::lha:return "LHA";
+    default:return "Unknown";
+    }
+}
+inline bool filesystem_image_format(ArchiveFormat f) noexcept {
+    return f==ArchiveFormat::squashfs||f==ArchiveFormat::dwarfs||f==ArchiveFormat::erofs;
+}
 using InodeId = std::uint64_t;
 enum class FileKind { regular, directory, symlink, special };
 struct FileInfo {

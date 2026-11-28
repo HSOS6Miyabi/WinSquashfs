@@ -57,15 +57,20 @@ std::uint64_t number(std::u16string_view text) {
     if(ec!=std::errc{}||ptr!=str.data()+str.size()) throw std::invalid_argument("invalid unsigned number");
     return n;
 }
-std::string_view format_name(ArchiveFormat format) {
-    switch(format) {
-    case ArchiveFormat::squashfs:return "SquashFS";
-    case ArchiveFormat::dwarfs:return "DwarFS";
-    case ArchiveFormat::erofs:return "EROFS";
-    default:return "Unknown";
-    }
-}
 std::string_view codec_name(const ArchiveInfo& info) {
+    if(!filesystem_image_format(info.format)){
+        switch(info.compression){
+        case 1:return "gzip";
+        case 2:return "bzip2";
+        case 3:return "compress";
+        case 5:return "lzma";
+        case 6:return "xz";
+        case 9:return "lzip";
+        case 13:return "lz4";
+        case 14:return "zstd";
+        default:return "Archive-defined compression";
+        }
+    }
     if(info.format!=ArchiveFormat::squashfs) return "Image-defined compression";
     switch(info.compression) {
     case 1:return "gzip";case 2:return "lzma";case 3:return "lzo";case 4:return "xz";
@@ -178,7 +183,7 @@ int cli(std::vector<std::u16string> args) {
         throw UsageError("invalid command arguments");
     ArchiveTree tree(open_archive(std::filesystem::path(args[1]),modules));
     if(command==u"info") {
-        auto info=tree.info();std::cout<<format_name(info.format)<<' '<<codec_name(info)<<' '<<info.block_size<<' '<<info.image_size<<'\n';
+        auto info=tree.info();std::cout<<archive_format_name(info.format)<<' '<<codec_name(info)<<' '<<info.block_size<<' '<<info.image_size<<'\n';
     } else if(command==u"list") {
         auto directory=args.size()==2?tree.root():tree.find(args[2]);
         if(directory)directory=tree.resolve_link(directory);
